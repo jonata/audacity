@@ -125,9 +125,9 @@ END_EVENT_TABLE()
 
 SelectionBar::SelectionBar()
 : ToolBar(SelectionBarID, _("Selection"), wxT("Selection")),
-  mListener(NULL), mRate(0.0), 
+  mListener(NULL), mRate(0.0),
   mStart(0.0), mEnd(0.0), mLength(0.0), mCenter(0.0), mAudio(0.0),
-  mStartTime(NULL), mEndTime(NULL), mLengthTime(NULL), mCenterTime(NULL), 
+  mStartTime(NULL), mEndTime(NULL), mLengthTime(NULL), mCenterTime(NULL),
   mAudioTime(NULL),
 #ifdef SEL_RADIO_TITLES
   mStartTitle(NULL), mCenterTitle(NULL), mLengthTitle(NULL), mEndTitle(NULL),
@@ -151,7 +151,7 @@ SelectionBar::SelectionBar()
 #ifdef SEL_BUTTON_TITLES
    mButtonTitles[0]=NULL;
    mButtonTitles[1]=NULL;
-   mButtonTitles[2]=NULL; 
+   mButtonTitles[2]=NULL;
    mHyphen[0]=NULL;
    mHyphen[1]=NULL;
    mHyphen[2]=NULL;
@@ -176,15 +176,15 @@ void SelectionBar::Create(wxWindow * parent)
 // Can't set textcolour of radio buttons.
 // so instead if we want to them, we make the text empty and add in a wxStaticText
 // and we can set the colour of that.
-// Slight regression relative ot Audacity, in that this text is not 
+// Slight regression relative ot Audacity, in that this text is not
 // clickable/active.  You have to click on the actual button.
 // And you can't tab between and hear the labels with voice over.
 // So VI users should use blend themes (which is the default).
-// Should not be a hardship for them, as themes make little difference 
+// Should not be a hardship for them, as themes make little difference
 // for them, except Hi-Contrast, which should be used with blend thems
 // and a windows theme that is close enough to actually blend.
 
-wxRadioButton * SelectionBar::AddRadioButton( const wxString & Name, 
+wxRadioButton * SelectionBar::AddRadioButton( const wxString & Name,
    int id, wxSizer *pSizer, long style )
 {
    bool bUseNativeRadioButton = theTheme.IsUsingSystemTextColour();
@@ -218,7 +218,7 @@ auStaticText * SelectionBar::AddTitle( const wxString & Title, wxSizer * pSizer 
 
 
 NumericTextCtrl * SelectionBar::AddTime( const wxString Name, int id, wxSizer * pSizer ){
-   wxString formatName = mListener ? mListener->AS_GetSelectionFormat() 
+   wxString formatName = mListener ? mListener->AS_GetSelectionFormat()
       : wxString(wxEmptyString);
    NumericTextCtrl * pCtrl = safenew NumericTextCtrl(
       NumericConverter::TIME, this, id, formatName, 0.0, mRate);
@@ -439,7 +439,7 @@ void SelectionBar::Populate()
    AButton *& pBtn = mButtons[ SelTBMenuID - SelTBFirstButton];
    pBtn = ToolBar::MakeButton(this,
       bmpRecoloredUpSmall, bmpRecoloredDownSmall, bmpRecoloredHiliteSmall,
-      bmpOptions, bmpOptions, bmpOptionsDisabled, 
+      bmpOptions, bmpOptions, bmpOptionsDisabled,
       SelTBMenuID,
       wxDefaultPosition,
       false,
@@ -449,15 +449,15 @@ void SelectionBar::Populate()
    pBtn->SetToolTip(_("Selection options"));
    //pBtn->Disable();
    mainSizer->Add( pBtn, 0,  wxALIGN_TOP | wxRIGHT, 5);
-#endif 
+#endif
    AddVLine( mainSizer );
 
    mAudioTime = AddTime(_("Audio Position"), AudioTimeID, mainSizer );
    // This vertical line is NOT just for decoration!
    // It works around a wxWidgets-on-Windows RadioButton bug, where tabbing
-   // into the radiobutton group jumps to selecting the first item in the 
+   // into the radiobutton group jumps to selecting the first item in the
    // group even if some other item had been selected.
-   // It is an important bug to work around for sceen reader users, who use TAB 
+   // It is an important bug to work around for sceen reader users, who use TAB
    // a lot in navigation.
    // More about the bug here:
    // https://forums.wxwidgets.org/viewtopic.php?t=41120
@@ -553,7 +553,7 @@ void SelectionBar::ModifySelection(int newDriver, bool done)
       SetDrivers( mDrive2, newDriver);
 
    // Only update a value if user typed something in.
-   // The reason is the controls may be less accurate than 
+   // The reason is the controls may be less accurate than
    // the values.
    if( newDriver == StartTimeID )
       mStart = mStartTime->GetValue();
@@ -811,7 +811,7 @@ void SelectionBar::SetSelectionMode(int mode)
    // With SEL_BUTTON_TITLES only modes 0 to 3 are supported,
    // so fix up a mode that could have come from the config.
    const int maxMode = 3;
-#else 
+#else
    const int maxMode = 7;
 #endif
 
@@ -825,18 +825,18 @@ void SelectionBar::SetSelectionMode(int mode)
 
 #ifdef SEL_RADIO_TITLES
    if( mStartEndProxy == NULL ){
-      // The line breaks are a little funny in order that the i18n hints occur i the right place in 
+      // The line breaks are a little funny in order that the i18n hints occur i the right place in
       // the .pot file
-      mStartEndRadBtn->SetLabelText(     (id == StartEndRadioID) ?      _("Start - End") : 
+      mStartEndRadBtn->SetLabelText(     (id == StartEndRadioID) ?      _("Start - End") :
       // i18n-hint: S-E is an abbreviation of Start-End
          _("S-E") );
-      mStartLengthRadBtn->SetLabelText(  (id == StartLengthRadioID) ?   _("Start - Length") : 
+      mStartLengthRadBtn->SetLabelText(  (id == StartLengthRadioID) ?   _("Start - Length") :
       // i18n-hint: S-L is an abbreviation of Start-Length
          _("S-L") );
-      mLengthEndRadBtn->SetLabelText(    (id == LengthEndRadioID) ?     _("Length - End") : 
+      mLengthEndRadBtn->SetLabelText(    (id == LengthEndRadioID) ?     _("Length - End") :
       // i18n-hint: L-E is an abbreviation of Length-End
          _("L-E") );
-      mLengthCenterRadBtn->SetLabelText( (id == LengthCenterRadioID) ?  _("Length - Center") : 
+      mLengthCenterRadBtn->SetLabelText( (id == LengthCenterRadioID) ?  _("Length - Center") :
       // i18n-hint: L-C is an abbreviation of Length-Center
          _("L-C") );
    }
@@ -865,15 +865,15 @@ void SelectionBar::SetSelectionMode(int mode)
    mButtonTitles[1]->SetLabel( CenterNames[mode] );
 #endif
 #ifdef SEL_CHOICE
-   mChoice->SetSelection( mode ); 
+   mChoice->SetSelection( mode );
 #endif
 
    // First decide which two controls drive the others...
-   // For example the last option is with all controls shown, and in that mode we 
+   // For example the last option is with all controls shown, and in that mode we
    // initially have start and end driving.
-   int Drive2[] = { StartTimeID, StartTimeID,  LengthTimeID, LengthTimeID, 
+   int Drive2[] = { StartTimeID, StartTimeID,  LengthTimeID, LengthTimeID,
                     StartTimeID, StartTimeID,  StartTimeID,  StartTimeID};
-   int Drive1[] = { EndTimeID,   LengthTimeID, EndTimeID,    CenterTimeID, 
+   int Drive1[] = { EndTimeID,   LengthTimeID, EndTimeID,    CenterTimeID,
                     EndTimeID,   LengthTimeID, EndTimeID,    EndTimeID};
 
    SetDrivers( Drive1[mode], Drive2[mode] );
@@ -890,8 +890,8 @@ void SelectionBar::SetSelectionMode(int mode)
 // Our mode determines which controls are visible.
 void SelectionBar::ShowHideControls(int mode)
 {
-   // These 
-   int masks[8]= { 
+   // These
+   int masks[8]= {
       9, 5, 12, 6, // 2 items
       13, 7, 11,// 3 items
       15};
@@ -902,10 +902,10 @@ void SelectionBar::ShowHideControls(int mode)
 #endif
    NumericTextCtrl ** Ctrls[4]  = { &mStartTime,  &mCenterTime,  &mLengthTime,  &mEndTime};
    for(int i=0;i<4;i++){
-      if( *Ctrls[i]) 
+      if( *Ctrls[i])
          (*Ctrls[i])->Show( (mask & (1<<i))!=0 );
 #ifdef SEL_PLAIN_TITLES
-      if( *Titles[i]) 
+      if( *Titles[i])
          (*Titles[i])->Show( (mask & (1<<i))!=0 );
 #endif
    }
@@ -919,6 +919,12 @@ void SelectionBar::ValuesToControls()
    for(i=0;i<5;i++)
       if( *Ctrls[i] )
          (*Ctrls[i])->SetValue( Values[i] );
+
+#ifdef PRINT_POSITION_TO_STDOUT
+   printf("(seek)%g\n", mAudio);
+   fflush(stdout);
+#endif
+
 }
 
 void SelectionBar::SetTimes(double start, double end, double audio)

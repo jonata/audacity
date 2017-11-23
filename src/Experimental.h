@@ -93,7 +93,7 @@
 // As a minimum, if this is turned on for a release,
 // it should have an easy mechanism to disable it at run-time, such as a menu item or a pref,
 // preferrably disabled until other work is done.  Martyn 22/12/2008.
-// 
+//
 
 // JKC Apr 2015, Menu item to manage effects.
 #define EXPERIMENTAL_EFFECT_MANAGEMENT
@@ -229,5 +229,12 @@
 // using delibrately ugly pens and brushes until there is better cooperation
 // with themes
 //#define EXPERIMENTAL_TRACK_PANEL_HIGHLIGHTING
+
+// Jonatã Bolzan Loss 23 Nov 2017
+// Print cursor position in seconds to stdout, useful if used with some video
+// playback engine, for example. It prints in SelectioBar everytime the
+// timecode is changed, and add a "(seek)" string to make sure it is a
+// position information that is being printed
+//#define PRINT_POSITION_TO_STDOUT
 
 #endif
