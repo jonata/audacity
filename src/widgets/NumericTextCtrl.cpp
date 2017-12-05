@@ -433,7 +433,7 @@ static const UntranslatedBuiltinFormatString TimeConverterFormats_[] =  {
    XO("NTSC frames"),
    /* i18n-hint: Format string for displaying time in frames with NTSC frames.
     * Change the comma
-    * in the middle to the 1000s separator for your locale, 
+    * in the middle to the 1000s separator for your locale,
     * translate 'frames' and leave the rest alone. That really is the frame
     * rate! */
    XO("01000,01000 frames|29.97002997")
@@ -456,7 +456,7 @@ static const UntranslatedBuiltinFormatString TimeConverterFormats_[] =  {
    XO("PAL frames (25 fps)"),
    /* i18n-hint: Format string for displaying time in frames with NTSC frames.
     * Change the comma
-    * in the middle to the 1000s separator for your locale, 
+    * in the middle to the 1000s separator for your locale,
     * translate 'frames' and leave the rest alone. */
    XO("01000,01000 frames|25")
    },
@@ -478,7 +478,7 @@ static const UntranslatedBuiltinFormatString TimeConverterFormats_[] =  {
    XO("CDDA frames (75 fps)"),
    /* i18n-hint: Format string for displaying time in frames with CD Audio
     * frames. Change the comma
-    * in the middle to the 1000s separator for your locale, 
+    * in the middle to the 1000s separator for your locale,
     * translate 'frames' and leave the rest alone */
    XO("01000,01000 frames|75")
    },
@@ -509,14 +509,14 @@ static const UntranslatedBuiltinFormatString FrequencyConverterFormats_[] =  {
    /* i18n-hint: Name of display format that shows frequency in hertz */
    {
       XO("Hz"),
-         /* i18n-hint: Format string for displaying frequency in hertz. Change 
+         /* i18n-hint: Format string for displaying frequency in hertz. Change
          * the decimal point for your locale. Don't change the numbers. */
          XO("0100000.0100 Hz")
    },
 
    {
       XO("kHz"),
-         /* i18n-hint: Format string for displaying frequency in kilohertz. Change 
+         /* i18n-hint: Format string for displaying frequency in kilohertz. Change
          * the decimal point for your locale. Don't change the numbers. */
          XO("01000.01000 kHz|0.001")
    },
@@ -564,7 +564,7 @@ static const UntranslatedBuiltinFormatString BandwidthConverterFormats_[] = {
    // Scale factor is 12 / ln (2)
    XO("1000 semitones .0100 cents|17.312340491")
    },
-   
+
    {
    /* i18n-hint: Name of display format that shows log of frequency
     * in decades */
@@ -1573,13 +1573,13 @@ void NumericTextCtrl::OnContext(wxContextMenuEvent &event)
 
    // This used to be in an EVT_MENU() event handler, but GTK
    // is sensitive to what is done within the handler if the
-   // user happens to check the first menuitem and then is 
+   // user happens to check the first menuitem and then is
    // moving down the menu when the ...CTRL_UPDATED event
    // handler kicks in.
    for (i = 0; i < GetNumBuiltins(); i++) {
       if (menu.IsChecked(ID_MENU + i) && i != currentSelection) {
          SetFormatString(GetBuiltinFormat(i));
-      
+
          int eventType = 0;
          switch (mType) {
             case NumericConverter::TIME:
@@ -1595,7 +1595,7 @@ void NumericTextCtrl::OnContext(wxContextMenuEvent &event)
                wxASSERT(false);
                break;
          }
-      
+
          wxCommandEvent e(eventType, GetId());
          e.SetInt(i);
          e.SetString(GetBuiltinName(i));
@@ -2168,4 +2168,3 @@ wxAccStatus NumericTextCtrlAx::GetValue(int WXUNUSED(childId), wxString * WXUNUS
 }
 
 #endif
-
