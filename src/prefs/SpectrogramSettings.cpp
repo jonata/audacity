@@ -19,7 +19,6 @@ Paul Licameli
 #include "../TranslatableStringArray.h"
 
 #include <algorithm>
-#include <wx/msgdlg.h>
 
 #include "../FFT.h"
 #include "../Prefs.h"
@@ -28,6 +27,8 @@ Paul Licameli
 #include <cmath>
 
 #include "../Experimental.h"
+#include "../widgets/ErrorDialog.h"
+#include "../Internat.h"
 
 SpectrogramSettings::Globals::Globals()
 {
@@ -186,7 +187,7 @@ bool SpectrogramSettings::Validate(bool quiet)
 {
    if (!quiet &&
       maxFreq < 100) {
-      wxMessageBox(_("Maximum frequency must be 100 Hz or above"));
+      AudacityMessageBox(_("Maximum frequency must be 100 Hz or above"));
       return false;
    }
    else
@@ -194,7 +195,7 @@ bool SpectrogramSettings::Validate(bool quiet)
 
    if (!quiet &&
       minFreq < 0) {
-      wxMessageBox(_("Minimum frequency must be at least 0 Hz"));
+      AudacityMessageBox(_("Minimum frequency must be at least 0 Hz"));
       return false;
    }
    else
@@ -202,7 +203,7 @@ bool SpectrogramSettings::Validate(bool quiet)
 
    if (!quiet &&
       maxFreq <= minFreq) {
-      wxMessageBox(_("Minimum frequency must be less than maximum frequency"));
+      AudacityMessageBox(_("Minimum frequency must be less than maximum frequency"));
       return false;
    }
    else
@@ -210,7 +211,7 @@ bool SpectrogramSettings::Validate(bool quiet)
 
    if (!quiet &&
       range <= 0) {
-      wxMessageBox(_("The range must be at least 1 dB"));
+      AudacityMessageBox(_("The range must be at least 1 dB"));
       return false;
    }
    else
@@ -218,12 +219,12 @@ bool SpectrogramSettings::Validate(bool quiet)
 
    if (!quiet &&
       frequencyGain < 0) {
-      wxMessageBox(_("The frequency gain cannot be negative"));
+      AudacityMessageBox(_("The frequency gain cannot be negative"));
       return false;
    }
    else if (!quiet &&
       frequencyGain > 60) {
-      wxMessageBox(_("The frequency gain must be no more than 60 dB/dec"));
+      AudacityMessageBox(_("The frequency gain must be no more than 60 dB/dec"));
       return false;
    }
    else
@@ -271,7 +272,7 @@ void SpectrogramSettings::LoadPrefs()
    scaleType = ScaleType(gPrefs->Read(wxT("/Spectrum/ScaleType"), 0L));
 
 #ifndef SPECTRAL_SELECTION_GLOBAL_SWITCH
-   spectralSelection = (gPrefs->Read(wxT("/Spectrum/EnableSpectralSelection"), 0L) != 0);
+   spectralSelection = (gPrefs->Read(wxT("/Spectrum/EnableSpectralSelection"), 1L) != 0);
 #endif
 
    algorithm = Algorithm(gPrefs->Read(wxT("/Spectrum/Algorithm"), 0L));
@@ -364,14 +365,14 @@ namespace
    {
       // Create the requested window function
       window = Floats{ fftLen };
-      int ii;
+      size_t ii;
 
       const bool extra = padding > 0;
       wxASSERT(windowSize % 2 == 0);
       if (extra)
          // For windows that do not go to 0 at the edges, this improves symmetry
          ++windowSize;
-      const int endOfWindow = padding + windowSize;
+      const size_t endOfWindow = padding + windowSize;
       // Left and right padding
       for (ii = 0; ii < padding; ++ii) {
          window[ii] = 0.0;
@@ -387,8 +388,10 @@ namespace
          break;
       case TWINDOW:
          NewWindowFunc(windowType, windowSize, extra, window.get() + padding);
-         for (int ii = padding, multiplier = -(int)windowSize / 2; ii < endOfWindow; ++ii, ++multiplier)
-            window[ii] *= multiplier;
+         {
+            for (int jj = padding, multiplier = -(int)windowSize / 2; jj < (int)endOfWindow; ++jj, ++multiplier)
+               window[jj] *= multiplier;
+         }
          break;
       case DWINDOW:
          DerivativeOfWindowFunc(windowType, windowSize, extra, window.get() + padding);
@@ -482,7 +485,7 @@ size_t SpectrogramSettings::NBins() const
    return GetFFTLength() / 2;
 }
 
-NumberScale SpectrogramSettings::GetScale( float minFreq, float maxFreq ) const
+NumberScale SpectrogramSettings::GetScale( float minFreqIn, float maxFreqIn ) const
 {
    NumberScaleType type = nstLinear;
 
@@ -505,7 +508,7 @@ NumberScale SpectrogramSettings::GetScale( float minFreq, float maxFreq ) const
       type = nstPeriod; break;
    }
 
-   return NumberScale(type, minFreq, maxFreq);
+   return NumberScale(type, minFreqIn, maxFreqIn);
 }
 
 bool SpectrogramSettings::SpectralSelectionEnabled() const

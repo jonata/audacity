@@ -66,13 +66,13 @@ struct ModuleInterfaceDeleter {
    void operator ()(ModuleInterface *pInterface) const;
 };
 
-using ModuleInterfaceHandle = movable_ptr_with_deleter<
+using ModuleInterfaceHandle = std::unique_ptr<
    ModuleInterface, ModuleInterfaceDeleter
 >;
 
 typedef std::map<wxString, ModuleMain *> ModuleMainMap;
 typedef std::map<wxString, ModuleInterfaceHandle> ModuleMap;
-typedef std::map<ModuleInterface *, movable_ptr<wxDynamicLibrary>> LibraryMap;
+typedef std::map<ModuleInterface *, std::unique_ptr<wxDynamicLibrary>> LibraryMap;
 
 class ModuleManager final : public ModuleManagerInterface
 {
@@ -99,7 +99,8 @@ public:
    void FindAllPlugins(PluginIDList & providers, wxArrayString & paths);
 
    wxArrayString FindPluginsForProvider(const PluginID & provider, const wxString & path);
-   bool RegisterPlugin(const PluginID & provider, const wxString & path);
+   bool RegisterEffectPlugin(const PluginID & provider, const wxString & path,
+                       wxString &errMsg);
 
    IdentInterface *CreateProviderInstance(const PluginID & provider, const wxString & path);
    IdentInterface *CreateInstance(const PluginID & provider, const wxString & path);
@@ -125,7 +126,7 @@ private:
    ModuleMap mDynModules;
    LibraryMap mLibs;
 
-   std::vector<movable_ptr<Module>> mModules;
+   std::vector<std::unique_ptr<Module>> mModules;
 };
 
 #endif /* __AUDACITY_MODULEMANAGER_H__ */

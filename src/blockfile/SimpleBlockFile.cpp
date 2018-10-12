@@ -239,7 +239,7 @@ bool SimpleBlockFile::WriteSimpleBlockFile(
       // memory
       int *int24sampleData = (int*)sampleData;
 
-      for( int i = 0; i < sampleLen; i++ )
+      for( size_t i = 0; i < sampleLen; i++ )
       {
          nBytesToWrite = 3;
          nBytesWritten =
@@ -543,11 +543,11 @@ auto SimpleBlockFile::GetSpaceUsage() const -> DiskByteCount
       file.Close();
    }
 
-   return {
+   return (
           sizeof(auHeader) +
           mSummaryInfo.totalSummaryBytes +
           (GetLength() * SAMPLE_SIZE_DISK(mFormat))
-   };
+   );
 }
 
 void SimpleBlockFile::Recover(){

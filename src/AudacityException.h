@@ -18,6 +18,9 @@
 
 #include "MemoryX.h"
 #include <wx/app.h>
+#include <exception>
+
+#include "Internat.h"
 
 class wxString;
 
@@ -26,11 +29,6 @@ class AudacityException /* not final */
 public:
    AudacityException() {}
    virtual ~AudacityException() = 0;
-
-   // This is intended as a "polymorphic move copy constructor"
-   // which leaves this "empty".
-   // We would not need this if we had std::exception_ptr
-   virtual std::unique_ptr< AudacityException > Move() = 0;
 
    // Action to do in the main thread at idle time of the event loop.
    virtual void DelayedHandlerAction() = 0;
@@ -85,8 +83,6 @@ public:
    SimpleMessageBoxException &operator = (
       SimpleMessageBoxException && ) PROHIBITED;
 
-   std::unique_ptr< AudacityException > Move() override;
-
    // Format a default, internationalized error message for this exception.
    virtual wxString ErrorMessage() const override;
 
@@ -100,29 +96,6 @@ struct DefaultDelayedHandlerAction
    {
       if ( pException )
          pException->DelayedHandlerAction();
-   }
-};
-
-// Helpers for defining GuardedCall:
-
-// Call one function object,
-// then another unless the first throws, return result of first
-template <typename R> struct Sequencer {
-   template <typename F1, typename Argument, typename F2>
-   R operator () (const F1 &f1, Argument &&a, const F2 &f2)
-   {
-      auto result = f1( std::forward<Argument>(a) );
-      f2();
-      return result;
-   }
-};
-// template specialization to allow R to be void
-template <> struct Sequencer<void> {
-   template <typename F1, typename Argument, typename F2>
-   void operator () (const F1 &f1, Argument &&a, const F2 &f2)
-   {
-      f1( std::forward<Argument>(a) );
-      f2();
    }
 };
 
@@ -167,11 +140,11 @@ inline SimpleGuard< void > MakeSimpleGuard() { return {}; }
  * for the guarded call or throw the same or another exception.
  * It executes in the same thread as the body.
  *
- * If the handler catches non-null and does not throw, then delayedHandler
+ * If the handler is passed non-null and does not throw, then delayedHandler
  * executes later in the main thread, in idle time of the event loop.
  */
 template <
-   typename R, // return type
+   typename R = void, // return type
 
    typename F1, // function object with signature R()
 
@@ -188,15 +161,22 @@ R GuardedCall
 {
    try { return body(); }
    catch ( AudacityException &e ) {
-      return Sequencer<R>{}( handler, &e,
-         [&] {
-            auto pException =
-               std::shared_ptr< AudacityException > { e.Move().release() };
+
+      auto end = finally([&]{
+         // At this point, e is the "current" exception, but not "uncaught"
+         // unless it was rethrown by handler.  handler might also throw some
+         // other exception object.
+         if (!std::uncaught_exception()) {
+            auto pException = std::current_exception(); // This points to e
             wxTheApp->CallAfter( [=] { // capture pException by value
-               delayedHandler( pException.get() );
+               try { std::rethrow_exception(pException); }
+               catch( AudacityException &e )
+                  { delayedHandler( &e ); }
             } );
          }
-      );
+      });
+
+      return handler( &e );
    }
    catch ( ... ) {
       return handler( nullptr );

@@ -30,6 +30,8 @@ public:
    // These are used in HandleXMLTag and BuildFomXML methods to check the input for
    // security vulnerabilites, per the NGS report for UmixIt.
    static bool IsGoodString(const wxString & str);
+   // Labels are allowed to be very long.  At some future date we will format long labels nicely.
+   static bool IsGoodLongString(const wxString & str);
 
    static bool IsGoodFileName(const wxString & strFileName, const wxString & strDirName = wxEmptyString);
    static bool IsGoodFileString(const wxString &str);
@@ -57,6 +59,7 @@ public:
 	* @return true if the string is convertable, false if not
 	*/
    static bool IsGoodInt64(const wxString & strInt);
+   static bool IsGoodIntForRange(const wxString & strInt, const wxString & strMAXABS);
 
    static bool IsValidChannel(const int nValue);
 #ifdef USE_MIDI

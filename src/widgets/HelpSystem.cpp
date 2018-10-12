@@ -71,18 +71,12 @@ void HelpSystem::ShowInfoDialog( wxWindow *parent,
       S.SetStyle( wxTE_MULTILINE | wxTE_READONLY | wxTE_RICH | wxTE_RICH2 | 
          wxTE_AUTO_URL | wxTE_NOHIDESEL | wxHSCROLL );
       S.AddTextWindow(message);
+
+      S.SetBorder( 0 );
+      S.StartHorizontalLay(wxALIGN_CENTER_HORIZONTAL, 0);
+         S.AddStandardButtons(eOkButton);
+      S.EndHorizontalLay();
    }
-   S.SetBorder( 0 );
-   S.StartHorizontalLay(wxALIGN_CENTER|wxALIGN_BOTTOM, 0);
-   S.AddStandardButtons(eOkButton);
-
-   S.EndHorizontalLay();
-
-   // Next three lines add a tiny dragger.
-   wxStatusBar * pBar = safenew wxStatusBar( &dlog );
-   pBar->SetSize( 18, 38);
-   S.AddWindow( pBar, wxALIGN_BOTTOM|wxALIGN_RIGHT );
-
    S.EndVerticalLay();
 
    // Smallest size is half default size.  Seems reasonable.
@@ -180,7 +174,6 @@ void HelpSystem::ShowHtmlText(wxWindow *pParent,
    pFrame->CreateStatusBar();
    pFrame->Centre();
    pFrame->Layout();
-   pFrame->Fit();
    pFrame->SetSizeHints(pWnd->GetSize());
 
    pFrame->SetName(Title);
@@ -361,9 +354,9 @@ void HelpSystem::ShowHelp(wxWindow *parent,
 #endif
 
    wxLogMessage(wxT("Help button pressed: PageName %s, releasePageName %s"),
-              PageName.c_str(), releasePageName.c_str());
+              PageName, releasePageName);
    wxLogMessage(wxT("webHelpPage %s, localHelpPage %s"),
-              webHelpPage.c_str(), localHelpPage.c_str());
+              webHelpPage, localHelpPage);
 
    wxASSERT(parent); // to justify safenew
 

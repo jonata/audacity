@@ -16,9 +16,8 @@
 
 #include "Project.h"
 #include "LabelTrack.h"
+#include "NoteTrack.h"
 #include "WaveTrack.h"
-
-#include <wx/arrimpl.cpp>
 
 inline bool operator < (SnapPoint s1, SnapPoint s2)
 {
@@ -57,7 +56,7 @@ SnapManager::SnapManager(const TrackList *tracks,
 
    mSnapTo = 0;
    mRate = 0.0;
-   mFormat.Empty();
+   mFormat = {};
 
    // Two time points closer than this are considered the same
    mEpsilon = 1 / 44100.0;
@@ -73,7 +72,7 @@ void SnapManager::Reinit()
 {
    int snapTo = mProject->GetSnapTo();
    double rate = mProject->GetRate();
-   wxString format = mProject->GetSelectionFormat();
+   auto format = mProject->GetSelectionFormat();
 
    // No need to reinit if these are still the same
    if (snapTo == mSnapTo && rate == mRate && format == mFormat)
@@ -102,19 +101,14 @@ void SnapManager::Reinit()
    // Add a SnapPoint at t=0
    mSnapPoints.push_back(SnapPoint{});
 
-   TrackListConstIterator iter(mTracks);
-   for (const Track *track = iter.First();  track; track = iter.Next())
-   {
-      if (mTrackExclusions &&
-          mTrackExclusions->end() !=
-          std::find(mTrackExclusions->begin(), mTrackExclusions->end(), track))
-      {
-         continue;
-      }
-
-      if (track->GetKind() == Track::Label)
-      {
-         LabelTrack *labelTrack = (LabelTrack *)track;
+   auto trackRange =
+      mTracks->Any()
+         - [&](const Track *pTrack){
+            return mTrackExclusions &&
+               make_iterator_range( *mTrackExclusions ).contains( pTrack );
+         };
+   trackRange.Visit(
+      [&](const LabelTrack *labelTrack) {
          for (int i = 0, cnt = labelTrack->GetNumLabels(); i < cnt; ++i)
          {
             const LabelStruct *label = labelTrack->GetLabel(i);
@@ -126,10 +120,8 @@ void SnapManager::Reinit()
                CondListAdd(t1, labelTrack);
             }
          }
-      }
-      else if (track->GetKind() == Track::Wave)
-      {
-         auto waveTrack = static_cast<const WaveTrack *>(track);
+      },
+      [&](const WaveTrack *waveTrack) {
          for (const auto &clip: waveTrack->GetClips())
          {
             if (mClipExclusions)
@@ -146,9 +138,7 @@ void SnapManager::Reinit()
                }
 
                if (skip)
-               {
                   continue;
-               }
             }
 
             CondListAdd(clip->GetStartTime(), waveTrack);
@@ -156,13 +146,13 @@ void SnapManager::Reinit()
          }
       }
 #ifdef USE_MIDI
-      else if (track->GetKind() == Track::Note)
-      {
+      ,
+      [&](const NoteTrack *track) {
          CondListAdd(track->GetStartTime(), track);
          CondListAdd(track->GetEndTime(), track);
       }
 #endif
-   }
+   );
 
    // Sort all by time
    std::sort(mSnapPoints.begin(), mSnapPoints.end());

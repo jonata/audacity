@@ -34,6 +34,8 @@ for each problem encountered, since there can be many orphans.
 #include <wx/artprov.h>
 #include <wx/radiobox.h>
 
+#include "../commands/CommandContext.h"
+
 class MultiDialog final : public wxDialogWrapper
 {
 public:
@@ -108,7 +110,7 @@ MultiDialog::MultiDialog(wxWindow * pParent,
             1, wxRA_SPECIFY_COLS);
          mRadioBox->SetName(boxMsg);
          mRadioBox->SetSelection(0);
-         vSizer->Add(mRadioBox, 1, wxEXPAND | wxALIGN_CENTER | wxALL, 5);
+         vSizer->Add(mRadioBox, 1, wxEXPAND | wxALL, 5);
 
 
          {
@@ -127,7 +129,7 @@ MultiDialog::MultiDialog(wxWindow * pParent,
             pButton = safenew wxButton(this, wxID_OK, _("OK"));
             if (!log)
                pButton->SetDefault();
-            buttonSizer->Add(pButton, 0, wxALIGN_RIGHT | wxALL, 5);
+            buttonSizer->Add(pButton, 0, wxALL, 5);
 
             vSizer->Add(buttonSizer.release(), 0, wxALIGN_CENTER | wxALL, 5);
          }
@@ -150,7 +152,8 @@ void MultiDialog::OnOK(wxCommandEvent & WXUNUSED(event))
 
 void MultiDialog::OnShowLog(wxCommandEvent & WXUNUSED(event))
 {
-   GetActiveProject()->OnShowLog();
+   auto project = GetActiveProject();
+   GetMenuCommandHandler(*project).OnShowLog(*project);
 }
 
 

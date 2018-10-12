@@ -26,15 +26,16 @@ class wxCheckBox;
 #include "../../SampleFormat.h"
 
 #define LADSPAEFFECTS_VERSION wxT("1.0.0.0")
-#define LADSPAEFFECTS_FAMILY wxT("LADSPA")
+/* i8n-hint: abbreviates "Linux Audio Developer's Simple Plugin API"
+   (Application programming interface)
+ */
+#define LADSPAEFFECTS_FAMILY XO("LADSPA")
 
 ///////////////////////////////////////////////////////////////////////////////
 //
 // LadspaEffect
 //
 ///////////////////////////////////////////////////////////////////////////////
-
-WX_DEFINE_ARRAY_PTR(LADSPA_Handle, LadspaSlaveArray);
 
 class LadspaEffectMeter;
 
@@ -49,16 +50,15 @@ public:
    // IdentInterface implementation
 
    wxString GetPath() override;
-   wxString GetSymbol() override;
-   wxString GetName() override;
-   wxString GetVendor() override;
+   IdentInterfaceSymbol GetSymbol() override;
+   IdentInterfaceSymbol GetVendor() override;
    wxString GetVersion() override;
    wxString GetDescription() override;
 
-   // EffectIdentInterface implementation
+   // EffectDefinitionInterface implementation
 
    EffectType GetType() override;
-   wxString GetFamily() override;
+   IdentInterfaceSymbol GetFamilyId() override;
    bool IsInteractive() override;
    bool IsDefault() override;
    bool IsLegacy() override;
@@ -100,8 +100,8 @@ public:
 
    bool ShowInterface(wxWindow *parent, bool forceModal = false) override;
 
-   bool GetAutomationParameters(EffectAutomationParameters & parms) override;
-   bool SetAutomationParameters(EffectAutomationParameters & parms) override;
+   bool GetAutomationParameters(CommandParameters & parms) override;
+   bool SetAutomationParameters(CommandParameters & parms) override;
 
    bool LoadUserPreset(const wxString & name) override;
    bool SaveUserPreset(const wxString & name) override;
@@ -179,7 +179,7 @@ private:
    bool mLatencyDone;
 
    // Realtime processing
-   LadspaSlaveArray mSlaves;
+   std::vector<LADSPA_Handle> mSlaves;
 
    EffectUIHostInterface *mUIHost;
 
@@ -212,9 +212,8 @@ public:
    // IdentInterface implementation
 
    wxString GetPath() override;
-   wxString GetSymbol() override;
-   wxString GetName() override;
-   wxString GetVendor() override;
+   IdentInterfaceSymbol GetSymbol() override;
+   IdentInterfaceSymbol GetVendor() override;
    wxString GetVersion() override;
    wxString GetDescription() override;
 
@@ -223,9 +222,15 @@ public:
    bool Initialize() override;
    void Terminate() override;
 
+   wxArrayString FileExtensions() override;
+   wxString InstallPath() override;
+
    bool AutoRegisterPlugins(PluginManagerInterface & pm) override;
-   wxArrayString FindPlugins(PluginManagerInterface & pm) override;
-   bool RegisterPlugin(PluginManagerInterface & pm, const wxString & path) override;
+   wxArrayString FindPluginPaths(PluginManagerInterface & pm) override;
+   unsigned DiscoverPluginsAtPath(
+      const wxString & path, wxString &errMsg,
+      const RegistrationCallback &callback)
+         override;
 
    bool IsPluginValid(const wxString & path, bool bFast) override;
 

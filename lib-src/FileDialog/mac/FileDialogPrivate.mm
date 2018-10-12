@@ -19,6 +19,8 @@
 // headers
 // ----------------------------------------------------------------------------
 
+#undef WXINTL_NO_GETTEXT_MACRO
+
 // For compilers that support precompilation, includes "wx.h".
 #include <wx/wxprec.h>
 
@@ -46,6 +48,10 @@
 // ============================================================================
 // implementation
 // ============================================================================
+
+#if MAC_OS_X_VERSION_MAX_ALLOWED > MAC_OS_X_VERSION_10_6
+   #define wxOSX_10_6_AND_LATER( x ) x
+#endif
 
 @interface OSPanelDelegate : NSObject wxOSX_10_6_AND_LATER(<NSOpenSavePanelDelegate>)
 {

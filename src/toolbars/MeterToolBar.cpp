@@ -83,7 +83,7 @@ void MeterToolBar::Create(wxWindow * parent)
 
 void MeterToolBar::ReCreateButtons()
 {
-   Meter::State playState{ false }, recordState{ false };
+   MeterPanel::State playState{ false }, recordState{ false };
 
    if (mPlayMeter && mProject->GetPlaybackMeter() == mPlayMeter)
    {
@@ -118,7 +118,7 @@ void MeterToolBar::Populate()
    if( mWhichMeters & kWithRecordMeter ){
       //JKC: Record on left, playback on right.  Left to right flow
       //(maybe we should do it differently for Arabic language :-)  )
-      mRecordMeter = safenew Meter( mProject,
+      mRecordMeter = safenew MeterPanel( mProject,
                                 this,
                                 wxID_ANY,
                                 true,
@@ -134,7 +134,7 @@ void MeterToolBar::Populate()
    }
 
    if( mWhichMeters & kWithPlayMeter ){
-      mPlayMeter = safenew Meter( mProject,
+      mPlayMeter = safenew MeterPanel( mProject,
                               this,
                               wxID_ANY,
                               false,
@@ -234,6 +234,7 @@ void MeterToolBar::OnSize( wxSizeEvent & event) //WXUNUSED(event) )
 
    // And make it happen
    Layout();
+   Fit();
 }
 
 bool MeterToolBar::Expose( bool show )
@@ -272,5 +273,13 @@ wxSize MeterToolBar::GetDockedSize()
    else 
       sz.y = 2 * tbs -1;
    return sz;
+}
+
+// The meter's sizing code does not take account of the resizer
+// Hence after docking we need to enlarge the bar (using fit)
+// so that the resizer can be reached.
+void MeterToolBar::SetDocked(ToolDock *dock, bool pushed) {
+   ToolBar::SetDocked(dock, pushed);
+   Fit();
 }
 

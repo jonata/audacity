@@ -15,21 +15,23 @@
 #include <vector>
 #include <wx/defs.h>
 #include <wx/choice.h>
-#include <wx/dynarray.h>
 #include <wx/event.h>
 #include <wx/grid.h>
 #include <wx/string.h>
 #include <wx/window.h>
 #include "NumericTextCtrl.h"
+#include "../Internat.h"
 
 #if wxUSE_ACCESSIBILITY
 #include <wx/access.h>
+#include "WindowAccessible.h"
 
 class GridAx;
 
 #endif
 
 class NumericTextCtrl;
+using NumericFormatId = IdentInterfaceSymbol;
 
 // ----------------------------------------------------------------------------
 // NumericEditor
@@ -44,7 +46,7 @@ class NumericEditor /* not final */ : public wxGridCellEditor
 public:
 
    NumericEditor
-      (NumericConverter::Type type, const wxString &format, double rate);
+      (NumericConverter::Type type, const NumericFormatId &format, double rate);
 
    ~NumericEditor();
 
@@ -63,9 +65,9 @@ public:
 
    void Reset() override;
 
-   wxString GetFormat() const;
+   NumericFormatId GetFormat() const;
    double GetRate() const;
-   void SetFormat(const wxString &format);
+   void SetFormat(const NumericFormatId &format);
    void SetRate(double rate);
 
    wxGridCellEditor *Clone() const override;
@@ -76,7 +78,7 @@ public:
 
  private:
 
-   wxString mFormat;
+   NumericFormatId mFormat;
    double mRate;
    NumericConverter::Type mType;
    double mOld;
@@ -138,22 +140,18 @@ public:
                        wxWindowID id,
                        wxEvtHandler *evtHandler) override;
 
-   void SetSize(const wxRect &rect);
-
-   void BeginEdit(int row, int col, wxGrid *grid);
-
+   void SetSize(const wxRect &rect) override;
+   void BeginEdit(int row, int col, wxGrid *grid) override;
    bool EndEdit(int row, int col, wxGrid *grid);
-
-   bool EndEdit(int row, int col, const wxGrid *grid, const wxString &oldval, wxString *newval);
-
-   void ApplyEdit(int row, int col, wxGrid *grid);
-
-   void Reset();
+   bool EndEdit(int row, int col, const wxGrid *grid,
+                const wxString &oldval, wxString *newval) override;
+   void ApplyEdit(int row, int col, wxGrid *grid) override;
+   void Reset() override;
 
    wxGridCellEditor *Clone() const override;
 
    void SetChoices(const wxArrayString &choices);
-   wxString GetValue() const;
+   wxString GetValue() const override;
 
  protected:
 
@@ -167,13 +165,15 @@ public:
    public:
       void ConnectEvent(wxWindow *w)
       {
-         w->GetEventHandler()->Connect(wxEVT_KILL_FOCUS, wxFocusEventHandler(FocusHandler::OnKillFocus));
+         // Need to use a named function pointer, not a lambda, so that we
+         // can unbind the same later
+         w->GetEventHandler()->Bind(wxEVT_KILL_FOCUS, OnKillFocus);
       };
       void DisconnectEvent(wxWindow *w)
       {
-         w->GetEventHandler()->Disconnect(wxEVT_KILL_FOCUS, wxFocusEventHandler(FocusHandler::OnKillFocus));
+         w->GetEventHandler()->Unbind(wxEVT_KILL_FOCUS, OnKillFocus);
       };
-      void OnKillFocus(wxFocusEvent & WXUNUSED(event))
+      static void OnKillFocus(wxFocusEvent & WXUNUSED(event))
       {
          return;
       };
@@ -226,7 +226,7 @@ class Grid final : public wxGrid
 
 #if wxUSE_ACCESSIBILITY
    GridAx *mAx;
-   std::vector<movable_ptr<GridAx>> mChildren;
+   std::vector<std::unique_ptr<GridAx>> mChildren;
    int mObjNdx;
 #endif
 
@@ -242,7 +242,7 @@ class Grid final : public wxGrid
 // wxAccessible object providing grid information for Grid.
 // ----------------------------------------------------------------------------
 
-class GridAx final : public wxWindowAccessible
+class GridAx final : public WindowAccessible
 {
 
  public:

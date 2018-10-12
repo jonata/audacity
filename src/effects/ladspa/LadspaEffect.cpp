@@ -37,7 +37,6 @@ effects from this one class.
 #include <wx/filename.h>
 #include <wx/log.h>
 #include <wx/menu.h>
-#include <wx/msgdlg.h>
 #include <wx/sizer.h>
 #include <wx/slider.h>
 #include <wx/statbox.h>
@@ -49,10 +48,15 @@ effects from this one class.
 #include <wx/version.h>
 
 #include "LadspaEffect.h"       // This class's header file
+#include "../../FileNames.h"
 #include "../../Internat.h"
 #include "../../ShuttleGui.h"
 #include "../../widgets/valnum.h"
 #include "../../widgets/wxPanelWrapper.h"
+
+#if wxUSE_ACCESSIBILITY
+#include "../../widgets/WindowAccessible.h"
+#endif
 
 // ============================================================================
 // List of effects that ship with Audacity.  These will be autoregistered.
@@ -112,17 +116,15 @@ wxString LadspaEffectsModule::GetPath()
    return mPath;
 }
 
-wxString LadspaEffectsModule::GetSymbol()
+IdentInterfaceSymbol LadspaEffectsModule::GetSymbol()
 {
+   /* i8n-hint: abbreviates "Linux Audio Developer's Simple Plugin API"
+      (Application programming interface)
+    */
    return XO("LADSPA Effects");
 }
 
-wxString LadspaEffectsModule::GetName()
-{
-   return GetSymbol();
-}
-
-wxString LadspaEffectsModule::GetVendor()
+IdentInterfaceSymbol LadspaEffectsModule::GetVendor()
 {
    return XO("The Audacity Team");
 }
@@ -135,7 +137,7 @@ wxString LadspaEffectsModule::GetVersion()
 
 wxString LadspaEffectsModule::GetDescription()
 {
-   return XO("Provides LADSPA Effects");
+   return _("Provides LADSPA Effects");
 }
 
 // ============================================================================
@@ -154,14 +156,45 @@ void LadspaEffectsModule::Terminate()
    return;
 }
 
+wxArrayString LadspaEffectsModule::FileExtensions()
+{
+   static const wxString ext[] = {
+
+#ifdef __WXMSW__
+
+      { _T("dll") }
+
+#else
+
+      { _T("so") }
+
+   #ifdef __WXMAC__
+   // Is it correct that these are candidate plug-in files too for macOs?
+      , { _T("dylib") }
+   #endif
+
+#endif
+
+   };
+   static const wxArrayString result{ sizeof(ext)/sizeof(*ext), ext };
+   return result;
+}
+
+wxString LadspaEffectsModule::InstallPath()
+{
+   // To do: better choice
+   return FileNames::PlugInDir();
+}
+
 bool LadspaEffectsModule::AutoRegisterPlugins(PluginManagerInterface & pm)
 {
    // Autoregister effects that we "think" are ones that have been shipped with
    // Audacity.  A little simplistic, but it should suffice for now.
    wxArrayString pathList = GetSearchPaths();
    wxArrayString files;
+   wxString ignoredErrMsg;
 
-   for (int i = 0; i < WXSIZEOF(kShippedEffects); i++)
+   for (int i = 0; i < (int)WXSIZEOF(kShippedEffects); i++)
    {
       files.Clear();
       pm.FindFilesInPathList(kShippedEffects[i], pathList, files);
@@ -169,7 +202,9 @@ bool LadspaEffectsModule::AutoRegisterPlugins(PluginManagerInterface & pm)
       {
          if (!pm.IsPluginRegistered(files[j]))
          {
-            RegisterPlugin(pm, files[j]);
+            // No checking for error ?
+            DiscoverPluginsAtPath(files[j], ignoredErrMsg,
+               PluginManagerInterface::DefaultRegistrationCallback);
          }
       }
    }
@@ -178,7 +213,7 @@ bool LadspaEffectsModule::AutoRegisterPlugins(PluginManagerInterface & pm)
    return false;
 }
 
-wxArrayString LadspaEffectsModule::FindPlugins(PluginManagerInterface & pm)
+wxArrayString LadspaEffectsModule::FindPluginPaths(PluginManagerInterface & pm)
 {
    wxArrayString pathList = GetSearchPaths();
    wxArrayString files;
@@ -203,13 +238,17 @@ wxArrayString LadspaEffectsModule::FindPlugins(PluginManagerInterface & pm)
    return files;
 }
 
-bool LadspaEffectsModule::RegisterPlugin(PluginManagerInterface & pm, const wxString & path)
+unsigned LadspaEffectsModule::DiscoverPluginsAtPath(
+   const wxString & path, wxString &errMsg,
+   const RegistrationCallback &callback)
 {
+   errMsg.clear();
    // Since we now have builtin VST support, ignore the VST bridge as it
    // causes duplicate menu entries to appear.
    wxFileName ff(path);
    if (ff.GetName().CmpNoCase(wxT("vst-bridge")) == 0) {
-      return false;
+      errMsg = _("Audacity no longer uses vst-bridge");
+      return 0;
    }
 
    // As a courtesy to some plug-ins that might be bridges to
@@ -220,8 +259,9 @@ bool LadspaEffectsModule::RegisterPlugin(PluginManagerInterface & pm, const wxSt
    wxSetEnv(wxT("PATH"), ff.GetPath() + wxFILE_SEP_PATH + envpath);
    wxString saveOldCWD = ff.GetCwd();
    ff.SetCwd();
-   
+
    int index = 0;
+   int nLoaded = 0;
    LADSPA_Descriptor_Function mainFn = NULL;
    wxDynamicLibrary lib;
    if (lib.Load(path, wxDL_NOW)) {
@@ -234,11 +274,17 @@ bool LadspaEffectsModule::RegisterPlugin(PluginManagerInterface & pm, const wxSt
          for (data = mainFn(index); data; data = mainFn(++index)) {
             LadspaEffect effect(path, index);
             if (effect.SetHost(NULL)) {
-               pm.RegisterPlugin(this, &effect);
+               ++nLoaded;
+               if (callback)
+                  callback( this, &effect );
             }
+            else
+               errMsg = _("Could not load the library");
          }
       }
    }
+   else
+      errMsg = _("Could not load the library");
 
    if (lib.IsLoaded()) {
       // PRL:  I suspect Bug1257 -- Crash when enabling Amplio2 -- is the fault of a timing-
@@ -252,7 +298,7 @@ bool LadspaEffectsModule::RegisterPlugin(PluginManagerInterface & pm, const wxSt
    wxSetWorkingDirectory(saveOldCWD);
    hadpath ? wxSetEnv(wxT("PATH"), envpath) : wxUnsetEnv(wxT("PATH"));
 
-   return index > 0;
+   return nLoaded;
 }
 
 bool LadspaEffectsModule::IsPluginValid(const wxString & path, bool bFast)
@@ -572,22 +618,17 @@ LadspaEffect::~LadspaEffect()
 
 wxString LadspaEffect::GetPath()
 {
-   return wxString::Format(wxT("%s;%d"), mPath.c_str(), mIndex);
+   return wxString::Format(wxT("%s;%d"), mPath, mIndex);
 }
 
-wxString LadspaEffect::GetSymbol()
+IdentInterfaceSymbol LadspaEffect::GetSymbol()
 {
    return LAT1CTOWX(mData->Name);
 }
 
-wxString LadspaEffect::GetName()
+IdentInterfaceSymbol LadspaEffect::GetVendor()
 {
-   return GetSymbol();
-}
-
-wxString LadspaEffect::GetVendor()
-{
-   return LAT1CTOWX(mData->Maker);
+   return { LAT1CTOWX(mData->Maker) };
 }
 
 wxString LadspaEffect::GetVersion()
@@ -601,14 +642,14 @@ wxString LadspaEffect::GetDescription()
 }
 
 // ============================================================================
-// EffectIdentInterface implementation
+// EffectDefinitionInterface implementation
 // ============================================================================
 
 EffectType LadspaEffect::GetType()
 {
    if (mAudioIns == 0 && mAudioOuts == 0)
    {
-      return EffectTypeNone;
+      return EffectTypeTool;
    }
 
    if (mAudioIns == 0)
@@ -624,7 +665,7 @@ EffectType LadspaEffect::GetType()
    return EffectTypeProcess;
 }
 
-wxString LadspaEffect::GetFamily()
+IdentInterfaceSymbol LadspaEffect::GetFamilyId()
 {
    return LADSPAEFFECTS_FAMILY;
 }
@@ -906,12 +947,12 @@ bool LadspaEffect::ProcessFinalize()
 
 size_t LadspaEffect::ProcessBlock(float **inBlock, float **outBlock, size_t blockLen)
 {
-   for (int i = 0; i < mAudioIns; i++)
+   for (int i = 0; i < (int)mAudioIns; i++)
    {
       mData->connect_port(mMaster, mInputPorts[i], inBlock[i]);
    }
 
-   for (int i = 0; i < mAudioOuts; i++)
+   for (int i = 0; i < (int)mAudioOuts; i++)
    {
       mData->connect_port(mMaster, mOutputPorts[i], outBlock[i]);
    }
@@ -936,18 +977,18 @@ bool LadspaEffect::RealtimeAddProcessor(unsigned WXUNUSED(numChannels), float sa
       return false;
    }
 
-   mSlaves.Add(slave);
+   mSlaves.push_back(slave);
 
    return true;
 }
 
 bool LadspaEffect::RealtimeFinalize()
 {
-   for (size_t i = 0, cnt = mSlaves.GetCount(); i < cnt; i++)
+   for (size_t i = 0, cnt = mSlaves.size(); i < cnt; i++)
    {
       FreeInstance(mSlaves[i]);
    }
-   mSlaves.Clear();
+   mSlaves.clear();
 
    return true;
 }
@@ -972,12 +1013,12 @@ size_t LadspaEffect::RealtimeProcess(int group,
                                           float **outbuf,
                                           size_t numSamples)
 {
-   for (int i = 0; i < mAudioIns; i++)
+   for (int i = 0; i < (int)mAudioIns; i++)
    {
       mData->connect_port(mSlaves[group], mInputPorts[i], inbuf[i]);
    }
 
-   for (int i = 0; i < mAudioOuts; i++)
+   for (int i = 0; i < (int)mAudioOuts; i++)
    {
       mData->connect_port(mSlaves[group], mOutputPorts[i], outbuf[i]);
    }
@@ -1027,7 +1068,7 @@ bool LadspaEffect::ShowInterface(wxWindow *parent, bool forceModal)
    return res;
 }
 
-bool LadspaEffect::GetAutomationParameters(EffectAutomationParameters & parms)
+bool LadspaEffect::GetAutomationParameters(CommandParameters & parms)
 {
    for (unsigned long p = 0; p < mData->PortCount; p++)
    {
@@ -1045,13 +1086,13 @@ bool LadspaEffect::GetAutomationParameters(EffectAutomationParameters & parms)
    return true;
 }
 
-bool LadspaEffect::SetAutomationParameters(EffectAutomationParameters & parms)
+bool LadspaEffect::SetAutomationParameters(CommandParameters & parms)
 {
    for (unsigned long p = 0; p < mData->PortCount; p++)
    {
-      LADSPA_PortDescriptor d = mData->PortDescriptors[p];
+      LADSPA_PortDescriptor descriptor = mData->PortDescriptors[p];
 
-      if (LADSPA_IS_PORT_CONTROL(d) && LADSPA_IS_PORT_INPUT(d))
+      if (LADSPA_IS_PORT_CONTROL(descriptor) && LADSPA_IS_PORT_INPUT(descriptor))
       {
          wxString labelText = LAT1CTOWX(mData->PortNames[p]);
          double d = 0.0;
@@ -1166,17 +1207,14 @@ bool LadspaEffect::PopulateUI(wxWindow *parent)
             item = safenew wxStaticText(w, 0, _("Duration:"));
             gridSizer->Add(item, 0, wxALIGN_CENTER_VERTICAL | wxALIGN_RIGHT | wxALL, 5);
             mDuration = safenew
-               NumericTextCtrl(NumericConverter::TIME,
-               w,
-               ID_Duration,
-               mHost->GetDurationFormat(),
-               mHost->GetDuration(),
-               mSampleRate,
-               wxDefaultPosition,
-               wxDefaultSize,
-               true);
+               NumericTextCtrl(w, ID_Duration,
+                  NumericConverter::TIME,
+                  mHost->GetDurationFormat(),
+                  mHost->GetDuration(),
+                  mSampleRate,
+                  NumericTextCtrl::Options{}
+                     .AutoPos(true));
             mDuration->SetName(_("Duration"));
-            mDuration->EnableMenu();
             gridSizer->Add(mDuration, 0, wxALIGN_CENTER_VERTICAL | wxALL, 5);
             gridSizer->Add(1, 1, 0);
             gridSizer->Add(1, 1, 0);
@@ -1282,6 +1320,10 @@ bool LadspaEffect::PopulateUI(wxWindow *parent)
                0, 0, 1000,
                wxDefaultPosition,
                wxSize(200, -1));
+#if wxUSE_ACCESSIBILITY
+            // so that name can be set on a standard control
+            mSliders[p]->SetAccessible(safenew WindowAccessible(mSliders[p]));
+#endif
             mSliders[p]->SetName(labelText);
             gridSizer->Add(mSliders[p], 0, wxALIGN_CENTER_VERTICAL | wxEXPAND | wxALL, 5);
 
@@ -1323,15 +1365,15 @@ bool LadspaEffect::PopulateUI(wxWindow *parent)
                // Set number of decimal places
                if (upper - lower < 10.0)
                {
-                  vld.SetStyle(NUM_VAL_THREE_TRAILING_ZEROES);
+                  vld.SetStyle(NumValidatorStyle::THREE_TRAILING_ZEROES);
                }
                else if (upper - lower < 100.0)
                {
-                  vld.SetStyle(NUM_VAL_TWO_TRAILING_ZEROES);
+                  vld.SetStyle(NumValidatorStyle::TWO_TRAILING_ZEROES);
                }
                else
                {
-                  vld.SetStyle(NUM_VAL_ONE_TRAILING_ZERO);
+                  vld.SetStyle(NumValidatorStyle::ONE_TRAILING_ZERO);
                }
 
                mFields[p]->SetValidator(vld);
@@ -1404,7 +1446,7 @@ bool LadspaEffect::PopulateUI(wxWindow *parent)
             mInputControls[p] = roundf(mInputControls[p] * 1000000.0) / 1000000.0;
 
             mMeters[p] = safenew LadspaEffectMeter(w, mOutputControls[p], lower, upper);
-            mMeters[p]->SetName(labelText);
+            mMeters[p]->SetLabel(labelText);    // for screen readers
             gridSizer->Add(mMeters[p], 1, wxEXPAND | wxALIGN_CENTER_VERTICAL | wxALL, 5);
          }
 
@@ -1558,7 +1600,7 @@ bool LadspaEffect::LoadParameters(const wxString & group)
       return false;
    }
 
-   EffectAutomationParameters eap;
+   CommandParameters eap;
    if (!eap.SetParameters(parms))
    {
       return false;
@@ -1569,7 +1611,7 @@ bool LadspaEffect::LoadParameters(const wxString & group)
 
 bool LadspaEffect::SaveParameters(const wxString & group)
 {
-   EffectAutomationParameters eap;
+   CommandParameters eap;
    if (!GetAutomationParameters(eap))
    {
       return false;
@@ -1672,7 +1714,7 @@ void LadspaEffect::OnSlider(wxCommandEvent & evt)
 
 void LadspaEffect::OnTextCtrl(wxCommandEvent & evt)
 {
-   LadspaEffect *that = reinterpret_cast<LadspaEffect *>(this);
+   LadspaEffect *that = this;
    int p = evt.GetId() - ID_Texts;
 
    float val;

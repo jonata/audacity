@@ -1,40 +1,39 @@
 Audacity(R): free, open source, cross-platform audio software for 
-multi-track recording and editing: http://www.audacityteam.org/ . 
+multi-track recording and editing: https://www.audacityteam.org/ . 
 
-User suppport is provided on Audacity Forum:
-http://forum.audacityteam.org/ .
+User support is provided on Audacity Forum:
+https://forum.audacityteam.org/ .
 
 We welcome feedback on Audacity, suggestions for new or improved features, 
-and bug reports. Please visit http://audacityteam.org/contact/#feedback .
+and bug reports. Please visit https://forum.audacityteam.org/viewforum.php?f=25 .
 
-Audacity is copyright (c) 1999-2017 by Audacity Team. This copyright 
+Audacity is copyright (c) 1999-2018 by Audacity Team. This copyright 
 notice applies to all documents in the Audacity source code archive, 
 except as otherwise noted (mostly in the lib-src subdirectories). 
 "Audacity" is a registered trademark of Dominic Mazzoni. 
 
 The Audacity documentation is licensed under the Creative Commons
-Attribution 3.0 license: http://creativecommons.org/licenses/by/3.0/legalcode .
+Attribution 3.0 license: https://creativecommons.org/licenses/by/3.0/legalcode .
 
 Compilation instructions for Audacity are provided in the source code:
-* Windows: win\compile.txt
-* macOS: mac/Build.txt
-* GNU/Linux: INSTALL . 
+* Windows: win\build.txt
+* macOS: mac/build.txt
+* GNU/Linux: linux/build.txt 
 
 You can ask for help with compilation problems at:
-http://forum.audacityteam.org/viewforum.php?f=19 .
+https://forum.audacityteam.org/viewforum.php?f=19 .
 
 If you want to suggest some simple text change in our code, please submit a 
 pull request on https://github.com/audacity/audacity/pulls . It's usually 
 best to discuss functional code changes with us first on audacity-devel: 
 https://lists.sourceforge.net/lists/listinfo/audacity-devel . 
 
-
-Version 2.2.0
+Version 2.3.0
 
 Contents of this README:
 
 1.  Licensing
-2.  Changes since version 2.1.3
+2.  Changes since version 2.2.2
 3.  Known Issues at Release
 4.  Source Code, Libraries and Additional Copyright Information
 
@@ -55,7 +54,7 @@ License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program (in a file called LICENSE.txt); if not, go
-to http://www.gnu.org/licenses/old-licenses/gpl-2.0.html or write to
+to https://www.gnu.org/licenses/old-licenses/gpl-2.0.html or write to
 
   Free Software Foundation, Inc.
   59 Temple Place - Suite 330
@@ -64,62 +63,55 @@ to http://www.gnu.org/licenses/old-licenses/gpl-2.0.html or write to
 
 -------------------------------------------------------------------------------
 
-2. Changes since version 2.1.3: 
+2. Changes since version 2.2.2: 
 
 Improvements
 
-    * Four Selectable themes provided, with new 'Light' theme as default, 
-      plus option to customize
-    * Many menu changes:
-        * Menus Reorganized
-        * Extended menu bar provided
-        * New keyboard commands for working with clips 
-    * Help buttons ? in Preferences, Effects, Generators and Analyzers - and 
-      other places
-    * Non-Graying out of effects when no selection (and explanatory dialog 
-      with help button)
-    * Playback of MIDI (and Allegro) files imported into Note Tracks is 
-      now available.
-    * 'Center' option in Selection Toolbar
-    * Stem plots
-    * Major overhaul to documentation/manual including many new images and 
-      streamlined text on landing pages for in-program help. 
+ * New feature - "Punch and Roll Recording".
+ * Pinned-play-head can now be repositioned by dragging
+ * Play-at-Speed now can be adjusted whilst playing.
+ * Toolbars controlling volume and speed can now be resized for greater precision
+ * Macros (formerly 'Chains') substantially extended
+   * New Macro palette
+   * Macros can be bound to keyboard keys
+ * New commands
+   * New 'Tools' menu
+   * New 'Scriptables' commands 
+ * Nyquist gains AUD-DO command
+ * Nyquist effects are now translatable and translated
+ * More dialogs have help buttons now
+ * Increased legibility of trackname display
+ * Half-wave option for collapsed tracks
+ * Sliding Stretch
+ * Dialog (option) for entering labels
 
-Other Changes
+See also: https://wiki.audacityteam.org/wiki/New_features_in_Audacity_2.3.0
 
-    * Append-record is now the default (use Shift + Record for old behavior, 
-	to record on a new track)
-    * The Esc key now cancels all click-and-drag actions. It also chooses among 
-      overlapping mouse click targets, which is especially useful in the Multi-Tool.
-    * Sync-Lock button removed (use menu item or keyboard shortcut instead)
-    * New preferences and preference pages
-    * Overhaul of much code:
-        * Overhaul of envelope handling code to deal with some anomalies
-        * Overhaul of exception handling for greater safety 
-   *  New Logo 
+
 
 Bug Fixes
 
-   * Major work on bug fixing. 198 bugs that were in 2.1.3 were fixed for 2.2.0.
-        * The most serious bug fixed this time round was bug 437 which was 
-          about what happens when Audacity is recording and runs out of storage.
-        * Most of the bugs fixed were more minor, such as bug 463 which was 
-          about a case in which the numbering on the timeline could display
-          incorrect times. 
+ Over 90 bugs in 2.2.2 fixed, including:
 
- See also: https://wiki.audacityteam.org/wiki/Release_Notes_2.2.0
+ * Windows: Queen Mary 1.7.1 Vamp plug-ins crash Audacity on opening Plug-in Manager - bug #1244
+ * Inconsistent behavior when recording with a selection defined - bug #1839
+ * Ctrl + M does not open label for editing - bug #1852
+ * Vertical Zoom in by clicking in the vertical Scale, or context menu, in waveform views is inconsistent - bug #1810
+ * Deletion of all tracks cannot be undone - bug #1845
+ * Timer Record with a selection present can get a truncated recording with data loss - bug #1851
+ * Duplicate shortcuts can be created - bug #1786
+ * Labels longer than 260 characters are now supported - bug #1905
+ * Using Spectrogram Settings in TCP or using Preferences causes Audacity to reset Project Rate to default rate in Quality Preferences - bug #1977
+ * Cut Preview should play all selected/sync-locked tracks, respecting Mute/Solo during preview - bug #231
+
+See also: https://wiki.audacityteam.org/wiki/Release_Notes_2.3.0
+
 -------------------------------------------------------------------------------
 
-3. Known Issues in 2.2.0:
+3. Known Issues in 2.3.0:
 
-For known issues at release of 2.2.0 please see:
-  http://wiki.audacityteam.org/wiki/Release_Notes_2.2.0/Issues 
-
-Please also check:
-  http://wiki.audacityteam.org/index.php?title=Known_Issues
-
-for details of any issues that have been identified after release of
-this version.
+For known issues in 2.3.0 please see:
+  https://wiki.audacityteam.org/wiki/Release_Notes_2.3.0/Issues 
 
 
 -------------------------------------------------------------------------------
@@ -129,7 +121,7 @@ this version.
 Source code to this program is always available; for more information visit
 our web site at:
 
-  http://audacityteam.org/download/source
+  https://www.audacityteam.org/download/source
 
 Audacity is built upon other free libraries; some of these libraries may have
 come with Audacity in the lib-src directory.  Others you are expected to install

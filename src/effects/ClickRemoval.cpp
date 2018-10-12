@@ -30,11 +30,11 @@
 #include <math.h>
 
 #include <wx/intl.h>
-#include <wx/msgdlg.h>
 #include <wx/valgen.h>
 
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
+#include "../widgets/ErrorDialog.h"
 #include "../widgets/valnum.h"
 
 #include "../WaveTrack.h"
@@ -75,14 +75,14 @@ EffectClickRemoval::~EffectClickRemoval()
 
 // IdentInterface implementation
 
-wxString EffectClickRemoval::GetSymbol()
+IdentInterfaceSymbol EffectClickRemoval::GetSymbol()
 {
    return CLICKREMOVAL_PLUGIN_SYMBOL;
 }
 
 wxString EffectClickRemoval::GetDescription()
 {
-   return XO("Click Removal is designed to remove clicks on audio tracks");
+   return _("Click Removal is designed to remove clicks on audio tracks");
 }
 
 wxString EffectClickRemoval::ManualPage()
@@ -90,7 +90,7 @@ wxString EffectClickRemoval::ManualPage()
    return wxT("Click_Removal");
 }
 
-// EffectIdentInterface implementation
+// EffectDefinitionInterface implementation
 
 EffectType EffectClickRemoval::GetType()
 {
@@ -98,8 +98,13 @@ EffectType EffectClickRemoval::GetType()
 }
 
 // EffectClientInterface implementation
+bool EffectClickRemoval::DefineParams( ShuttleParams & S ){
+   S.SHUTTLE_PARAM( mThresholdLevel, Threshold );
+   S.SHUTTLE_PARAM( mClickWidth, Width );
+   return true;
+}
 
-bool EffectClickRemoval::GetAutomationParameters(EffectAutomationParameters & parms)
+bool EffectClickRemoval::GetAutomationParameters(CommandParameters & parms)
 {
    parms.Write(KEY_Threshold, mThresholdLevel);
    parms.Write(KEY_Width, mClickWidth);
@@ -107,7 +112,7 @@ bool EffectClickRemoval::GetAutomationParameters(EffectAutomationParameters & pa
    return true;
 }
 
-bool EffectClickRemoval::SetAutomationParameters(EffectAutomationParameters & parms)
+bool EffectClickRemoval::SetAutomationParameters(CommandParameters & parms)
 {
    ReadAndVerifyInt(Threshold);
    ReadAndVerifyInt(Width);
@@ -167,10 +172,8 @@ bool EffectClickRemoval::Process()
    bool bGoodResult = true;
    mbDidSomething = false;
 
-   SelectedTrackListOfKindIterator iter(Track::Wave, mOutputTracks.get());
-   WaveTrack *track = (WaveTrack *) iter.First();
    int count = 0;
-   while (track) {
+   for( auto track : mOutputTracks->Selected< WaveTrack >() ) {
       double trackStart = track->GetStartTime();
       double trackEnd = track->GetEndTime();
       double t0 = mT0 < trackStart? trackStart: mT0;
@@ -188,13 +191,11 @@ bool EffectClickRemoval::Process()
          }
       }
 
-      track = (WaveTrack *) iter.Next();
       count++;
    }
    if (bGoodResult && !mbDidSomething) // Processing successful, but ineffective.
-      wxMessageBox(
-         wxString::Format(_("Algorithm not effective on this audio. Nothing changed.")),
-         GetName(),
+      Effect::MessageBox(
+         _("Algorithm not effective on this audio. Nothing changed."),
          wxOK | wxICON_ERROR);
 
    this->ReplaceProcessedTracks(bGoodResult && mbDidSomething);
@@ -205,10 +206,9 @@ bool EffectClickRemoval::ProcessOne(int count, WaveTrack * track, sampleCount st
 {
    if (len <= windowSize / 2)
    {
-      wxMessageBox(
+      Effect::MessageBox(
          wxString::Format(_("Selection must be larger than %d samples."),
                           windowSize / 2),
-         GetName(),
          wxOK | wxICON_ERROR);
       return false;
    }
@@ -260,8 +260,8 @@ bool EffectClickRemoval::ProcessOne(int count, WaveTrack * track, sampleCount st
 bool EffectClickRemoval::RemoveClicks(size_t len, float *buffer)
 {
    bool bResult = false; // This effect usually does nothing.
-   int i;
-   int j;
+   size_t i;
+   size_t j;
    int left = 0;
 
    float msw;
@@ -279,46 +279,46 @@ bool EffectClickRemoval::RemoveClicks(size_t len, float *buffer)
    for(i=0;i<len;i++)
       ms_seq[i]=b2[i];
 
-   for(i=1; i < sep; i *= 2) {
+   for(i=1; (int)i < sep; i *= 2) {
       for(j=0;j<len-i; j++)
          ms_seq[j] += ms_seq[j+i];
-      }
+   }
 
-      /* Cheat by truncating sep to next-lower power of two... */
-      sep = i;
+   /* Cheat by truncating sep to next-lower power of two... */
+   sep = i;
 
-      for( i=0; i<len-sep; i++ ) {
-         ms_seq[i] /= sep;
-      }
-      /* ww runs from about 4 to mClickWidth.  wrc is the reciprocal;
-       * chosen so that integer roundoff doesn't clobber us.
-       */
-      int wrc;
-      for(wrc=mClickWidth/4; wrc>=1; wrc /= 2) {
-         ww = mClickWidth/wrc;
+   for( i=0; i<len-sep; i++ ) {
+      ms_seq[i] /= sep;
+   }
+   /* ww runs from about 4 to mClickWidth.  wrc is the reciprocal;
+    * chosen so that integer roundoff doesn't clobber us.
+    */
+   int wrc;
+   for(wrc=mClickWidth/4; wrc>=1; wrc /= 2) {
+      ww = mClickWidth/wrc;
 
-         for( i=0; i<len-sep; i++ ){
-            msw = 0;
-            for( j=0; j<ww; j++) {
-               msw += b2[i+s2+j];
+      for( i=0; i<len-sep; i++ ){
+         msw = 0;
+         for( j=0; (int)j<ww; j++) {
+            msw += b2[i+s2+j];
+         }
+         msw /= ww;
+
+         if(msw >= mThresholdLevel * ms_seq[i]/10) {
+            if( left == 0 ) {
+               left = i+s2;
             }
-            msw /= ww;
-
-            if(msw >= mThresholdLevel * ms_seq[i]/10) {
-               if( left == 0 ) {
-                  left = i+s2;
+         } else {
+            if(left != 0 && ((int)i-left+s2) <= ww*2) {
+               float lv = buffer[left];
+               float rv = buffer[i+ww+s2];
+               for(j=left; j<i+ww+s2; j++) {
+                  bResult = true;
+                  buffer[j]= (rv*(j-left) + lv*(i+ww+s2-j))/(float)(i+ww+s2-left);
+                  b2[j] = buffer[j]*buffer[j];
                }
-            } else {
-               if(left != 0 && i-left+s2 <= ww*2) {
-                  float lv = buffer[left];
-                  float rv = buffer[i+ww+s2];
-                  for(j=left; j<i+ww+s2; j++) {
-                     bResult = true;
-                     buffer[j]= (rv*(j-left) + lv*(i+ww+s2-j))/(float)(i+ww+s2-left);
-                     b2[j] = buffer[j]*buffer[j];
-                  }
-                  left=0;
-               } else if(left != 0) {
+               left=0;
+            } else if(left != 0) {
                left = 0;
             }
          }
@@ -344,7 +344,7 @@ void EffectClickRemoval::PopulateOrExchange(ShuttleGui & S)
       mThreshT->SetValidator(vldThresh);
 
       S.SetStyle(wxSL_HORIZONTAL);
-      mThreshS = S.Id(ID_Thresh).AddSlider(wxT(""), mThresholdLevel, MAX_Threshold, MIN_Threshold);
+      mThreshS = S.Id(ID_Thresh).AddSlider( {}, mThresholdLevel, MAX_Threshold, MIN_Threshold);
       mThreshS->SetName(_("Threshold"));
       mThreshS->SetValidator(wxGenericValidator(&mThresholdLevel));
       mThreshS->SetMinSize(wxSize(150, -1));
@@ -358,7 +358,7 @@ void EffectClickRemoval::PopulateOrExchange(ShuttleGui & S)
       mWidthT->SetValidator(vldWidth);
 
       S.SetStyle(wxSL_HORIZONTAL);
-      mWidthS = S.Id(ID_Width).AddSlider(wxT(""), mClickWidth, MAX_Width, MIN_Width);
+      mWidthS = S.Id(ID_Width).AddSlider( {}, mClickWidth, MAX_Width, MIN_Width);
       mWidthS->SetName(_("Max Spike Width"));
       mWidthS->SetValidator(wxGenericValidator(&mClickWidth));
       mWidthS->SetMinSize(wxSize(150, -1));

@@ -26,7 +26,7 @@ updating the ODPCMAliasBlockFile and the GUI of the newly available data.
 #include <wx/wx.h>
 
 //36 blockfiles > 3 minutes stereo 44.1kHz per ODTask::DoSome
-#define kNumBlockFilesPerDoSome 36
+#define nBlockFilesPerDoSome 36
 
 ///Creates a NEW task that computes summaries for a wavetrack that needs to be specified through SetWaveTrack()
 ODComputeSummaryTask::ODComputeSummaryTask()
@@ -35,9 +35,9 @@ ODComputeSummaryTask::ODComputeSummaryTask()
    mHasUpdateRan=false;
 }
 
-movable_ptr<ODTask> ODComputeSummaryTask::Clone() const
+std::unique_ptr<ODTask> ODComputeSummaryTask::Clone() const
 {
-   auto clone = make_movable<ODComputeSummaryTask>();
+   auto clone = std::make_unique<ODComputeSummaryTask>();
    clone->mDemandSample = GetDemandSample();
    // This std::move is needed to "upcast" the pointer type
    return std::move(clone);
@@ -66,7 +66,7 @@ void ODComputeSummaryTask::DoSomeInternal()
    }
 
    mBlockFilesMutex.Lock();
-   for(size_t i=0; i < mWaveTracks.size() && mBlockFiles.size();i++)
+   for(size_t j=0; j < mWaveTracks.size() && mBlockFiles.size();j++)
    {
       bool success = false;
       const auto bf = mBlockFiles[0].lock();
@@ -138,7 +138,7 @@ float ODComputeSummaryTask::ComputeNextWorkUntilPercentageComplete()
 
    float nextPercent;
    mPercentCompleteMutex.Lock();
-   nextPercent=mPercentComplete + ((float)kNumBlockFilesPerDoSome/(mMaxBlockFiles+1));
+   nextPercent=mPercentComplete + ((float)nBlockFilesPerDoSome/(mMaxBlockFiles+1));
    mPercentCompleteMutex.Unlock();
 
    return nextPercent;

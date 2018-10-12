@@ -27,6 +27,7 @@ Paul Licameli split from TrackPanel.cpp
 #include "../../../../ViewInfo.h"
 #include "../../../../WaveTrack.h"
 #include "../../../../../images/Cursors.h"
+#include "../../../../widgets/ErrorDialog.h"
 
 
 static const int SMOOTHING_KERNEL_RADIUS = 3;
@@ -47,14 +48,13 @@ void SampleHandle::Enter(bool)
 }
 
 HitTestPreview SampleHandle::HitPreview
-(const wxMouseState &state, const AudacityProject *pProject, bool unsafe)
+(const wxMouseState &state, const AudacityProject *WXUNUSED(pProject), bool unsafe)
 {
    static auto disabledCursor =
       ::MakeCursor(wxCURSOR_NO_ENTRY, DisabledCursorXpm, 16, 16);
    static wxCursor smoothCursor{ wxCURSOR_SPRAYCAN };
    static auto pencilCursor =
       ::MakeCursor(wxCURSOR_PENCIL, DrawCursorXpm, 12, 22);
-   const ToolsToolBar *const ttb = pProject->GetToolsToolBar();
 
    // TODO:  message should also mention the brush.  Describing the modifier key
    // (alt, or other) varies with operating system.
@@ -72,7 +72,7 @@ HitTestPreview SampleHandle::HitPreview
 
 UIHandlePtr SampleHandle::HitAnywhere
 (std::weak_ptr<SampleHandle> &holder,
- const wxMouseState &state, const std::shared_ptr<WaveTrack> &pTrack)
+ const wxMouseState &WXUNUSED(state), const std::shared_ptr<WaveTrack> &pTrack)
 {
    auto result = std::make_shared<SampleHandle>( pTrack );
    result = AssignUIHandlePtr(holder, result);
@@ -115,7 +115,9 @@ UIHandlePtr SampleHandle::HitTest
 {
    const ViewInfo &viewInfo = pProject->GetViewInfo();
 
-   WaveTrack *wavetrack = pTrack.get();
+   /// method that tells us if the mouse event landed on an
+   /// editable sample
+   const auto wavetrack = pTrack.get();
 
    const int displayType = wavetrack->GetDisplay();
    if (WaveTrack::Waveform != displayType)
@@ -173,18 +175,14 @@ namespace {
    ///  @return true if we can edit the samples, false otherwise.
    bool IsSampleEditingPossible
       (const wxMouseEvent &event,
-       const wxRect &rect, const ViewInfo &viewInfo, Track *pTrack, int width)
+       const wxRect &rect, const ViewInfo &viewInfo, WaveTrack *wt, int width)
    {
-      if (pTrack->GetKind() != Track::Wave)
-         return false;
-      WaveTrack *wt = static_cast<WaveTrack*>(pTrack);
-
       //Get out of here if we shouldn't be drawing right now:
       //If we aren't displaying the waveform, Display a message dialog
       const int display = wt->GetDisplay();
       if (WaveTrack::Waveform != display)
       {
-         wxMessageBox(_(
+         AudacityMessageBox(_(
 "To use Draw, choose 'Waveform' or 'Waveform (dB)' in the Track Dropdown Menu."),
                       _("Draw Tool"));
          return false;
@@ -194,7 +192,7 @@ namespace {
       const double time = adjustTime(wt, viewInfo.PositionToTime(event.m_x, rect.x));
       if (!SampleResolutionTest(viewInfo, wt, time, width))
       {
-         wxMessageBox(_(
+         AudacityMessageBox(_(
 "To use Draw, zoom in further until you can see the individual samples."),
                       _("Draw Tool"));
          return false;

@@ -77,9 +77,8 @@ public:
    // IdentInterface implementation
 
    wxString GetPath() override;
-   wxString GetSymbol() override;
-   wxString GetName() override;
-   wxString GetVendor() override;
+   IdentInterfaceSymbol GetSymbol() override;
+   IdentInterfaceSymbol GetVendor() override;
    wxString GetVersion() override;
    wxString GetDescription() override;
 
@@ -88,9 +87,15 @@ public:
    bool Initialize() override;
    void Terminate() override;
 
+   wxArrayString FileExtensions() override { return {}; }
+   wxString InstallPath() override { return {}; }
+
    bool AutoRegisterPlugins(PluginManagerInterface & pm) override;
-   wxArrayString FindPlugins(PluginManagerInterface & pm) override;
-   bool RegisterPlugin(PluginManagerInterface & pm, const wxString & path) override;
+   wxArrayString FindPluginPaths(PluginManagerInterface & pm) override;
+   unsigned DiscoverPluginsAtPath(
+      const wxString & path, wxString &errMsg,
+      const RegistrationCallback &callback)
+         override;
 
    bool IsPluginValid(const wxString & path, bool bFast) override;
 

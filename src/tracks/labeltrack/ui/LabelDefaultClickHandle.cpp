@@ -34,19 +34,10 @@ void LabelDefaultClickHandle::SaveState( AudacityProject *pProject )
    mLabelState = std::make_shared<LabelState>();
    auto &pairs = mLabelState->mPairs;
    TrackList *const tracks = pProject->GetTracks();
-   TrackListIterator iter(tracks);
-   Track *n = iter.First();
 
-   while (n) {
-      if (n->GetKind() == Track::Label) {
-         LabelTrack *const lt = static_cast<LabelTrack*>(n);
-         pairs.push_back( std::make_pair(
-            Track::Pointer<LabelTrack>( lt ),
-            lt->SaveFlags() )
-         );
-      }
-      n = iter.Next();
-   }
+   for (auto lt : tracks->Any<LabelTrack>())
+      pairs.push_back( std::make_pair(
+         Track::Pointer<LabelTrack>( lt ), lt->SaveFlags() ) );
 }
 
 void LabelDefaultClickHandle::RestoreState( AudacityProject *pProject )
@@ -66,23 +57,16 @@ UIHandle::Result LabelDefaultClickHandle::Click
    // Redraw to show the change of text box selection status
    UIHandle::Result result = RefreshAll;
 
-   auto pLT = static_cast<LabelTrack*>(evt.pCell.get());
-
    if (evt.event.LeftDown())
    {
       SaveState( pProject );
 
-      TrackList *const tracks = pProject->GetTracks();
-      TrackListIterator iter(tracks);
-      Track *n = iter.First();
-
-      while (n) {
-         if (n->GetKind() == Track::Label && evt.pCell.get() != n) {
-            LabelTrack *const lt = static_cast<LabelTrack*>(n);
+      const auto pLT = evt.pCell.get();
+      for (auto lt : pProject->GetTracks()->Any<LabelTrack>()) {
+         if (pLT != lt) {
             lt->ResetFlags();
             lt->Unselect();
          }
-         n = iter.Next();
       }
    }
 
@@ -90,14 +74,14 @@ UIHandle::Result LabelDefaultClickHandle::Click
 }
 
 UIHandle::Result LabelDefaultClickHandle::Drag
-(const TrackPanelMouseEvent &evt, AudacityProject *pProject)
+(const TrackPanelMouseEvent &WXUNUSED(evt), AudacityProject *WXUNUSED(pProject))
 {
    return RefreshCode::RefreshNone;
 }
 
 UIHandle::Result LabelDefaultClickHandle::Release
-(const TrackPanelMouseEvent &evt, AudacityProject *pProject,
- wxWindow *pParent)
+(const TrackPanelMouseEvent &WXUNUSED(evt), AudacityProject *WXUNUSED(pProject),
+ wxWindow *WXUNUSED(pParent))
 {
    mLabelState.reset();
    return RefreshCode::RefreshNone;

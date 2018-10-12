@@ -31,7 +31,7 @@ Vaughan Johnson (Preview)
 class wxTextCtrl;
 class ShuttleGui;
 
-#define CLASSICFILTERS_PLUGIN_SYMBOL XO("Classic Filters")
+#define CLASSICFILTERS_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Classic Filters") }
 
 class EffectScienFilterPanel;
 
@@ -43,11 +43,11 @@ public:
 
    // IdentInterface implementation
 
-   wxString GetSymbol() override;
+   IdentInterfaceSymbol GetSymbol() override;
    wxString GetDescription() override;
    wxString ManualPage() override;
 
-   // EffectIdentInterface implementation
+   // EffectDefinitionInterface implementation
 
    EffectType GetType() override;
 
@@ -57,8 +57,9 @@ public:
    unsigned GetAudioOutCount() override;
    bool ProcessInitialize(sampleCount totalLen, ChannelNames chanMap = NULL) override;
    size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
-   bool GetAutomationParameters(EffectAutomationParameters & parms) override;
-   bool SetAutomationParameters(EffectAutomationParameters & parms) override;
+   bool DefineParams( ShuttleParams & S ) override;
+   bool GetAutomationParameters(CommandParameters & parms) override;
+   bool SetAutomationParameters(CommandParameters & parms) override;
 
    // Effect implementation
 
@@ -101,7 +102,7 @@ private:
    int mFilterSubtype;	// lowpass, highpass
    int mOrder;
    int mOrderIndex;
-   ArrayOf<BiquadStruct> mpBiquad;
+   ArrayOf<Biquad> mpBiquad;
 
    double mdBMax;
    double mdBMin;
@@ -139,7 +140,9 @@ private:
 class EffectScienFilterPanel final : public wxPanelWrapper
 {
 public:
-   EffectScienFilterPanel(EffectScienFilter *effect, wxWindow *parent);
+   EffectScienFilterPanel(
+      wxWindow *parent, wxWindowID winid,
+      EffectScienFilter *effect, double lo, double hi);
    virtual ~EffectScienFilterPanel();
 
    // We don't need or want to accept focus.

@@ -24,12 +24,10 @@ Paul Licameli split from TrackPanel.cpp
 #include "TrackPanelMouseEvent.h"
 #include "tracks/ui/TrackControls.h"
 
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-#include "WaveTrack.h"
-#endif
-
 HitTestPreview TrackPanelResizeHandle::HitPreview(bool bLinked)
 {
+   // TODO: more-than-two-channels-message
+
    static wxCursor resizeCursor{ wxCURSOR_SIZENS };
 
    /// When in the resize area we can adjust size or relative size.
@@ -57,70 +55,40 @@ TrackPanelResizeHandle::~TrackPanelResizeHandle()
 }
 
 UIHandle::Result TrackPanelResizeHandle::Click
-(const TrackPanelMouseEvent &evt, AudacityProject *pProject)
+(const TrackPanelMouseEvent &WXUNUSED(evt), AudacityProject *WXUNUSED(pProject))
 {
    return RefreshCode::RefreshNone;
 }
 
 TrackPanelResizeHandle::TrackPanelResizeHandle
-( const std::shared_ptr<Track> &track, int y, const AudacityProject *pProject )
+( const std::shared_ptr<Track> &track, int y )
    : mpTrack{ track }
    , mMouseClickY( y )
 {
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-   if (MONO_WAVE_PAN(track)){
-      //STM:  Determine whether we should rescale one or two tracks
-      if (track->GetVirtualStereo()) {
-         // mpTrack is the lower track
-         mInitialTrackHeight = track->GetHeight(true);
-         mInitialActualHeight = mInitialUpperActualHeight = track->GetActualHeight();
-         mInitialMinimized = track->GetMinimized();
-         mInitialUpperTrackHeight = track->GetHeight();
+   // TODO: more-than-two-channels
+
+   //STM:  Determine whether we should rescale one or two tracks
+   auto channels = TrackList::Channels(track.get());
+   auto last = *channels.rbegin();
+   mInitialTrackHeight = last->GetHeight();
+   mInitialActualHeight = last->GetActualHeight();
+   mInitialMinimized = last->GetMinimized();
+
+   if (channels.size() > 1) {
+      auto first = *channels.begin();
+
+      mInitialUpperTrackHeight = first->GetHeight();
+      mInitialUpperActualHeight = first->GetActualHeight();
+
+      if (track.get() == *channels.rbegin())
+         // capturedTrack is the lowest track
          mMode = IsResizingBelowLinkedTracks;
-      }
-      else {
-         // mpTrack is the upper track
-         mInitialTrackHeight = track->GetHeight(true);
-         mInitialActualHeight = mInitialUpperActualHeight = track->GetActualHeight();
-         mInitialMinimized = track->GetMinimized();
-         mInitialUpperTrackHeight = track->GetHeight();
+      else
+         // capturedTrack is not the lowest track
          mMode = IsResizingBetweenLinkedTracks;
-      }
    }
    else
-#endif
-   {
-      auto tracks = pProject->GetTracks();
-      Track *prev = tracks->GetPrev(track.get());
-      Track *next = tracks->GetNext(track.get());
-
-      //STM:  Determine whether we should rescale one or two tracks
-      if (prev && prev->GetLink() == track.get()) {
-         // mpTrack is the lower track
-         mInitialTrackHeight = track->GetHeight();
-         mInitialActualHeight = track->GetActualHeight();
-         mInitialMinimized = track->GetMinimized();
-         mInitialUpperTrackHeight = prev->GetHeight();
-         mInitialUpperActualHeight = prev->GetActualHeight();
-         mMode = IsResizingBelowLinkedTracks;
-      }
-      else if (next && track->GetLink() == next) {
-         // mpTrack is the upper track
-         mInitialTrackHeight = next->GetHeight();
-         mInitialActualHeight = next->GetActualHeight();
-         mInitialMinimized = next->GetMinimized();
-         mInitialUpperTrackHeight = track->GetHeight();
-         mInitialUpperActualHeight = track->GetActualHeight();
-         mMode = IsResizingBetweenLinkedTracks;
-      }
-      else {
-         // DM: Save the initial mouse location and the initial height
-         mInitialTrackHeight = track->GetHeight();
-         mInitialActualHeight = track->GetActualHeight();
-         mInitialMinimized = track->GetMinimized();
-         mMode = IsResizing;
-      }
-   }
+      mMode = IsResizing;
 }
 
 UIHandle::Result TrackPanelResizeHandle::Drag
@@ -141,30 +109,24 @@ UIHandle::Result TrackPanelResizeHandle::Drag
    // This used to be in HandleResizeClick(), but simply clicking
    // on a resize border would switch the minimized state.
    if (pTrack->GetMinimized()) {
-      Track *link = pTrack->GetLink();
+      auto channels = TrackList::Channels( pTrack.get() );
+      for (auto channel : channels) {
+         channel->SetHeight(channel->GetHeight());
+         channel->SetMinimized(false);
+      }
 
-      pTrack->SetHeight(pTrack->GetHeight());
-      pTrack->SetMinimized(false);
-
-      if (link) {
-         link->SetHeight(link->GetHeight());
-         link->SetMinimized(false);
+      if (channels.size() > 1) {
          // Initial values must be reset since they weren't based on the
          // minimized heights.
-         mInitialUpperTrackHeight = link->GetHeight();
-         mInitialTrackHeight = pTrack->GetHeight();
+         mInitialUpperTrackHeight = (*channels.begin())->GetHeight();
+         mInitialTrackHeight = (*channels.rbegin())->GetHeight();
       }
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-      else if (MONO_WAVE_PAN(mpTrack)){
-         mpTrack->SetMinimized(false);
-         mInitialUpperTrackHeight = mpTrack->GetHeight();
-         mInitialTrackHeight = mpTrack->GetHeight(true);
-      }
-#endif
    }
 
    // Common pieces of code for MONO_WAVE_PAN and otherwise.
-   auto doResizeBelow = [&] (Track *prev, bool vStereo) {
+   auto doResizeBelow = [&] (Track *prev, bool WXUNUSED(vStereo)) {
+      // TODO: more-than-two-channels
+      
       double proportion = static_cast < double >(mInitialTrackHeight)
       / (mInitialTrackHeight + mInitialUpperTrackHeight);
 
@@ -180,15 +142,13 @@ UIHandle::Result TrackPanelResizeHandle::Drag
       if (newUpperTrackHeight < prev->GetMinimizedHeight())
          newUpperTrackHeight = prev->GetMinimizedHeight();
 
-      pTrack->SetHeight(newTrackHeight
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-                                , vStereo
-#endif
-                                );
+      pTrack->SetHeight(newTrackHeight);
       prev->SetHeight(newUpperTrackHeight);
    };
 
-   auto doResizeBetween = [&] (Track *next, bool vStereo) {
+   auto doResizeBetween = [&] (Track *next, bool WXUNUSED(vStereo)) {
+      // TODO: more-than-two-channels
+
       int newUpperTrackHeight = mInitialUpperTrackHeight + delta;
       int newTrackHeight = mInitialTrackHeight - delta;
 
@@ -204,21 +164,8 @@ UIHandle::Result TrackPanelResizeHandle::Drag
          mInitialUpperTrackHeight + mInitialTrackHeight - pTrack->GetMinimizedHeight();
       }
 
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-      if (vStereo) {
-         float temp = 1.0f;
-         if(newUpperTrackHeight != 0.0f)
-            temp = (float)newUpperTrackHeight/(float)(newUpperTrackHeight + newTrackHeight);
-         mpTrack->SetVirtualTrackPercentage(temp);
-      }
-#endif
-
       pTrack->SetHeight(newUpperTrackHeight);
-      next->SetHeight(newTrackHeight
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-                      , vStereo
-#endif
-                      );
+      next->SetHeight(newTrackHeight);
    };
 
    auto doResize = [&] {
@@ -232,58 +179,28 @@ UIHandle::Result TrackPanelResizeHandle::Drag
    // If two, resize proportionally if we are dragging the lower track, and
    // adjust compensatively if we are dragging the upper track.
 
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-   if(MONO_WAVE_PAN(mpTrack)) {
-      switch( mMode )
-      {
-         case IsResizingBelowLinkedTracks:
-         {
-            doResizeBelow( mpTrack, true );
-            break;
-         }
-         case IsResizingBetweenLinkedTracks:
-         {
-            doResizeBetween( mpTrack, true );
-            break;
-         }
-         case IsResizing:
-         {
-            // Should imply !MONO_WAVE_PAN(mCapturedTrack),
-            // so impossible, but anyway:
-            doResize();
-            break;
-         }
-         default:
-            // don't refresh in this case.
-            return RefreshCode::RefreshNone;
-      }
-   }
-   else
-#endif
+   switch( mMode )
    {
-      switch( mMode )
+      case IsResizingBelowLinkedTracks:
       {
-         case IsResizingBelowLinkedTracks:
-         {
-            Track *prev = tracks->GetPrev(pTrack.get());
-            doResizeBelow(prev, false);
-            break;
-         }
-         case IsResizingBetweenLinkedTracks:
-         {
-            Track *next = tracks->GetNext(pTrack.get());
-            doResizeBetween(next, false);
-            break;
-         }
-         case IsResizing:
-         {
-            doResize();
-            break;
-         }
-         default:
-            // don't refresh in this case.
-            return RefreshCode::RefreshNone;
+         auto prev = * -- tracks->Find(pTrack.get());
+         doResizeBelow(prev, false);
+         break;
       }
+      case IsResizingBetweenLinkedTracks:
+      {
+         auto next = * ++ tracks->Find(pTrack.get());
+         doResizeBetween(next, false);
+         break;
+      }
+      case IsResizing:
+      {
+         doResize();
+         break;
+      }
+      default:
+         // don't refresh in this case.
+         return RefreshCode::RefreshNone;
    }
 
    return RefreshCode::RefreshAll;
@@ -326,30 +243,20 @@ UIHandle::Result TrackPanelResizeHandle::Cancel(AudacityProject *pProject)
    break;
    case IsResizingBetweenLinkedTracks:
    {
-      Track *const next = tracks->GetNext(pTrack.get());
+      Track *const next = * ++ tracks->Find(pTrack.get());
       pTrack->SetHeight(mInitialUpperActualHeight);
       pTrack->SetMinimized(mInitialMinimized);
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-      if( !MONO_WAVE_PAN(pTrack) )
-#endif
-      {
-         next->SetHeight(mInitialActualHeight);
-         next->SetMinimized(mInitialMinimized);
-      }
+      next->SetHeight(mInitialActualHeight);
+      next->SetMinimized(mInitialMinimized);
    }
    break;
    case IsResizingBelowLinkedTracks:
    {
-      Track *const prev = tracks->GetPrev(pTrack.get());
+      Track *const prev = * -- tracks->Find(pTrack.get());
       pTrack->SetHeight(mInitialActualHeight);
       pTrack->SetMinimized(mInitialMinimized);
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-      if( !MONO_WAVE_PAN(pTrack) )
-#endif
-      {
-         prev->SetHeight(mInitialUpperActualHeight);
-         prev->SetMinimized(mInitialMinimized);
-      }
+      prev->SetHeight(mInitialUpperActualHeight);
+      prev->SetMinimized(mInitialMinimized);
    }
    break;
    }

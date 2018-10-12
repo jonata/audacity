@@ -19,10 +19,11 @@
 #include <wx/defs.h>
 #include <wx/string.h>
 #include "widgets/NumericTextCtrl.h"
+#include "Internat.h"
 
 class AudacityProject;
 class Track;
-class TrackArray;
+using TrackArray = std::vector< Track* >;
 class TrackClipArray;
 class WaveClip;
 class WaveTrack;
@@ -39,8 +40,10 @@ public:
 
    Track *track;
    Track *origTrack;
-   WaveTrack *dstTrack;
    WaveClip *clip;
+
+   // These fields are used only during time-shift dragging
+   WaveTrack *dstTrack;
    std::shared_ptr<WaveClip> holder;
 };
 
@@ -136,7 +139,7 @@ private:
 
    int mSnapTo;
    double mRate;
-   wxString mFormat;
+   NumericFormatId mFormat;
 };
 
 #endif

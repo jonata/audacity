@@ -24,7 +24,11 @@
 
 class ShuttleGui;
 
-#define TIMESCALE_PLUGIN_SYMBOL XO("Time Scale")
+// two strings here
+// unusual case
+#define TIMESCALE_PLUGIN_SYMBOL \
+   IdentInterfaceSymbol{ wxT("Sliding Stretch"), \
+                         XO("Sliding Stretch") }
 
 class EffectTimeScale final : public EffectSBSMS
 {
@@ -34,19 +38,19 @@ public:
 
    // IdentInterface implementation
 
-   wxString GetSymbol() override;
-   wxString GetName() override;
+   IdentInterfaceSymbol GetSymbol() override;
    wxString GetDescription() override;
    wxString ManualPage() override;
 
-   // EffectIdentInterface implementation
+   // EffectDefinitionInterface implementation
 
    EffectType GetType() override;
 
    // EffectClientInterface implementation
 
-   bool GetAutomationParameters(EffectAutomationParameters & parms) override;
-   bool SetAutomationParameters(EffectAutomationParameters & parms) override;
+   bool DefineParams( ShuttleParams & S ) override;
+   bool GetAutomationParameters(CommandParameters & parms) override;
+   bool SetAutomationParameters(CommandParameters & parms) override;
 
    // Effect implementation
 

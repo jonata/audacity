@@ -86,7 +86,6 @@ UIHandle::Result TrackSelectHandle::Click
    const auto pTrack = mpTrack;
    if (!pTrack)
       return Cancelled;
-   TrackPanel *const trackPanel = pProject->GetTrackPanel();
    const bool unsafe = pProject->IsAudioActive();
 
    // DM: If they weren't clicking on a particular part of a track label,
@@ -101,8 +100,8 @@ UIHandle::Result TrackSelectHandle::Click
       CalculateRearrangingThresholds(event);
    }
 
-   pProject->HandleListSelection
-      (pTrack.get(), event.ShiftDown(), event.ControlDown(), !unsafe);
+   GetMenuCommandHandler(*pProject).HandleListSelection(*pProject,
+      pTrack.get(), event.ShiftDown(), event.ControlDown(), !unsafe);
 
    mClicked = true;
    return result;
@@ -188,13 +187,12 @@ UIHandle::Result TrackSelectHandle::Release
    wxASSERT( mpTrack );
    if (mRearrangeCount != 0) {
       AudacityProject *const project = ::GetActiveProject();
-      wxString dir;
-      /* i18n-hint: a direction as in up or down.*/
-      dir = mRearrangeCount < 0 ? _("up") : _("down");
-/* i18n-hint: will substitute name of track for first %s, "up" or "down" for the other.*/
-      project->PushState(wxString::Format(_("Moved '%s' %s"),
-         mpTrack->GetName().c_str(),
-         dir.c_str()),
+      project->PushState(
+         wxString::Format(
+            /* i18n-hint: will substitute name of track for %s */
+            ( mRearrangeCount < 0 ? _("Moved '%s' up") : _("Moved '%s' down") ),
+            mpTrack->GetName()
+         ),
          _("Move Track"));
    }
    // Bug 1677
@@ -227,13 +225,17 @@ void TrackSelectHandle::CalculateRearrangingThresholds(const wxMouseEvent & even
 
    if (tracks->CanMoveUp(mpTrack.get()))
       mMoveUpThreshold =
-      event.m_y - tracks->GetGroupHeight(tracks->GetPrev(mpTrack.get(), true));
+         event.m_y -
+            tracks->GetGroupHeight(
+               * -- tracks->FindLeader( mpTrack.get() ) );
    else
       mMoveUpThreshold = INT_MIN;
 
    if (tracks->CanMoveDown(mpTrack.get()))
       mMoveDownThreshold =
-      event.m_y + tracks->GetGroupHeight(tracks->GetNext(mpTrack.get(), true));
+         event.m_y +
+            tracks->GetGroupHeight(
+               * ++ tracks->FindLeader( mpTrack.get() ) );
    else
       mMoveDownThreshold = INT_MAX;
 }

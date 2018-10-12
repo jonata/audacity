@@ -25,7 +25,6 @@
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/combobox.h>
-#include <wx/msgdlg.h>
 #include <wx/sizer.h>
 #include <wx/slider.h>
 #include <wx/statbox.h>
@@ -39,13 +38,10 @@
 
 #include "../../ShuttleGui.h"
 #include "../../widgets/valnum.h"
+#include "../../widgets/ErrorDialog.h"
 
 #include "../../LabelTrack.h"
 #include "../../WaveTrack.h"
-
-#ifdef __AUDACITY_OLD_STD__
-#include <list>
-#endif
 
 enum
 {
@@ -96,19 +92,14 @@ wxString VampEffect::GetPath()
    return mPath;
 }
 
-wxString VampEffect::GetSymbol()
+IdentInterfaceSymbol VampEffect::GetSymbol()
 {
    return mName;
 }
 
-wxString VampEffect::GetName()
+IdentInterfaceSymbol VampEffect::GetVendor()
 {
-   return GetSymbol();
-}
-
-wxString VampEffect::GetVendor()
-{
-   return wxString::FromUTF8(mPlugin->getMaker().c_str());
+   return { wxString::FromUTF8(mPlugin->getMaker().c_str()) };
 }
 
 wxString VampEffect::GetVersion()
@@ -122,7 +113,7 @@ wxString VampEffect::GetDescription()
 }
 
 // ============================================================================
-// EffectIdentInterface implementation
+// EffectDefinitionInterface implementation
 // ============================================================================
 
 EffectType VampEffect::GetType()
@@ -130,7 +121,7 @@ EffectType VampEffect::GetType()
    return EffectTypeAnalyze;
 }
 
-wxString VampEffect::GetFamily()
+IdentInterfaceSymbol VampEffect::GetFamilyId()
 {
    return VAMPEFFECTS_FAMILY;
 }
@@ -153,9 +144,9 @@ unsigned VampEffect::GetAudioInCount()
    return mPlugin->getMaxChannelCount();
 }
 
-bool VampEffect::GetAutomationParameters(EffectAutomationParameters & parms)
+bool VampEffect::GetAutomationParameters(CommandParameters & parms)
 {
-   for (size_t p = 0, cnt = mParameters.size(); p < cnt; p++)
+   for (size_t p = 0, paramCount = mParameters.size(); p < paramCount; p++)
    {
       wxString key = wxString::FromUTF8(mParameters[p].identifier.c_str());
       float value = mPlugin->getParameter(mParameters[p].identifier);
@@ -175,20 +166,20 @@ bool VampEffect::GetAutomationParameters(EffectAutomationParameters & parms)
                mParameters[p].quantizeStep == 1.0 &&
                !mParameters[p].valueNames.empty())
       {
-         wxArrayString choices;
+         std::vector<IdentInterfaceSymbol> choices;
          int val = 0;
 
-         for (size_t i = 0, cnt = mParameters[p].valueNames.size(); i < cnt; i++)
+         for (size_t i = 0, choiceCount = mParameters[p].valueNames.size(); i < choiceCount; i++)
          {
             wxString choice = wxString::FromUTF8(mParameters[p].valueNames[i].c_str());
             if (size_t(value - mParameters[p].minValue + 0.5) == i)
             {
                val = i;
             }
-            choices.Add(choice);
+            choices.push_back(choice);
          }
 
-         parms.WriteEnum(key, val, choices);
+         parms.WriteEnum(key, val, choices.data(), choices.size());
       }
       else
       {
@@ -199,10 +190,10 @@ bool VampEffect::GetAutomationParameters(EffectAutomationParameters & parms)
    return true;
 }
 
-bool VampEffect::SetAutomationParameters(EffectAutomationParameters & parms)
+bool VampEffect::SetAutomationParameters(CommandParameters & parms)
 {
    // First pass verifies values
-   for (size_t p = 0, cnt = mParameters.size(); p < cnt; p++)
+   for (size_t p = 0, paramCount = mParameters.size(); p < paramCount; p++)
    {
       wxString key = wxString::FromUTF8(mParameters[p].identifier.c_str());
       float lower = mParameters[p].minValue;
@@ -222,16 +213,16 @@ bool VampEffect::SetAutomationParameters(EffectAutomationParameters & parms)
                mParameters[p].quantizeStep == 1.0 &&
                !mParameters[p].valueNames.empty())
       {
-         wxArrayString choices;
+         std::vector<IdentInterfaceSymbol> choices;
          int val;
 
-         for (size_t i = 0, cnt = mParameters[p].valueNames.size(); i < cnt; i++)
+         for (size_t i = 0, choiceCount = mParameters[p].valueNames.size(); i < choiceCount; i++)
          {
             wxString choice = wxString::FromUTF8(mParameters[p].valueNames[i].c_str());
-            choices.Add(choice);
+            choices.push_back(choice);
          }
 
-         good = parms.ReadEnum(key, &val, choices) && val != wxNOT_FOUND;
+         good = parms.ReadEnum(key, &val, choices.data(), choices.size()) && val != wxNOT_FOUND;
       }
       else
       {
@@ -247,7 +238,7 @@ bool VampEffect::SetAutomationParameters(EffectAutomationParameters & parms)
    }
 
    // Second pass sets the variables
-   for (size_t p = 0, cnt = mParameters.size(); p < cnt; p++)
+   for (size_t p = 0, paramCount = mParameters.size(); p < paramCount; p++)
    {
       wxString key = wxString::FromUTF8(mParameters[p].identifier.c_str());
       float lower = mParameters[p].minValue;
@@ -268,16 +259,16 @@ bool VampEffect::SetAutomationParameters(EffectAutomationParameters & parms)
                mParameters[p].quantizeStep == 1.0 &&
                !mParameters[p].valueNames.empty())
       {
-         wxArrayString choices;
-         int val;
+         std::vector<IdentInterfaceSymbol> choices;
+         int val = 0;
 
-         for (size_t i = 0, cnt = mParameters[p].valueNames.size(); i < cnt; i++)
+         for (size_t i = 0, choiceCount = mParameters[p].valueNames.size(); i < choiceCount; i++)
          {
             wxString choice = wxString::FromUTF8(mParameters[p].valueNames[i].c_str());
-            choices.Add(choice);
+            choices.push_back(choice);
          }
 
-         parms.ReadEnum(key, &val, choices);
+         parms.ReadEnum(key, &val, choices.data(), choices.size());
 
          mPlugin->setParameter(mParameters[p].identifier, (float) val);
       }
@@ -306,30 +297,27 @@ bool VampEffect::SetAutomationParameters(EffectAutomationParameters & parms)
 
 bool VampEffect::Init()
 {
-   TrackListOfKindIterator iter(Track::Wave, inputTracks());
-   WaveTrack *left = (WaveTrack *)iter.First();
-
    mRate = 0.0;
 
-   while (left)
-   {
-      if (mRate == 0.0)
-      {
-         mRate = left->GetRate();
-      }
+   // PRL: this loop checked that channels of a track have the same rate,
+   // but there was no check that all tracks have one rate, and only the first
+   // is remembered in mRate.  Is that correct?
 
-      if (left->GetLinked())
-      {
-         WaveTrack *right = (WaveTrack *)iter.Next();
-
-         if (left->GetRate() != right->GetRate())
-         {
-            wxMessageBox(_("Sorry, Vamp Plug-ins cannot be run on stereo tracks where the individual channels of the track do not match."));
-            return false;
+   for (auto leader : inputTracks()->Leaders<const WaveTrack>()) {
+      auto channelGroup = TrackList::Channels( leader );
+      auto rate = (*channelGroup.first++) -> GetRate();
+      for(auto channel : channelGroup) {
+         if (rate != channel->GetRate())
+         // PRL:  Track rate might not match individual clip rates.
+         // So is this check not adequate?
+          {
+             // TODO: more-than-two-channels-message
+             Effect::MessageBox(_("Sorry, Vamp Plug-ins cannot be run on stereo tracks where the individual channels of the track do not match."));
+             return false;
          }
       }
-
-      left = (WaveTrack *)iter.Next();
+      if (mRate == 0.0)
+         mRate = rate;
    }
 
    if (mRate <= 0.0)
@@ -343,7 +331,7 @@ bool VampEffect::Init()
    mPlugin.reset(loader->loadPlugin(mKey, mRate, Vamp::HostExt::PluginLoader::ADAPT_ALL));
    if (!mPlugin)
    {
-      wxMessageBox(_("Sorry, failed to load Vamp Plug-in."));
+      Effect::MessageBox(_("Sorry, failed to load Vamp Plug-in."));
       return false;
    }
 
@@ -357,11 +345,7 @@ bool VampEffect::Process()
       return false;
    }
 
-   TrackListOfKindIterator iter(Track::Wave, inputTracks());
-
    int count = 0;
-
-   WaveTrack *left = (WaveTrack *)iter.First();
 
    bool multiple = false;
    unsigned prevTrackChannels = 0;
@@ -377,21 +361,25 @@ bool VampEffect::Process()
 
    std::vector<std::shared_ptr<Effect::AddedAnalysisTrack>> addedTracks;
 
-   while (left)
+   for (auto leader : inputTracks()->Leaders<const WaveTrack>())
    {
+      auto channelGroup = TrackList::Channels(leader);
+      auto left = *channelGroup.first++;
+
       sampleCount lstart, rstart = 0;
       sampleCount len;
       GetSamples(left, &lstart, &len);
 
-      WaveTrack *right = NULL;
       unsigned channels = 1;
 
-      if (left->GetLinked())
+      const WaveTrack *right = *channelGroup.first++;
+      if (right)
       {
-         right = (WaveTrack *)iter.Next();
          channels = 2;
          GetSamples(right, &rstart, &len);
       }
+
+      // TODO: more-than-two-channels
 
       size_t step = mPlugin->getPreferredStepSize();
       size_t block = mPlugin->getPreferredBlockSize();
@@ -437,16 +425,16 @@ bool VampEffect::Process()
       {
          if (!mPlugin->initialise(channels, step, block))
          {
-            wxMessageBox(_("Sorry, Vamp Plug-in failed to initialize."));
+            Effect::MessageBox(_("Sorry, Vamp Plug-in failed to initialize."));
             return false;
          }
       }
 
+      const auto effectName = GetSymbol().Translation();
       addedTracks.push_back(AddAnalysisTrack(
          multiple
-         ? wxString::Format(wxT("%s: %s"),
-            left->GetName().c_str(), GetName().c_str())
-         : GetName()
+         ? wxString::Format( _("%s: %s"), left->GetName(), effectName )
+         : effectName
       ));
       LabelTrack *ltrack = addedTracks.back()->get();
 
@@ -472,7 +460,7 @@ bool VampEffect::Process()
 
          if (request < block)
          {
-            for (int c = 0; c < channels; ++c)
+            for (unsigned int c = 0; c < channels; ++c)
             {
                for (decltype(block) i = request; i < block; ++i)
                {
@@ -528,8 +516,6 @@ bool VampEffect::Process()
       AddFeatures(ltrack, features);
 
       prevTrackChannels = channels;
-
-      left = (WaveTrack *)iter.Next();
    }
 
    // All completed without cancellation, so commit the addition of tracks now
@@ -581,7 +567,7 @@ void VampEffect::PopulateOrExchange(ShuttleGui & S)
                S.AddPrompt(_("Program"));
 
                S.Id(ID_Program);
-               mProgram = S.AddChoice(wxT(""), currentProgram, &choices);
+               mProgram = S.AddChoice( {}, currentProgram, &choices);
                mProgram->SetName(_("Program"));
                mProgram->SetSizeHints(-1, -1);
                wxSizer *s = mProgram->GetContainingSizer();
@@ -618,7 +604,7 @@ void VampEffect::PopulateOrExchange(ShuttleGui & S)
                    mParameters[p].maxValue == 1.0)
                {
                   S.Id(ID_Toggles + p);
-                  mToggles[p] = S.AddCheckBox(wxT(""),
+                  mToggles[p] = S.AddCheckBox( {},
                                               value > 0.5 ? wxT("true") : wxT("false"));
                   mToggles[p]->SetName(labelText);
                   if (!tip.IsEmpty())
@@ -651,7 +637,7 @@ void VampEffect::PopulateOrExchange(ShuttleGui & S)
                   }
 
                   S.Id(ID_Choices + p);
-                  mChoices[p] = S.AddChoice(wxT(""), selected, &choices);
+                  mChoices[p] = S.AddChoice( {}, selected, &choices);
                   mChoices[p]->SetName(labelText);
                   mChoices[p]->SetSizeHints(-1, -1);
                   if (!tip.IsEmpty())
@@ -672,13 +658,13 @@ void VampEffect::PopulateOrExchange(ShuttleGui & S)
                   vld.SetRange(mParameters[p].minValue, mParameters[p].maxValue);
 
                   float range = mParameters[p].maxValue - mParameters[p].minValue;
-                  int style = range < 10 ? NUM_VAL_THREE_TRAILING_ZEROES :
-                              range < 100 ? NUM_VAL_TWO_TRAILING_ZEROES :
-                              NUM_VAL_ONE_TRAILING_ZERO;
+                  auto style = range < 10 ? NumValidatorStyle::THREE_TRAILING_ZEROES :
+                              range < 100 ? NumValidatorStyle::TWO_TRAILING_ZEROES :
+                              NumValidatorStyle::ONE_TRAILING_ZERO;
                   vld.SetStyle(style);
 
                   S.Id(ID_Texts + p);
-                  mFields[p] = S.AddTextBox(wxT(""), wxT(""), 12);
+                  mFields[p] = S.AddTextBox( {}, wxT(""), 12);
                   mFields[p]->SetName(labelText);
                   mFields[p]->SetValidator(vld);
                   if (!tip.IsEmpty())
@@ -693,7 +679,7 @@ void VampEffect::PopulateOrExchange(ShuttleGui & S)
 
                   S.SetStyle(wxSL_HORIZONTAL);
                   S.Id(ID_Sliders + p);
-                  mSliders[p] = S.AddSlider(wxT(""), 0, 1000, 0);
+                  mSliders[p] = S.AddSlider( {}, 0, 1000, 0);
                   mSliders[p]->SetName(labelText);
                   mSliders[p]->SetSizeHints(150, -1);
                   if (!tip.IsEmpty())
@@ -767,7 +753,7 @@ void VampEffect::AddFeatures(LabelTrack *ltrack,
          }
       }
 
-      ltrack->AddLabel(SelectedRegion(ltime0, ltime1), label);
+      ltrack->AddLabel(SelectedRegion(ltime0, ltime1), label, -2);
    }
 }
 

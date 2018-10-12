@@ -22,7 +22,7 @@
 
 #include "SelectedRegion.h"
 
-#include "widgets/OverlayPanel.h"
+#include "CellularPanel.h"
 
 #include "SelectionState.h"
 
@@ -34,7 +34,6 @@ class SpectrumAnalyst;
 class Track;
 class TrackList;
 class TrackPanel;
-class TrackPanelCell;
 class TrackArtist;
 class Ruler;
 class SnapManager;
@@ -43,20 +42,13 @@ class LWSlider;
 class ControlToolBar; //Needed because state of controls can affect what gets drawn.
 class ToolsToolBar; //Needed because state of controls can affect what gets drawn.
 class MixerBoard;
-class AudacityProject;
 
 class TrackPanelAx;
 class TrackPanelCellIterator;
-struct TrackPanelMouseEvent;
-struct TrackPanelMouseState;
-
-class ViewInfo;
 
 class NoteTrack;
 class WaveTrack;
 class WaveClip;
-class UIHandle;
-using UIHandlePtr = std::shared_ptr<UIHandle>;
 
 // Declared elsewhere, to reduce compilation dependencies
 class TrackPanelListener;
@@ -65,20 +57,8 @@ struct TrackPanelDrawingContext;
 
 enum class UndoPush : unsigned char;
 
-// JKC Nov 2011: Disabled warning C4251 which is to do with DLL linkage
-// and only a worry when there are DLLs using the structures.
-// Array classes are private in TrackInfo, so we will not
-// access them directly from the DLL.
-// TrackClipArray in TrackPanel needs to be handled with care in the derived
-// class, but the C4251 warning is no worry in core Audacity.
-// wxWidgets doesn't cater to the exact details we need in
-// WX_DECLARE_EXPORTED_OBJARRAY to be able to use that for these two arrays.
-#ifdef _MSC_VER
-#pragma warning( push )
-#pragma warning( disable: 4251 )
-#endif
-
-DECLARE_EXPORTED_EVENT_TYPE(AUDACITY_DLL_API, EVT_TRACK_PANEL_TIMER, -1);
+wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API,
+                         EVT_TRACK_PANEL_TIMER, wxCommandEvent);
 
 enum {
    kTimerInterval = 50, // milliseconds
@@ -254,9 +234,9 @@ private:
 const int DragThreshold = 3;// Anything over 3 pixels is a drag, else a click.
 
 
-class AUDACITY_DLL_API TrackPanel final : public OverlayPanel {
- public:
+class AUDACITY_DLL_API TrackPanel final : public CellularPanel {
 
+ public:
    TrackPanel(wxWindow * parent,
               wxWindowID id,
               const wxPoint & pos,
@@ -275,16 +255,7 @@ class AUDACITY_DLL_API TrackPanel final : public OverlayPanel {
 
    void OnPaint(wxPaintEvent & event);
    void OnMouseEvent(wxMouseEvent & event);
-   void OnCaptureLost(wxMouseCaptureLostEvent & event);
-   void OnCaptureKey(wxCommandEvent & event);
    void OnKeyDown(wxKeyEvent & event);
-   void OnChar(wxKeyEvent & event);
-   void OnKeyUp(wxKeyEvent & event);
-
-   void OnSetFocus(wxFocusEvent & event);
-   void OnKillFocus(wxFocusEvent & event);
-
-   void OnContextMenu(wxContextMenuEvent & event);
 
    void OnPlayback(wxCommandEvent &);
    void OnTrackListResizing(wxCommandEvent & event);
@@ -314,29 +285,23 @@ class AUDACITY_DLL_API TrackPanel final : public OverlayPanel {
    // void SetSelectionFormat(int iformat)
    // void SetSnapTo(int snapto)
 
-   void HandleInterruptedDrag();
-   void Uncapture( wxMouseState *pState = nullptr );
-   bool CancelDragging();
-   bool HandleEscapeKey(bool down);
-   void UpdateMouseState(const wxMouseState &state);
-   void HandleModifierKey();
    void HandlePageUpKey();
    void HandlePageDownKey();
-   AudacityProject * GetProject() const;
+   AudacityProject * GetProject() const override;
 
    void ScrollIntoView(double pos);
    void ScrollIntoView(int x);
 
    void OnTrackMenu(Track *t = NULL);
    Track * GetFirstSelectedTrack();
-   bool IsMouseCaptured();
 
    void EnsureVisible(Track * t);
+   void VerticalScroll( float fracPosition);
 
+   TrackPanelCell *GetFocusedCell() override;
+   void SetFocusedCell() override;
    Track *GetFocusedTrack();
    void SetFocusedTrack(Track *t);
-
-   void HandleCursorForPresentMouseState(bool doHit = true);
 
    void UpdateVRulers();
    void UpdateVRuler(Track *t);
@@ -349,7 +314,6 @@ class AUDACITY_DLL_API TrackPanel final : public OverlayPanel {
 
  protected:
    bool IsAudioActive();
-   void HandleClick( const TrackPanelMouseEvent &tpmEvent );
 
 public:
    size_t GetTrackCount() const;
@@ -362,40 +326,31 @@ public:
    void UpdateAccessibility();
    void MessageForScreenReader(const wxString& message);
 
-   // MM: Handle mouse wheel rotation
-   void HandleWheelRotation( TrackPanelMouseEvent &tpmEvent );
-
    void MakeParentRedrawScrollbars();
-
-protected:
-   void MakeParentModifyState(bool bWantsAutoSave);    // if true, writes auto-save file. Should set only if you really want the state change restored after
-                                                               // a crash, as it can take many seconds for large (eg. 10 track-hours) projects
-
-   // Find track info by coordinate
-   struct FoundCell {
-      std::shared_ptr<Track> pTrack;
-      std::shared_ptr<TrackPanelCell> pCell;
-      wxRect rect;
-   };
-   FoundCell FindCell(int mouseX, int mouseY);
-
-   void HandleMotion( wxMouseState &state, bool doHit = true );
-   void HandleMotion
-      ( const TrackPanelMouseState &tpmState, bool doHit = true );
 
    // If label, rectangle includes track control panel only.
    // If !label, rectangle includes all of that, and the vertical ruler, and
    // the proper track area.
    wxRect FindTrackRect( const Track * target, bool label );
 
+protected:
+   void MakeParentModifyState(bool bWantsAutoSave);    // if true, writes auto-save file. Should set only if you really want the state change restored after
+                                                               // a crash, as it can take many seconds for large (eg. 10 track-hours) projects
+
+   // Find track info by coordinate
+   FoundCell FindCell(int mouseX, int mouseY) override;
+
+   // Find rectangle of the given cell
+   wxRect FindRect(const TrackPanelCell &cell) override;
+
    int GetVRulerWidth() const;
    int GetVRulerOffset() const { return mTrackInfo.GetTrackInfoWidth(); }
 
+public:
    int GetLabelWidth() const { return mTrackInfo.GetTrackInfoWidth() + GetVRulerWidth(); }
 
 // JKC Nov-2011: These four functions only used from within a dll such as mod-track-panel
 // They work around some messy problems with constructors.
-public:
    const TrackList * GetTracks() const { return mTracks.get(); }
    TrackList * GetTracks() { return mTracks.get(); }
    ViewInfo * GetViewInfo(){ return mViewInfo;}
@@ -418,16 +373,20 @@ protected:
    void DrawEverythingElse(TrackPanelDrawingContext &context,
                            const wxRegion & region,
                            const wxRect & clip);
-   void DrawOutside
-      (TrackPanelDrawingContext &context,
-       Track *t, const wxRect & rec);
+   void DrawOutside(
+      TrackPanelDrawingContext &context,
+      const Track *leaderTrack, const wxRect & teamRect);
 
    void HighlightFocusedTrack (wxDC* dc, const wxRect &rect);
-   void DrawShadow            (Track *t, wxDC* dc, const wxRect & rect);
-   void DrawBordersAroundTrack(Track *t, wxDC* dc, const wxRect & rect, const int labelw, const int vrul);
-   void DrawOutsideOfTrack
-      (TrackPanelDrawingContext &context,
-       Track *t, const wxRect & rect);
+   void DrawShadow            (const Track *t, wxDC* dc, const wxRect & rect);
+   void DrawBordersAroundTrack(wxDC* dc, const wxRect & rect,
+                                       const int vrul);
+   void DrawBordersAroundSash (const Track *t, wxDC* dc, const wxRect & rect,
+                                       const int labelw);
+   void DrawOutsideOfTrack    (
+      TrackPanelDrawingContext &context,
+      const Track *t, const wxRect & rect);
+   void DrawSash              (const Track *t, wxDC* dc, const wxRect & rect);
 
 public:
    // Set the object that performs catch-all event handling when the pointer
@@ -435,10 +394,6 @@ public:
    void SetBackgroundCell
       (const std::shared_ptr< TrackPanelCell > &pCell);
    std::shared_ptr< TrackPanelCell > GetBackgroundCell();
-
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-   void UpdateVirtualStereoOrder();
-#endif
 
 public:
    // Accessors...
@@ -463,7 +418,6 @@ protected:
    TrackPanelListener *mListener;
 
    std::shared_ptr<TrackList> mTracks;
-   ViewInfo *mViewInfo;
 
    AdornedRulerPanel *mRuler;
 
@@ -497,11 +451,6 @@ protected:
 
    bool mRedrawAfterStop;
 
-   wxMouseState mLastMouseState;
-
-   int mMouseMostRecentX;
-   int mMouseMostRecentY;
-
    friend class TrackPanelAx;
 
 #if wxUSE_ACCESSIBILITY
@@ -526,44 +475,32 @@ protected:
    wxSize vrulerSize;
 
  protected:
-   std::weak_ptr<TrackPanelCell> mLastCell;
-   std::vector<UIHandlePtr> mTargets;
-   size_t mTarget {};
-   unsigned mMouseOverUpdateFlags{};
-
- public:
-   UIHandlePtr Target()
-   {
-      if (mTargets.size())
-         return mTargets[mTarget];
-      else
-         return {};
-   }
-
- protected:
-   void ClearTargets()
-   {
-      // Forget the rotation of hit test candidates when the mouse moves from
-      // cell to cell or outside of the TrackPanel entirely.
-      mLastCell.reset();
-      mTargets.clear();
-      mTarget = 0;
-      mMouseOverUpdateFlags = 0;
-   }
-
-   bool HasRotation();
-   bool HasEscape();
-
-   bool ChangeTarget(bool forward, bool cycle);
-
-   std::weak_ptr<Track> mpClickedTrack;
-   UIHandlePtr mUIHandle;
 
    std::shared_ptr<TrackPanelCell> mpBackground;
 
-   bool mEnableTab{};
-
    DECLARE_EVENT_TABLE()
+
+   void ProcessUIHandleResult
+      (TrackPanelCell *pClickedTrack, TrackPanelCell *pLatestCell,
+       unsigned refreshResult) override;
+
+   void UpdateStatusMessage( const wxString &status ) override;
+
+   bool TakesFocus() const override;
+   
+   // friending GetInfoCommand allow automation to get sizes of the
+   // tracks, track control panel and such.
+   friend class GetInfoCommand;
+};
+
+// A predicate class
+struct IsVisibleTrack
+{
+   IsVisibleTrack(AudacityProject *project);
+
+   bool operator () (const Track *pTrack) const;
+
+   wxRect mPanelRect;
 };
 
 // See big pictorial comment in TrackPanel for explanation of these numbers
@@ -593,10 +530,6 @@ enum : int {
    kMidiCellWidth = (kTrackInfoWidth / 4) - 2,
    kMidiCellHeight = kTrackInfoBtnSize
 };
-#endif
-
-#ifdef _MSC_VER
-#pragma warning( pop )
 #endif
 
 #endif

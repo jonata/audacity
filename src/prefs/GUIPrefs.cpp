@@ -34,10 +34,11 @@
 
 #include "ThemePrefs.h"
 #include "../AColor.h"
+#include "../Internat.h"
 
-GUIPrefs::GUIPrefs(wxWindow * parent)
+GUIPrefs::GUIPrefs(wxWindow * parent, wxWindowID winid)
 /* i18n-hint: refers to Audacity's user interface settings */
-:  PrefsPanel(parent, _("Interface"))
+:  PrefsPanel(parent, winid, _("Interface"))
 {
    Populate();
 }
@@ -124,6 +125,7 @@ void GUIPrefs::Populate()
 void GUIPrefs::PopulateOrExchange(ShuttleGui & S)
 {
    S.SetBorder(2);
+   S.StartScroller();
 
    S.StartStatic(_("Display"));
    {
@@ -142,28 +144,24 @@ void GUIPrefs::PopulateOrExchange(ShuttleGui & S)
                      wxT(""),
                      mLangNames,
                      mLangCodes);
-         S.SetSizeHints(mLangNames);
 
          S.TieChoice(_("Location of &Manual:"),
                      wxT("/GUI/Help"),
                      wxT("Local"),
                      mHtmlHelpChoices,
                      mHtmlHelpCodes);
-         S.SetSizeHints(mHtmlHelpChoices);
 
          S.TieChoice(_("Th&eme:"),
                      wxT("/GUI/Theme"),
                      defaultTheme,
                      mThemeChoices,
                      mThemeCodes);
-         S.SetSizeHints(mThemeChoices);
 
          S.TieChoice(_("Meter dB &range:"),
                      ENV_DB_KEY,
                      defaultRange,
                      mRangeChoices,
                      mRangeCodes);
-         S.SetSizeHints(mRangeChoices);
       }
       S.EndMultiColumn();
 //      S.AddSpace(10);
@@ -176,12 +174,13 @@ void GUIPrefs::PopulateOrExchange(ShuttleGui & S)
    }
    S.EndStatic();
 
-   S.StartStatic(_("Show"));
+   S.StartStatic(_("Options"));
    {
-      S.TieCheckBox(_("'How to Get &Help' at launch"),
+      // Start wording of options with a verb, if possible.
+      S.TieCheckBox(_("Show 'How to Get &Help' at launch"),
                     wxT("/GUI/ShowSplashScreen"),
                     true);
-      S.TieCheckBox(_("E&xtra menus"),
+      S.TieCheckBox(_("Show e&xtra menus"),
                     wxT("/GUI/ShowExtraMenus"),
                     false);
 #ifdef EXPERIMENTAL_THEME_PREFS
@@ -191,11 +190,6 @@ void GUIPrefs::PopulateOrExchange(ShuttleGui & S)
                     wxT("/GUI/ShowMac"),
                     false);
 #endif
-   }
-   S.EndStatic();
-
-   S.StartStatic(_("Behaviors"));
-   {
       S.TieCheckBox(_("&Beep on completion of longer activities"),
                     wxT("/GUI/BeepOnCompletion"),
                     false);
@@ -205,13 +199,16 @@ void GUIPrefs::PopulateOrExchange(ShuttleGui & S)
       S.TieCheckBox(_("B&lend system and Audacity theme"),
                     wxT("/GUI/BlendThemes"),
                     true);
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-      S.TieCheckBox(_("&Display a mono channel as virtual stereo"),
-                    wxT("/GUI/MonoAsVirtualStereo"),
-                    false);
+#ifndef __WXMAC__
+      /* i18n-hint: RTL stands for 'Right to Left'  */
+      S.TieCheckBox(_("Use mostly Left-to-Right layouts in RTL languages"),
+         "/GUI/RtlWorkaround",
+         true);
 #endif
    }
    S.EndStatic();
+
+   S.EndScroller();
 }
 
 bool GUIPrefs::Commit()
@@ -237,8 +234,8 @@ wxString GUIPrefs::HelpPageName()
    return "Interface_Preferences";
 }
 
-PrefsPanel *GUIPrefsFactory::Create(wxWindow *parent)
+PrefsPanel *GUIPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
-   return safenew GUIPrefs(parent);
+   return safenew GUIPrefs(parent, winid);
 }

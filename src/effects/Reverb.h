@@ -22,7 +22,7 @@
 
 class ShuttleGui;
 
-#define REVERB_PLUGIN_SYMBOL XO("Reverb")
+#define REVERB_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Reverb") }
 
 struct Reverb_priv_t;
 
@@ -48,11 +48,11 @@ public:
 
    // IdentInterface implementation
 
-   wxString GetSymbol() override;
+   IdentInterfaceSymbol GetSymbol() override;
    wxString GetDescription() override;
    wxString ManualPage() override;
 
-   // EffectIdentInterface implementation
+   // EffectDefinitionInterface implementation
 
    EffectType GetType() override;
 
@@ -63,15 +63,16 @@ public:
    bool ProcessInitialize(sampleCount totalLen, ChannelNames chanMap = NULL) override;
    bool ProcessFinalize() override;
    size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
-   bool GetAutomationParameters(EffectAutomationParameters & parms) override;
-   bool SetAutomationParameters(EffectAutomationParameters & parms) override;
+   bool DefineParams( ShuttleParams & S ) override;
+   bool GetAutomationParameters(CommandParameters & parms) override;
+   bool SetAutomationParameters(CommandParameters & parms) override;
    wxArrayString GetFactoryPresets() override;
    bool LoadFactoryPreset(int id) override;
 
    // Effect implementation
 
-   bool Startup();
-   void PopulateOrExchange(ShuttleGui & S);
+   bool Startup() override;
+   void PopulateOrExchange(ShuttleGui & S) override;
    bool TransferDataToWindow() override;
    bool TransferDataFromWindow() override;
 

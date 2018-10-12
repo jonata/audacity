@@ -15,7 +15,6 @@
 #include <vector>
 #include <wx/defs.h>
 #include <wx/dialog.h>
-#include <wx/dynarray.h>
 #include <wx/panel.h>
 #include <wx/hashmap.h>
 #include <wx/timer.h>
@@ -23,6 +22,8 @@
 
 #include "ImageRoll.h"
 #include "wxPanelWrapper.h"
+
+#include <unordered_map>
 
 class wxDragImage;
 
@@ -36,9 +37,7 @@ class ToolBarGrabber;
 
 class ToolBarArrangement;
 
-WX_DECLARE_VOIDPTR_HASH_MAP(int, WindowHash);
-WX_DEFINE_ARRAY(ExpandingToolBar *, ExpandingToolBarArray);
-WX_DECLARE_OBJARRAY(wxRect, wxArrayRect);
+using WindowHash = std::unordered_map<void*, int>;
 
 class ExpandingToolBarEvtHandler;
 
@@ -116,7 +115,7 @@ class ExpandingToolBar final : public wxPanelWrapper
    ImageRollPanel *mTargetPanel;
    std::unique_ptr<wxDragImage> mDragImage;
    wxWindow *mTopLevelParent;
-   wxArrayRect mDropTargets;
+   std::vector<wxRect> mDropTargets;
    wxRect mDropTarget;
 
    static int msNoAutoExpandStack;
@@ -124,7 +123,7 @@ class ExpandingToolBar final : public wxPanelWrapper
    DECLARE_EVENT_TABLE()
 
    friend class ExpandingToolBarEvtHandler;
-   std::vector< movable_ptr< ExpandingToolBarEvtHandler > > mHandlers;
+   std::vector< std::unique_ptr< ExpandingToolBarEvtHandler > > mHandlers;
 };
 
 class ToolBarGrabber final : public wxPanelWrapper
@@ -225,7 +224,7 @@ class ToolBarArea final : public wxPanelWrapper
    std::unique_ptr<ToolBarArrangement> SaveArrangement();
    void RestoreArrangement(std::unique_ptr<ToolBarArrangement>&& arrangement);
 
-   wxArrayRect GetDropTargets();
+   std::vector<wxRect> GetDropTargets();
    void MoveChild(ExpandingToolBar *child, wxRect dropTarget);
 
    void SetCapturedChild(ExpandingToolBar *child);
@@ -237,8 +236,8 @@ class ToolBarArea final : public wxPanelWrapper
    void AdjustLayout();
    void Fit(bool horizontal, bool vertical);
 
-   ExpandingToolBarArray    mChildArray;
-   wxArrayInt               mRowArray;
+   std::vector<ExpandingToolBar*> mChildArray;
+   std::vector<int>         mRowArray;
    wxSize                   mLastLayoutSize;
    bool                     mInOnSize;
 
@@ -248,9 +247,9 @@ class ToolBarArea final : public wxPanelWrapper
    wxSize                   mMaxSize;
    wxSize                   mActualSize;
 
-   wxArrayRect              mDropTargets;
-   wxArrayInt               mDropTargetIndices;
-   wxArrayInt               mDropTargetRows;
+   std::vector<wxRect>      mDropTargets;
+   std::vector<int>         mDropTargetIndices;
+   std::vector<int>         mDropTargetRows;
 
    DECLARE_EVENT_TABLE()
 };

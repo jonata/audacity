@@ -21,7 +21,7 @@
 
 class ShuttleGui;
 
-#define NOISE_PLUGIN_SYMBOL XO("Noise")
+#define NOISE_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Noise") }
 
 class EffectNoise final : public Effect
 {
@@ -31,11 +31,11 @@ public:
 
    // IdentInterface implementation
 
-   wxString GetSymbol() override;
+   IdentInterfaceSymbol GetSymbol() override;
    wxString GetDescription() override;
    wxString ManualPage() override;
 
-   // EffectIdentInterface implementation
+   // EffectDefinitionInterface implementation
 
    EffectType GetType() override;
 
@@ -43,8 +43,9 @@ public:
 
    unsigned GetAudioOutCount() override;
    size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
-   bool GetAutomationParameters(EffectAutomationParameters & parms) override;
-   bool SetAutomationParameters(EffectAutomationParameters & parms) override;
+   bool DefineParams( ShuttleParams & S ) override;
+   bool GetAutomationParameters(CommandParameters & parms) override;
+   bool SetAutomationParameters(CommandParameters & parms) override;
 
    // Effect implementation
 

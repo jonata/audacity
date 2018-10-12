@@ -21,7 +21,6 @@ the pitch without changing the tempo.
 #include "ChangePitch.h"
 
 #if USE_SBSMS
-#include "sbsms.h"
 #include <wx/valgen.h>
 #endif
 
@@ -37,6 +36,20 @@ the pitch without changing the tempo.
 #include "../WaveTrack.h"
 #include "../widgets/valnum.h"
 #include "TimeWarper.h"
+
+// Soundtouch defines these as well, which are also in generated configmac.h
+// and configunix.h, so get rid of them before including,
+// to avoid compiler warnings, and be sure to do this
+// after all other #includes, to avoid any mischief that might result
+// from doing the un-definitions before seeing any wx headers.
+#undef PACKAGE_NAME
+#undef PACKAGE_STRING
+#undef PACKAGE_TARNAME
+#undef PACKAGE_VERSION
+#undef PACKAGE_BUGREPORT
+#undef PACKAGE
+#undef VERSION
+#include "SoundTouch.h"
 
 enum {
    ID_PercentChange = 10000,
@@ -116,14 +129,14 @@ EffectChangePitch::~EffectChangePitch()
 
 // IdentInterface implementation
 
-wxString EffectChangePitch::GetSymbol()
+IdentInterfaceSymbol EffectChangePitch::GetSymbol()
 {
    return CHANGEPITCH_PLUGIN_SYMBOL;
 }
 
 wxString EffectChangePitch::GetDescription()
 {
-   return XO("Change the pitch of a track without changing its tempo");
+   return _("Changes the pitch of a track without changing its tempo");
 }
 
 wxString EffectChangePitch::ManualPage()
@@ -131,7 +144,7 @@ wxString EffectChangePitch::ManualPage()
    return wxT("Change_Pitch");
 }
 
-// EffectIdentInterface implementation
+// EffectDefinitionInterface implementation
 
 EffectType EffectChangePitch::GetType()
 {
@@ -139,8 +152,13 @@ EffectType EffectChangePitch::GetType()
 }
 
 // EffectClientInterface implementation
+bool EffectChangePitch::DefineParams( ShuttleParams & S ){
+   S.SHUTTLE_PARAM( m_dPercentChange, Percentage );
+   S.SHUTTLE_PARAM( mUseSBSMS, UseSBSMS );
+   return true;
+}
 
-bool EffectChangePitch::GetAutomationParameters(EffectAutomationParameters & parms)
+bool EffectChangePitch::GetAutomationParameters(CommandParameters & parms)
 {
    parms.Write(KEY_Percentage, m_dPercentChange);
    parms.Write(KEY_UseSBSMS, mUseSBSMS);
@@ -148,7 +166,7 @@ bool EffectChangePitch::GetAutomationParameters(EffectAutomationParameters & par
    return true;
 }
 
-bool EffectChangePitch::SetAutomationParameters(EffectAutomationParameters & parms)
+bool EffectChangePitch::SetAutomationParameters(CommandParameters & parms)
 {
    // Vaughan, 2013-06: Long lost to history, I don't see why m_dPercentChange was chosen to be shuttled.
    // Only m_dSemitonesChange is used in Process().
@@ -188,17 +206,16 @@ bool EffectChangePitch::Process()
    if (mUseSBSMS)
    {
       double pitchRatio = 1.0 + m_dPercentChange / 100.0;
-      SelectedRegion region(mT0, mT1);
       EffectSBSMS proxy;
       proxy.mProxyEffectName = XO("High Quality Pitch Change");
       proxy.setParameters(1.0, pitchRatio);
 
-      return Delegate(proxy, mUIParent, &region, false);
+      return Delegate(proxy, mUIParent, false);
    }
    else
 #endif
    {
-      mSoundTouch = std::make_unique<SoundTouch>();
+      mSoundTouch = std::make_unique<soundtouch::SoundTouch>();
       IdentityTimeWarper warper;
       mSoundTouch->setPitchSemiTones((float)(m_dSemitonesChange));
 #ifdef USE_MIDI
@@ -228,18 +245,8 @@ void EffectChangePitch::PopulateOrExchange(ShuttleGui & S)
    DeduceFrequencies(); // Set frequency-related control values based on sample.
 
    wxArrayString pitch;
-   pitch.Add(wxT("C"));
-   pitch.Add(wxT("C#/Db"));
-   pitch.Add(wxT("D"));
-   pitch.Add(wxT("D#/Eb"));
-   pitch.Add(wxT("E"));
-   pitch.Add(wxT("F"));
-   pitch.Add(wxT("F#/Gb"));
-   pitch.Add(wxT("G"));
-   pitch.Add(wxT("G#/Ab"));
-   pitch.Add(wxT("A"));
-   pitch.Add(wxT("A#/Bb"));
-   pitch.Add(wxT("B"));
+   for (int ii = 0; ii < 12; ++ii)
+      pitch.Add( PitchName( ii, PitchNameChoice::Both ) );
 
    S.SetBorder(5);
 
@@ -250,7 +257,7 @@ void EffectChangePitch::PopulateOrExchange(ShuttleGui & S)
          S.AddTitle(_("Change Pitch without Changing Tempo"));
          S.AddTitle(
             wxString::Format(_("Estimated Start Pitch: %s%d (%.3f Hz)"),
-                              pitch[m_nFromPitch].c_str(), m_nFromOctave, m_FromFrequency));
+                              pitch[m_nFromPitch], m_nFromOctave, m_FromFrequency));
       }
       S.EndVerticalLay();
 
@@ -263,7 +270,7 @@ void EffectChangePitch::PopulateOrExchange(ShuttleGui & S)
             m_pChoice_FromPitch->SetName(_("from"));
             m_pChoice_FromPitch->SetSizeHints(80, -1);
 
-            m_pSpin_FromOctave = S.Id(ID_FromOctave).AddSpinCtrl(wxT(""), m_nFromOctave, INT_MAX, INT_MIN);
+            m_pSpin_FromOctave = S.Id(ID_FromOctave).AddSpinCtrl( {}, m_nFromOctave, INT_MAX, INT_MIN);
             m_pSpin_FromOctave->SetName(_("from Octave"));
             m_pSpin_FromOctave->SetSizeHints(50, -1);
 
@@ -272,7 +279,7 @@ void EffectChangePitch::PopulateOrExchange(ShuttleGui & S)
             m_pChoice_ToPitch->SetSizeHints(80, -1);
 
             m_pSpin_ToOctave =
-               S.Id(ID_ToOctave).AddSpinCtrl(wxT(""), m_nToOctave, INT_MAX, INT_MIN);
+               S.Id(ID_ToOctave).AddSpinCtrl( {}, m_nToOctave, INT_MAX, INT_MIN);
             m_pSpin_ToOctave->SetName(_("to Octave"));
             m_pSpin_ToOctave->SetSizeHints(50, -1);
          }
@@ -280,7 +287,7 @@ void EffectChangePitch::PopulateOrExchange(ShuttleGui & S)
 
          S.StartHorizontalLay(wxALIGN_CENTER);
          {
-            FloatingPointValidator<double> vldSemitones(2, &m_dSemitonesChange, NUM_VAL_TWO_TRAILING_ZEROES);
+            FloatingPointValidator<double> vldSemitones(2, &m_dSemitonesChange, NumValidatorStyle::TWO_TRAILING_ZEROES);
             m_pTextCtrl_SemitonesChange =
                S.Id(ID_SemitonesChange).AddTextBox(_("Semitones (half-steps):"), wxT(""), 12);
             m_pTextCtrl_SemitonesChange->SetName(_("Semitones (half-steps)"));
@@ -294,13 +301,13 @@ void EffectChangePitch::PopulateOrExchange(ShuttleGui & S)
       {
          S.StartMultiColumn(5, wxALIGN_CENTER); // 5, because AddTextBox adds a wxStaticText and a wxTextCtrl.
          {
-            FloatingPointValidator<double> vldFromFrequency(3, &m_FromFrequency, NUM_VAL_THREE_TRAILING_ZEROES);
+            FloatingPointValidator<double> vldFromFrequency(3, &m_FromFrequency, NumValidatorStyle::THREE_TRAILING_ZEROES);
             vldFromFrequency.SetMin(0.0);
             m_pTextCtrl_FromFrequency = S.Id(ID_FromFrequency).AddTextBox(_("from"), wxT(""), 12);
             m_pTextCtrl_FromFrequency->SetName(_("from (Hz)"));
             m_pTextCtrl_FromFrequency->SetValidator(vldFromFrequency);
 
-            FloatingPointValidator<double> vldToFrequency(3, &m_ToFrequency, NUM_VAL_THREE_TRAILING_ZEROES);
+            FloatingPointValidator<double> vldToFrequency(3, &m_ToFrequency, NumValidatorStyle::THREE_TRAILING_ZEROES);
             vldToFrequency.SetMin(0.0);
             m_pTextCtrl_ToFrequency = S.Id(ID_ToFrequency).AddTextBox(_("to"), wxT(""), 12);
             m_pTextCtrl_ToFrequency->SetName(_("to (Hz)"));
@@ -312,7 +319,7 @@ void EffectChangePitch::PopulateOrExchange(ShuttleGui & S)
 
          S.StartHorizontalLay(wxALIGN_CENTER);
          {
-            FloatingPointValidator<double> vldPercentage(3, &m_dPercentChange, NUM_VAL_THREE_TRAILING_ZEROES);
+            FloatingPointValidator<double> vldPercentage(3, &m_dPercentChange, NumValidatorStyle::THREE_TRAILING_ZEROES);
             vldPercentage.SetRange(MIN_Percentage, MAX_Percentage);
             m_pTextCtrl_PercentChange = S.Id(ID_PercentChange).AddTextBox(_("Percent Change:"), wxT(""), 12);
             m_pTextCtrl_PercentChange->SetValidator(vldPercentage);
@@ -323,7 +330,7 @@ void EffectChangePitch::PopulateOrExchange(ShuttleGui & S)
          {
             S.SetStyle(wxSL_HORIZONTAL);
             m_pSlider_PercentChange = S.Id(ID_PercentChange)
-               .AddSlider(wxT(""), 0, (int)kSliderMax, (int)MIN_Percentage);
+               .AddSlider( {}, 0, (int)kSliderMax, (int)MIN_Percentage);
             m_pSlider_PercentChange->SetName(_("Percent Change"));
          }
          S.EndHorizontalLay();
@@ -402,8 +409,7 @@ void EffectChangePitch::DeduceFrequencies()
 {
    // As a neat trick, attempt to get the frequency of the note at the
    // beginning of the selection.
-   SelectedTrackListOfKindIterator iter(Track::Wave, inputTracks());
-   WaveTrack *track = (WaveTrack *) iter.First();
+   auto track = *( inputTracks()->Selected< const WaveTrack >() ).first;
    if (track) {
       double rate = track->GetRate();
 

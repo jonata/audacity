@@ -72,7 +72,7 @@ struct UndoState {
    SelectedRegion selectedRegion; // by value
 };
 
-using UndoStack = std::vector <movable_ptr<UndoStackElem>>;
+using UndoStack = std::vector <std::unique_ptr<UndoStackElem>>;
 
 using SpaceArray = std::vector <unsigned long long> ;
 
@@ -94,6 +94,9 @@ class AUDACITY_DLL_API UndoManager {
  public:
    UndoManager();
    ~UndoManager();
+
+   UndoManager( const UndoManager& ) = delete;
+   UndoManager& operator = ( const UndoManager& ) = delete;
 
    void PushState(const TrackList * l,
                   const SelectedRegion &selectedRegion,

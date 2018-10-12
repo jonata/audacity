@@ -17,7 +17,6 @@
 #include <wx/choice.h>
 #include <wx/string.h>
 #include <wx/window.h>
-#include <wx/dynarray.h>
 
 #include "PrefsPanel.h"
 
@@ -26,14 +25,14 @@ class ShuttleGui;
 class DevicePrefs final : public PrefsPanel
 {
  public:
-   DevicePrefs(wxWindow * parent);
+   DevicePrefs(wxWindow * parent, wxWindowID winid);
    virtual ~DevicePrefs();
    bool Commit() override;
    wxString HelpPageName() override;
+   void PopulateOrExchange(ShuttleGui & S) override;
 
  private:
    void Populate();
-   void PopulateOrExchange(ShuttleGui & S);
    void GetNamesAndLabels();
 
    void OnHost(wxCommandEvent & e);
@@ -58,7 +57,7 @@ class DevicePrefs final : public PrefsPanel
 class DevicePrefsFactory final : public PrefsPanelFactory
 {
 public:
-   PrefsPanel *Create(wxWindow *parent) override;
+   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
 };
 
 #endif

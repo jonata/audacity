@@ -32,7 +32,6 @@
 #include <wx/string.h>
 #include <wx/timer.h>
 #include <wx/dynlib.h> //<! For windows.h
-#include <wx/msgdlg.h>
 
 #include "ShuttleGui.h"
 #include "Project.h"
@@ -40,6 +39,12 @@
 #include "Prefs.h"
 #include "widgets/NumericTextCtrl.h"
 #include "widgets/HelpSystem.h"
+#include "widgets/ErrorDialog.h"
+#include "commands/CommandContext.h"
+
+#if wxUSE_ACCESSIBILITY
+#include "widgets/WindowAccessible.h"
+#endif
 
 #define TIMER_ID 7000
 
@@ -74,6 +79,11 @@ enum {
    POST_TIMER_RECORD_SHUTDOWN
 };
 
+// The slow timer interval is used to update the start and end times, which only show
+// time to the nearest second.  So we only need an update once a second.
+const int kSlowTimerInterval = 1000; // ms
+
+// This timer interval is used in some busy-wait loops and is much shorter.
 const int kTimerInterval = 50; // ms
 
 static double wxDateTime_to_AudacityTime(wxDateTime& dateTime)
@@ -92,10 +102,10 @@ static double wxDateTime_to_AudacityTime(wxDateTime& dateTime)
 
 #if wxUSE_ACCESSIBILITY
 
-class DatePickerCtrlAx final : public wxWindowAccessible
+class DatePickerCtrlAx final : public WindowAccessible
 {
 public:
-   DatePickerCtrlAx(wxDatePickerCtrl * ctrl) : wxWindowAccessible(ctrl), mCtrl(ctrl) {};
+   DatePickerCtrlAx(wxDatePickerCtrl * ctrl) : WindowAccessible(ctrl), mCtrl(ctrl) {};
 
    virtual ~ DatePickerCtrlAx() {};
 
@@ -172,7 +182,7 @@ TimerRecordDialog::TimerRecordDialog(wxWindow* parent, bool bAlreadySaved)
    m_pTimeTextCtrl_Duration->SetFieldFocus(3);
 
    m_timer.SetOwner(this, TIMER_ID);
-   m_timer.Start(kTimerInterval);
+   m_timer.Start(kSlowTimerInterval);
 
    // Do we need to tidy up when the timer recording has been completed?
    m_bProjectCleanupRequired = !(this->HaveFilesToRecover());
@@ -309,7 +319,7 @@ void TimerRecordDialog::OnAutoSavePathButton_Click(wxCommandEvent& WXUNUSED(even
    // If project already exists then abort - we do not allow users to overwrite an existing project
    // unless it is the current project.
    if (wxFileExists(fName) && (pProject->GetFileName() != fName)) {
-      wxMessageDialog m(
+      AudacityMessageDialog m(
          NULL,
          _("The selected file name could not be used\nfor Timer Recording because it \
 would overwrite another project.\nPlease try again and select an original name."),
@@ -364,7 +374,7 @@ void TimerRecordDialog::OnOK(wxCommandEvent& WXUNUSED(event))
    this->TransferDataFromWindow();
    if (!m_TimeSpan_Duration.IsPositive())
    {
-      wxMessageBox(_("Duration is zero. Nothing will be recorded."),
+      AudacityMessageBox(_("Duration is zero. Nothing will be recorded."),
                      _("Error in Duration"), wxICON_EXCLAMATION | wxOK);
       return;
    }
@@ -373,14 +383,14 @@ void TimerRecordDialog::OnOK(wxCommandEvent& WXUNUSED(event))
    wxString sTemp = m_fnAutoSaveFile.GetFullPath();
    if (m_pTimerAutoSaveCheckBoxCtrl->IsChecked()) {
       if (!m_fnAutoSaveFile.IsOk() || m_fnAutoSaveFile.IsDir()) {
-         wxMessageBox(_("Automatic Save path is invalid."),
+         AudacityMessageBox(_("Automatic Save path is invalid."),
             _("Error in Automatic Save"), wxICON_EXCLAMATION | wxOK);
          return;
       }
    }
    if (m_pTimerAutoExportCheckBoxCtrl->IsChecked()) {
       if (!m_fnAutoExportFile.IsOk() || m_fnAutoExportFile.IsDir()) {
-         wxMessageBox(_("Automatic Export path is invalid."),
+         AudacityMessageBox(_("Automatic Export path is invalid."),
             _("Error in Automatic Export"), wxICON_EXCLAMATION | wxOK);
          return;
       }
@@ -416,7 +426,7 @@ void TimerRecordDialog::OnOK(wxCommandEvent& WXUNUSED(event))
          sPlannedTime,
          sRemainingTime);
 
-      wxMessageDialog dlgMessage(NULL,
+      AudacityMessageDialog dlgMessage(NULL,
          sMessage,
          _("Timer Recording Disk Space Warning"),
          wxYES_NO | wxNO_DEFAULT | wxICON_WARNING);
@@ -469,7 +479,7 @@ bool TimerRecordDialog::HaveFilesToRecover()
 {
    wxDir dir(FileNames::AutoSaveDir());
    if (!dir.IsOpened()) {
-      wxMessageBox(_("Could not enumerate files in auto save directory."),
+      AudacityMessageBox(_("Could not enumerate files in auto save directory."),
          _("Error"), wxICON_STOP);
       return false;
    }
@@ -492,7 +502,7 @@ bool TimerRecordDialog::RemoveAllAutoSaveFiles()
       {
          // I don't think this error message is actually useful.
          // -dmazzoni
-         //wxMessageBox(_("Could not remove auto save file: " + files[i]),
+         //AudacityMessageBox(_("Could not remove auto save file: " + files[i]),
          //             _("Error"), wxICON_STOP);
          return false;
       }
@@ -517,35 +527,41 @@ int TimerRecordDialog::RunWaitDialog()
       return POST_TIMER_RECORD_CANCEL_WAIT;
    } else {
       // Record for specified time.
-      pProject->OnRecord();
+      GetMenuCommandHandler(*pProject).OnRecord(*pProject);
       bool bIsRecording = true;
 
       wxString sPostAction = m_pTimerAfterCompleteChoiceCtrl->GetString(m_pTimerAfterCompleteChoiceCtrl->GetSelection());
 
-      // Two column layout. Line spacing must match for both columns.
-      // First column
-      wxString strMsg = wxString::Format(_("Recording start:\n") +
-                                         _("Duration:\n") +
-                                         _("Recording end:\n\n") +
-                                         _("Automatic Save enabled:\n") +
-                                         _("Automatic Export enabled:\n") +
-                                         _("Action after Timer Recording:"));
+      // Two column layout.
+      TimerProgressDialog::MessageTable columns(2);
+      auto &column1 = columns[0];
+      auto &column2 = columns[1];
 
-      strMsg += ProgressDialog::ColoumnSplitMarker;
+      column1.push_back( _("Recording start:") );
+      column2.push_back( GetDisplayDate(m_DateTime_Start) );
 
-      // Second column
-      strMsg += wxString::Format(wxT("%s\n%s\n%s\n\n%s\n%s\n%s"),
-                                       GetDisplayDate(m_DateTime_Start).c_str(),
-                                       m_TimeSpan_Duration.Format(),
-                                       GetDisplayDate(m_DateTime_End).c_str(),
-                                       (m_bAutoSaveEnabled ? _("Yes") : _("No")),
-                                       (m_bAutoExportEnabled ? _("Yes") : _("No")),
-                                       sPostAction);
+      column1.push_back( _("Duration:") );
+      column2.push_back( m_TimeSpan_Duration.Format() );
+
+      column1.push_back( _("Recording end:") );
+      column2.push_back( GetDisplayDate(m_DateTime_End) );
+
+      column1.push_back( {} );
+      column2.push_back( {} );
+
+      column1.push_back( _("Automatic Save enabled:") );
+      column2.push_back( (m_bAutoSaveEnabled ? _("Yes") : _("No")) );
+
+      column1.push_back( _("Automatic Export enabled:") );
+      column2.push_back( (m_bAutoExportEnabled ? _("Yes") : _("No")) );
+
+      column1.push_back( _("Action after Timer Recording:") );
+      column2.push_back( sPostAction );
 
       TimerProgressDialog
          progress(m_TimeSpan_Duration.GetMilliseconds().GetValue(),
                   _("Audacity Timer Record Progress"),
-                  strMsg,
+                  columns,
                   pdlgHideCancelButton | pdlgConfirmStopCancel);
 
       // Make sure that start and end time are updated, so we always get the full
@@ -555,7 +571,7 @@ int TimerRecordDialog::RunWaitDialog()
 
       // Loop for progress display during recording.
       while (bIsRecording && (updateResult == ProgressResult::Success)) {
-         updateResult = progress.Update();
+         updateResult = progress.UpdateProgress();
          wxMilliSleep(kTimerInterval);
          bIsRecording = (wxDateTime::UNow() <= m_DateTime_End); // Call UNow() again for extra accuracy...
       }
@@ -563,7 +579,7 @@ int TimerRecordDialog::RunWaitDialog()
 
    // Must do this AFTER the timer project dialog has been deleted to ensure the application
    // responds to the AUDIOIO events...see not about bug #334 in the ProgressDialog constructor.
-   pProject->OnStop();
+   GetMenuCommandHandler(*pProject).OnStop(*pProject);
 
    // Let the caller handle cancellation or failure from recording progress.
    if (updateResult == ProgressResult::Cancelled || updateResult == ProgressResult::Failed)
@@ -648,7 +664,7 @@ int TimerRecordDialog::ExecutePostRecordActions(bool bWasStopped) {
          }
 
          // Show Error Message Box
-         wxMessageBox(sMessage, _("Error"), wxICON_EXCLAMATION | wxOK);
+         AudacityMessageBox(sMessage, _("Error"), wxICON_EXCLAMATION | wxOK);
       } else {
 
          if (bWasStopped && (iOverriddenAction != POST_TIMER_RECORD_NOTHING)) {
@@ -657,7 +673,7 @@ int TimerRecordDialog::ExecutePostRecordActions(bool bWasStopped) {
                             m_pTimerAfterCompleteChoiceCtrl->GetString(iOverriddenAction));
          }
 
-         wxMessageBox(sMessage, _("Timer Recording"), wxICON_INFORMATION | wxOK);
+         AudacityMessageBox(sMessage, _("Timer Recording"), wxICON_INFORMATION | wxOK);
       }
    }
 
@@ -755,7 +771,7 @@ wxString TimerRecordDialog::GetDisplayDate( wxDateTime & dt )
 #endif
 
    // Use default formatting
-wxPrintf(wxT("%s\n"), dt.Format().c_str());
+wxPrintf(wxT("%s\n"), dt.Format());
    return dt.FormatDate() + wxT(" ") + dt.FormatTime();
 }
 
@@ -786,7 +802,8 @@ void TimerRecordDialog::PopulateOrExchange(ShuttleGui& S)
          * The 'h' indicates the first number displayed is hours, the 'm' indicates the second number
          * displayed is minutes, and the 's' indicates that the third number displayed is seconds.
          */
-         wxString strFormat = _("099 h 060 m 060 s");
+         auto strFormat = _("099 h 060 m 060 s");
+         using Options = NumericTextCtrl::Options;
          S.StartStatic(_("Start Date and Time"), true);
          {
             m_pDatePickerCtrl_Start =
@@ -802,13 +819,14 @@ void TimerRecordDialog::PopulateOrExchange(ShuttleGui& S)
             S.AddWindow(m_pDatePickerCtrl_Start);
 
             m_pTimeTextCtrl_Start = safenew NumericTextCtrl(
-               NumericConverter::TIME, this, ID_TIMETEXT_START);
+               this, ID_TIMETEXT_START, NumericConverter::TIME,
+               {}, 0, 44100,
+               Options{}
+                  .MenuEnabled(false)
+                  .Format(strFormat)
+                  .Value(true, wxDateTime_to_AudacityTime(m_DateTime_Start)));
             m_pTimeTextCtrl_Start->SetName(_("Start Time"));
-            m_pTimeTextCtrl_Start->SetFormatString(strFormat);
-            m_pTimeTextCtrl_Start->
-               SetValue(wxDateTime_to_AudacityTime(m_DateTime_Start));
             S.AddWindow(m_pTimeTextCtrl_Start);
-            m_pTimeTextCtrl_Start->EnableMenu(false);
          }
          S.EndStatic();
 
@@ -830,12 +848,14 @@ void TimerRecordDialog::PopulateOrExchange(ShuttleGui& S)
             S.AddWindow(m_pDatePickerCtrl_End);
 
             m_pTimeTextCtrl_End = safenew NumericTextCtrl(
-               NumericConverter::TIME, this, ID_TIMETEXT_END);
+               this, ID_TIMETEXT_END, NumericConverter::TIME,
+               {}, 0, 44100,
+               Options{}
+                  .MenuEnabled(false)
+                  .Format(strFormat)
+                  .Value(true, wxDateTime_to_AudacityTime(m_DateTime_End)));
             m_pTimeTextCtrl_End->SetName(_("End Time"));
-            m_pTimeTextCtrl_End->SetFormatString(strFormat);
-            m_pTimeTextCtrl_End->SetValue(wxDateTime_to_AudacityTime(m_DateTime_End));
             S.AddWindow(m_pTimeTextCtrl_End);
-            m_pTimeTextCtrl_End->EnableMenu(false);
          }
          S.EndStatic();
 
@@ -849,13 +869,16 @@ void TimerRecordDialog::PopulateOrExchange(ShuttleGui& S)
             * number displayed is minutes, and the 's' indicates that the fourth number displayed is
             * seconds.
             */
-            wxString strFormat1 = _("099 days 024 h 060 m 060 s");
-            m_pTimeTextCtrl_Duration = safenew NumericTextCtrl(NumericConverter::TIME, this, ID_TIMETEXT_DURATION);
+            auto strFormat1 = _("099 days 024 h 060 m 060 s");
+            m_pTimeTextCtrl_Duration = safenew NumericTextCtrl(
+               this, ID_TIMETEXT_DURATION, NumericConverter::TIME,
+               {}, 0, 44100,
+               Options{}
+                  .MenuEnabled(false)
+                  .Format(strFormat1)
+                  .Value(true, m_TimeSpan_Duration.GetSeconds().ToDouble()));
             m_pTimeTextCtrl_Duration->SetName(_("Duration"));
-            m_pTimeTextCtrl_Duration->SetFormatString(strFormat1);
-            m_pTimeTextCtrl_Duration->SetValue(m_TimeSpan_Duration.GetSeconds().ToDouble());
             S.AddWindow(m_pTimeTextCtrl_Duration);
-            m_pTimeTextCtrl_Duration->EnableMenu(false);
          }
          S.EndStatic();
       }
@@ -905,23 +928,28 @@ void TimerRecordDialog::PopulateOrExchange(ShuttleGui& S)
          S.StartStatic(_("Options"), true);
          {
 
-            wxArrayString arrayOptions;
-            arrayOptions.Add(_("Do nothing"));
-            arrayOptions.Add(_("Exit Audacity"));
-            arrayOptions.Add(_("Restart system"));
-            arrayOptions.Add(_("Shutdown system"));
+            S.StartMultiColumn(1, wxEXPAND);
+            {
+               S.SetStretchyCol( 0 );
+               wxArrayString arrayOptions;
+               arrayOptions.Add(_("Do nothing"));
+               arrayOptions.Add(_("Exit Audacity"));
+               arrayOptions.Add(_("Restart system"));
+               arrayOptions.Add(_("Shutdown system"));
 
-            m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(0));
-            m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(1));
+               m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(0));
+               m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(1));
 #ifdef __WINDOWS__
-            m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(2));
-            m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(3));
+               m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(2));
+               m_sTimerAfterCompleteOptionsArray.Add(arrayOptions.Item(3));
 #endif
-            m_sTimerAfterCompleteOption = arrayOptions.Item(iPostTimerRecordAction);
+               m_sTimerAfterCompleteOption = arrayOptions.Item(iPostTimerRecordAction);
 
-            m_pTimerAfterCompleteChoiceCtrl = S.AddChoice(_("After Recording completes:"),
-                                                          m_sTimerAfterCompleteOption,
-                                                          &m_sTimerAfterCompleteOptionsArray);
+               m_pTimerAfterCompleteChoiceCtrl = S.AddChoice(_("After Recording completes:"),
+                                                             m_sTimerAfterCompleteOption,
+                                                             &m_sTimerAfterCompleteOptionsArray);
+            }
+            S.EndMultiColumn();
          }
          S.EndStatic();
 
@@ -996,7 +1024,15 @@ void TimerRecordDialog::UpdateEnd()
 {
    //v Use remaining disk -> record time calcs from AudacityProject::OnTimer to set range?
    m_DateTime_End = m_DateTime_Start + m_TimeSpan_Duration;
+   //wxLogDebug( "Time start %s end %s", 
+   //   m_DateTime_Start.FormatISOCombined(' '),
+   //   m_DateTime_End.FormatISOCombined(' ') );
+
+   // Disable the range limitation (to fix Bug 1749 and 1978)
+   // Otherwise SetVallue asserts when going back in time.
+   m_pDatePickerCtrl_End->SetRange(wxInvalidDateTime, wxInvalidDateTime); 
    m_pDatePickerCtrl_End->SetValue(m_DateTime_End);
+   // Re-enable range limitation to constrain user input.
    m_pDatePickerCtrl_End->SetRange(m_DateTime_Start, wxInvalidDateTime); // No backdating.
    m_pDatePickerCtrl_End->Refresh();
    m_pTimeTextCtrl_End->SetValue(wxDateTime_to_AudacityTime(m_DateTime_End));
@@ -1007,31 +1043,37 @@ ProgressResult TimerRecordDialog::WaitForStart()
    // MY: The Waiting For Start dialog now shows what actions will occur after recording has completed
    wxString sPostAction = m_pTimerAfterCompleteChoiceCtrl->GetString(m_pTimerAfterCompleteChoiceCtrl->GetSelection());
 
-   // Two column layout. Line spacing must match for both columns.
-   // First column
-   wxString strMsg = wxString::Format(_("Waiting to start recording at:\n") +
-                                      _("Recording duration:\n") +
-                                      _("Scheduled to stop at:\n\n") +
-                                      _("Automatic Save enabled:\n") +
-                                      _("Automatic Export enabled:\n") +
-                                      _("Action after Timer Recording:"));
+   // Two column layout.
+   TimerProgressDialog::MessageTable columns(2);
+   auto &column1 = columns[0];
+   auto &column2 = columns[1];
 
-   strMsg += ProgressDialog::ColoumnSplitMarker;
+   column1.push_back(_("Waiting to start recording at:"));
+   column2.push_back(GetDisplayDate(m_DateTime_Start));
 
-   // Second column
-   strMsg += wxString::Format(wxT("%s\n%s\n%s\n\n%s\n%s\n%s"),
-                                    GetDisplayDate(m_DateTime_Start).c_str(),
-                                    m_TimeSpan_Duration.Format(),
-                                    GetDisplayDate(m_DateTime_End).c_str(),
-                                    (m_bAutoSaveEnabled ? _("Yes") : _("No")),
-                                    (m_bAutoExportEnabled ? _("Yes") : _("No")),
-                                    sPostAction);
+   column1.push_back(_("Recording duration:"));
+   column2.push_back(m_TimeSpan_Duration.Format());
+
+   column1.push_back(_("Scheduled to stop at:"));
+   column2.push_back(GetDisplayDate(m_DateTime_End));
+
+   column1.push_back( {} );
+   column2.push_back( {} );
+
+   column1.push_back(_("Automatic Save enabled:"));
+   column2.push_back((m_bAutoSaveEnabled ? _("Yes") : _("No")));
+
+   column1.push_back(_("Automatic Export enabled:"));
+   column2.push_back((m_bAutoExportEnabled ? _("Yes") : _("No")));
+
+   column1.push_back(_("Action after Timer Recording:"));
+   column2.push_back(sPostAction);
 
    wxDateTime startWait_DateTime = wxDateTime::UNow();
    wxTimeSpan waitDuration = m_DateTime_Start - startWait_DateTime;
    TimerProgressDialog progress(waitDuration.GetMilliseconds().GetValue(),
       _("Audacity Timer Record - Waiting for Start"),
-      strMsg,
+      columns,
       pdlgHideStopButton | pdlgConfirmStopCancel | pdlgHideElapsedTime,
       _("Recording will commence in:"));
 
@@ -1039,8 +1081,8 @@ ProgressResult TimerRecordDialog::WaitForStart()
    bool bIsRecording = false;
    while (updateResult == ProgressResult::Success && !bIsRecording)
    {
-      updateResult = progress.Update();
-      wxMilliSleep(10);
+      updateResult = progress.UpdateProgress();
+      wxMilliSleep(kTimerInterval);
       bIsRecording = (m_DateTime_Start <= wxDateTime::UNow());
    }
    return updateResult;
@@ -1052,20 +1094,25 @@ ProgressResult TimerRecordDialog::PreActionDelay(int iActionIndex, TimerRecordCo
    wxString sCountdownLabel;
    sCountdownLabel.Printf("%s in:", sAction);
 
-   // Two column layout. Line spacing must match for both columns.
-   // First column
-   wxString strMsg = wxString::Format(_("Timer Recording completed.\n\n") +
-                                      _("Recording Saved:\n") +
-                                      _("Recording Exported:\n") +
-                                      _("Action after Timer Recording:"));
+   // Two column layout.
+   TimerProgressDialog::MessageTable columns(2);
+   auto &column1 = columns[0];
+   auto &column2 = columns[1];
 
-   strMsg += ProgressDialog::ColoumnSplitMarker;
+   column1.push_back(_("Timer Recording completed."));
+   column2.push_back( {} );
 
-   // Second column
-   strMsg +=  wxString::Format(wxT("\n\n%s\n%s\n%s"),
-                                    ((eCompletedActions & TR_ACTION_SAVED) ? _("Yes") : _("No")),
-                                    ((eCompletedActions & TR_ACTION_EXPORTED) ? _("Yes") : _("No")),
-                                    sAction);
+   column1.push_back( {} );
+   column2.push_back( {} );
+
+   column1.push_back(_("Recording Saved:"));
+   column2.push_back(((eCompletedActions & TR_ACTION_SAVED) ? _("Yes") : _("No")));
+
+   column1.push_back(_("Recording Exported:"));
+   column2.push_back(((eCompletedActions & TR_ACTION_EXPORTED) ? _("Yes") : _("No")));
+
+   column1.push_back(_("Action after Timer Recording:"));
+   column2.push_back(sAction);
 
    wxDateTime dtNow = wxDateTime::UNow();
    wxTimeSpan tsWait = wxTimeSpan(0, 1, 0, 0);
@@ -1073,7 +1120,7 @@ ProgressResult TimerRecordDialog::PreActionDelay(int iActionIndex, TimerRecordCo
 
    TimerProgressDialog dlgAction(tsWait.GetMilliseconds().GetValue(),
                           _("Audacity Timer Record - Waiting"),
-                          strMsg,
+                          columns,
                           pdlgHideStopButton | pdlgHideElapsedTime,
                           sCountdownLabel);
 
@@ -1081,8 +1128,8 @@ ProgressResult TimerRecordDialog::PreActionDelay(int iActionIndex, TimerRecordCo
    bool bIsTime = false;
    while (iUpdateResult == ProgressResult::Success && !bIsTime)
    {
-      iUpdateResult = dlgAction.Update();
-      wxMilliSleep(10);
+      iUpdateResult = dlgAction.UpdateProgress();
+      wxMilliSleep(kTimerInterval);
       bIsTime = (dtActionTime <= wxDateTime::UNow());
    }
    return iUpdateResult;

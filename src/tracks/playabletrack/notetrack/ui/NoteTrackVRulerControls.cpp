@@ -33,11 +33,14 @@ std::vector<UIHandlePtr> NoteTrackVRulerControls::HitTest
 {
    std::vector<UIHandlePtr> results;
    UIHandlePtr result;
-   auto track = std::static_pointer_cast<NoteTrack>(FindTrack());
-   result = NoteTrackVZoomHandle::HitTest(
-      mVZoomHandle, st.state, track, st.rect);
-   if (result)
-      results.push_back(result);
+
+   if ( st.state.GetX() <= st.rect.GetRight() - kGuard ) {
+      auto track = std::static_pointer_cast<NoteTrack>(FindTrack());
+      result = NoteTrackVZoomHandle::HitTest(
+         mVZoomHandle, st.state, track, st.rect);
+      if (result)
+         results.push_back(result);
+   }
 
    auto more = TrackVRulerControls::HitTest(st, pProject);
    std::copy(more.begin(), more.end(), std::back_inserter(results));
@@ -61,10 +64,10 @@ unsigned NoteTrackVRulerControls::HandleWheelRotation
    const auto pTrack = FindTrack();
    if (!pTrack)
       return RefreshNone;
-   wxASSERT(pTrack->GetKind() == Track::Note);
-   auto steps = evt.steps;
 
+   auto steps = evt.steps;
    const auto nt = static_cast<NoteTrack*>(pTrack.get());
+
    if (event.CmdDown() && !event.ShiftDown()) {
       if (steps > 0)
          nt->ZoomIn(evt.rect, evt.event.m_y);

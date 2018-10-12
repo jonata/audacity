@@ -126,19 +126,19 @@ public:
 
       //if they are both off the cache boundary in the same direction, the cache is missed,
       //so we are safe, and don't need to track this one.
-      if((invalStart<0 && invalEnd <0) || (invalStart>=len && invalEnd >= len))
+      if((invalStart<0 && invalEnd <0) || (invalStart>=(long)len && invalEnd >= (long)len))
          return;
 
       //in all other cases, we need to clip the boundries so they make sense with the cache.
       //for some reason, the cache is set up to access up to array[len], not array[len-1]
       if(invalStart <0)
          invalStart =0;
-      else if(invalStart > len)
+      else if(invalStart > (long)len)
          invalStart = len;
 
       if(invalEnd <0)
          invalEnd =0;
-      else if(invalEnd > len)
+      else if(invalEnd > (long)len)
          invalEnd = len;
 
 
@@ -153,13 +153,13 @@ public:
          {
             //if the regions intersect OR are pixel adjacent
             InvalidRegion &region = mRegions[i];
-            if(region.start <= invalEnd+1
-               && region.end + 1 >= invalStart)
+            if((long)region.start <= (invalEnd+1)
+               && ((long)region.end + 1) >= invalStart)
             {
                //take the union region
-               if(region.start > invalStart)
+               if((long)region.start > invalStart)
                   region.start = invalStart;
-               if(region.end < invalEnd)
+               if((long)region.end < invalEnd)
                   region.end = invalEnd;
                added=true;
                break;
@@ -206,7 +206,7 @@ public:
          }
 
          //if we are past the end of the region we added, we are past the area of regions that might be oversecting.
-         if(region.start > invalEnd)
+         if(invalEnd < 0 || (long)region.start > invalEnd)
          {
             break;
          }
@@ -255,11 +255,11 @@ public:
          LoadInvalidRegion(i, sequence, updateODCount);
    }
 
-   int CountODPixels(size_t start, size_t end)
+   int CountODPixels(size_t startIn, size_t endIn)
    {
       using namespace std;
       const int *begin = &bl[0];
-      return count_if(begin + start, begin + end, bind2nd(less<int>(), 0));
+      return count_if(begin + startIn, begin + endIn, bind2nd(less<int>(), 0));
    }
 
 protected:
@@ -333,7 +333,7 @@ WaveClip::WaveClip(const WaveClip& orig,
    if ( copyCutlines )
       for (const auto &clip: orig.mCutLines)
          mCutLines.push_back
-            ( make_movable<WaveClip>( *clip, projDirManager, true ) );
+            ( std::make_unique<WaveClip>( *clip, projDirManager, true ) );
 
    mIsPlaceholder = orig.GetIsPlaceholder();
 }
@@ -377,7 +377,7 @@ WaveClip::WaveClip(const WaveClip& orig,
          if (cutlinePosition >= t0 && cutlinePosition <= t1)
          {
             auto newCutLine =
-               make_movable< WaveClip >( *clip, projDirManager, true );
+               std::make_unique< WaveClip >( *clip, projDirManager, true );
             newCutLine->SetOffset( cutlinePosition - t0 );
             mCutLines.push_back(std::move(newCutLine));
          }
@@ -830,7 +830,7 @@ bool SpecCache::CalculateOneSpectrum
    bool result = false;
    const bool reassignment =
       (settings.algorithm == SpectrogramSettings::algReassignment);
-   const size_t windowSize = settings.WindowSize();
+   const size_t windowSizeSetting = settings.WindowSize();
 
    sampleCount from;
 
@@ -842,7 +842,7 @@ bool SpecCache::CalculateOneSpectrum
       from = sampleCount(
          where[0].as_double() + xx * (rate / pixelsPerSecond)
       );
-   else if (xx > len)
+   else if (xx > (int)len)
       from = sampleCount(
          where[len].as_double() + (xx - len) * (rate / pixelsPerSecond)
       );
@@ -851,13 +851,13 @@ bool SpecCache::CalculateOneSpectrum
 
    const bool autocorrelation =
       settings.algorithm == SpectrogramSettings::algPitchEAC;
-   const size_t zeroPaddingFactor = settings.ZeroPaddingFactor();
-   const size_t padding = (windowSize * (zeroPaddingFactor - 1)) / 2;
-   const size_t fftLen = windowSize * zeroPaddingFactor;
+   const size_t zeroPaddingFactorSetting = settings.ZeroPaddingFactor();
+   const size_t padding = (windowSizeSetting * (zeroPaddingFactorSetting - 1)) / 2;
+   const size_t fftLen = windowSizeSetting * zeroPaddingFactorSetting;
    auto nBins = settings.NBins();
 
    if (from < 0 || from >= numSamples) {
-      if (xx >= 0 && xx < len) {
+      if (xx >= 0 && xx < (int)len) {
          // Pixel column is out of bounds of the clip!  Should not happen.
          float *const results = &out[nBins * xx];
          std::fill(results, results + nBins, 0.0f);
@@ -872,9 +872,9 @@ bool SpecCache::CalculateOneSpectrum
       float *adj = scratch + padding;
 
       {
-         auto myLen = windowSize;
+         auto myLen = windowSizeSetting;
          // Take a window of the track centered at this sample.
-         from -= windowSize >> 1;
+         from -= windowSizeSetting >> 1;
          if (from < 0) {
             // Near the start of the clip, pad left with zeroes as needed.
             // from is at least -windowSize / 2
@@ -922,7 +922,7 @@ bool SpecCache::CalculateOneSpectrum
          wxASSERT(xx >= 0);
          float *const results = &out[nBins * xx];
          // This function does not mutate useBuffer
-         ComputeSpectrum(useBuffer, windowSize, windowSize,
+         ComputeSpectrum(useBuffer, windowSizeSetting, windowSizeSetting,
             rate, results,
             autocorrelation, settings.windowType);
       }
@@ -984,8 +984,10 @@ bool SpecCache::CalculateOneSpectrum
                freqCorrection = multiplier * quotIm;
             }
 
-            const int bin = (int)(ii + freqCorrection + 0.5f);
-            if (bin >= 0 && bin < hFFT->Points) {
+            const int bin = (int)((int)ii + freqCorrection + 0.5f);
+            // Must check if correction takes bin out of bounds, above or below!
+            // bin is signed!
+            if (bin >= 0 && bin < (int)hFFT->Points) {
                double timeCorrection;
                {
                   const float
@@ -1069,21 +1071,21 @@ void SpecCache::Populate
     sampleCount numSamples,
     double offset, double rate, double pixelsPerSecond)
 {
-   const int &frequencyGain = settings.frequencyGain;
-   const size_t windowSize = settings.WindowSize();
+   const int &frequencyGainSetting = settings.frequencyGain;
+   const size_t windowSizeSetting = settings.WindowSize();
    const bool autocorrelation =
       settings.algorithm == SpectrogramSettings::algPitchEAC;
    const bool reassignment =
       settings.algorithm == SpectrogramSettings::algReassignment;
 #ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
-   const size_t zeroPaddingFactor = settings.ZeroPaddingFactor();
+   const size_t zeroPaddingFactorSetting = settings.ZeroPaddingFactor();
 #else
-   const size_t zeroPaddingFactor = 1;
+   const size_t zeroPaddingFactorSetting = 1;
 #endif
 
    // FFT length may be longer than the window of samples that affect results
    // because of zero padding done for increased frequency resolution
-   const size_t fftLen = windowSize * zeroPaddingFactor;
+   const size_t fftLen = windowSizeSetting * zeroPaddingFactorSetting;
    const auto nBins = settings.NBins();
 
    const size_t bufferSize = fftLen;
@@ -1092,7 +1094,7 @@ void SpecCache::Populate
 
    std::vector<float> gainFactors;
    if (!autocorrelation)
-      ComputeSpectrogramGainFactors(fftLen, rate, frequencyGain, gainFactors);
+      ComputeSpectrogramGainFactors(fftLen, rate, frequencyGainSetting, gainFactors);
 
    // Loop over the ranges before and after the copied portion and compute anew.
    // One of the ranges may be empty.
@@ -1173,7 +1175,7 @@ void SpecCache::Populate
 #ifdef _OPENMP
          #pragma omp parallel for
 #endif
-         for (auto xx = lowerBoundX; xx < upperBoundX; ++xx) {
+         for (xx = lowerBoundX; xx < upperBoundX; ++xx) {
             float *const results = &freq[nBins * xx];
             for (size_t ii = 0; ii < nBins; ++ii) {
                float &power = results[ii];
@@ -1276,8 +1278,8 @@ bool WaveClip::GetSpectrogram(WaveTrackCache &waveTrackCache,
       // old cache doesn't match. It won't happen in resize, since the
       // spectrum view is pinned to left side of window.
       wxASSERT(
-         (copyBegin >= 0 && copyEnd == numPixels) || // copied the end
-         (copyBegin == 0 && copyEnd <= numPixels)    // copied the beginning
+         (copyBegin >= 0 && copyEnd == (int)numPixels) || // copied the end
+         (copyBegin == 0 && copyEnd <= (int)numPixels)    // copied the beginning
       );
 
       int zeroBegin = copyBegin > 0 ? 0 : copyEnd-copyBegin;
@@ -1550,7 +1552,7 @@ XMLTagHandler *WaveClip::HandleXMLChild(const wxChar *tag)
    {
       // Nested wave clips are cut lines
       mCutLines.push_back(
-         make_movable<WaveClip>(mSequence->GetDirManager(),
+         std::make_unique<WaveClip>(mSequence->GetDirManager(),
             mSequence->GetSampleFormat(), mRate, 0 /*colourindex*/));
       return mCutLines.back().get();
    }
@@ -1606,7 +1608,7 @@ void WaveClip::Paste(double t0, const WaveClip* other)
    for (const auto &cutline: pastedClip->mCutLines)
    {
       newCutlines.push_back(
-         make_movable<WaveClip>
+         std::make_unique<WaveClip>
             ( *cutline, mSequence->GetDirManager(),
               // Recursively copy cutlines of cutlines.  They don't need
               // their offsets adjusted.
@@ -1623,7 +1625,7 @@ void WaveClip::Paste(double t0, const WaveClip* other)
    // Assume NOFAIL-GUARANTEE in the remaining
    MarkChanged();
    auto sampleTime = 1.0 / GetRate();
-   mEnvelope->Paste
+   mEnvelope->PasteEnvelope
       (s0.as_double()/mRate + mOffset, pastedClip->mEnvelope.get(), sampleTime);
    OffsetCutLines(t0, pastedClip->GetEndTime() - pastedClip->GetStartTime());
 
@@ -1743,7 +1745,7 @@ void WaveClip::ClearAndAddCutLine(double t0, double t1)
    const double clip_t0 = std::max( t0, GetStartTime() );
    const double clip_t1 = std::min( t1, GetEndTime() );
 
-   auto newClip = make_movable< WaveClip >
+   auto newClip = std::make_unique< WaveClip >
       (*this, mSequence->GetDirManager(), true, clip_t0, clip_t1);
 
    newClip->SetOffset( clip_t0 - mOffset );

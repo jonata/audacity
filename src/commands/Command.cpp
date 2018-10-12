@@ -10,10 +10,72 @@
 
 \file Command.cpp
 \brief Contains definitions for Command, DecoratedCommand,
-ApplyAndSendResponse, and CommandImplementation classes
+ApplyAndSendResponse, and CommandImplementation classes.  These are
+remnants of Dan Horgans external scripting commands.  We now use 
+AudacityCommand and a shuttle system.  This allows commands to be used
+from within macros too, to have settings dialogs, using ShuttleGui and
+without need for validators.
+
+Here's the doxygen for the still-remaining going-away classes.
+
+
+\class BatchEvalCommandType
+\brief The <something>CommandType classes are classes which are going 
+away.  They all provided a BuildSignature (what parameters they accept)
+and Name, but that is now replaced by the AudacityCommand interface.  
+
+We in effect merge the <something>CommandType classes into the 
+<something>Command classes.
+
+\class MessageCommandType
+\brief The <something>CommandType classes are classes which are going 
+away.  They all provided a BuildSignature (what parameters they accept)
+and Name, but that is now replaced by the AudacityCommand interface.  
+
+We in effect merge the <something>CommandType classes into the 
+<something>Command classes.
+
+\class BatchEvalCommand
+\brief Command to make processing of macros available to scripting.  It can either
+make a one command macro, or invoke an existing macro.  It will become redundant
+when menu commands are integrated into scripting.
+
+\class HelpCommand
+\brief Command to get help about other commands.
+
+\class MessageCommand
+\brief Command to get a message response.  Used for testing, and used internally
+to create messages for forwarding.
+
+******************************************************************//**
+
+\class OldStyleCommand
+\brief Abstract base class for command interface.  This is the version
+created by Dan Horgan.  It was previously a factory for other command classes.
+It created a separation between the type of a command and the command itself, 
+which is being removed.  These Cmmands were managed by CommandDirectory.
+
+\class OldStyleCommandPointer
+\brief OldStyleCommandPointer is a unique_ptr to an OldStyleCommand.
+
+\class DecoratedCommand
+\brief DecoratedCommand is a decorator for command.  It forwards functions 
+to the mCommand it holds.
+
+\class ApplyAndSendResponse
+\brief ApplyAndSendResponse is a DecoratoredCommand that performs the given 
+command and then outputs a status message according to the result.  It 
+manages a CommandContext which is passed into its mCommand, so that result 
+messages are routed back to the right place.
+
+\class CommandImplementation,
+\brief is derived from OldStyleCommand.  It validates and 
+applies the command.  CommandImplementation::Apply() is overloaded in 
+classes derived from it.
 
 *//*******************************************************************/
 
+#include "../Audacity.h"
 #include "Command.h"
 #include <map>
 #include <wx/string.h>
@@ -28,35 +90,25 @@ ApplyAndSendResponse, and CommandImplementation classes
 #include "CommandTargets.h"
 #include "CommandDirectory.h"
 
-bool Command::SetParameter(const wxString & WXUNUSED(paramName),
+#include "CommandContext.h"
+#include "../Project.h"
+
+
+
+bool OldStyleCommand::SetParameter(const wxString & WXUNUSED(paramName),
                            const wxVariant & WXUNUSED(paramValue))
 {
    wxASSERT_MSG(false, wxT("Tried to set parameter for command which doesn't support parameters!"));
    return false;
 }
 
-void DecoratedCommand::Progress(double completed)
-{
-   mCommand->Progress(completed);
-}
-
-void DecoratedCommand::Status(const wxString &message)
-{
-   mCommand->Status(message);
-}
-
-void DecoratedCommand::Error(const wxString &message)
-{
-   mCommand->Error(message);
-}
-
 DecoratedCommand::~DecoratedCommand()
 {
 }
 
-wxString DecoratedCommand::GetName()
+IdentInterfaceSymbol DecoratedCommand::GetSymbol()
 {
-   return mCommand->GetName();
+   return mCommand->GetSymbol();
 }
 
 CommandSignature &DecoratedCommand::GetSignature()
@@ -70,12 +122,39 @@ bool DecoratedCommand::SetParameter(const wxString &paramName,
    return mCommand->SetParameter(paramName, paramValue);
 }
 
-bool ApplyAndSendResponse::Apply(CommandExecutionContext context)
+ApplyAndSendResponse::ApplyAndSendResponse(const OldStyleCommandPointer &cmd, std::unique_ptr<CommandOutputTargets> &target)
+      : DecoratedCommand(cmd),
+       mCtx( std::make_unique<CommandContext>( *GetActiveProject(), std::move(target) ) )
 {
+}
+
+
+bool ApplyAndSendResponse::Apply(const CommandContext &WXUNUSED(context))
+{
+   wxLogMessage( "Context was passed in, but was ignored.  ApplyAndSendResponse has its own one");
+   return Apply();
+}
+
+
+bool ApplyAndSendResponse::Apply()
+{
+   // ApplyAndSendResponse IS a command.
+   // It also HOLDS a command.
+
+   // Mostly its functions forward to the recipient.
+   // However it uses its OWN context, not the one of 
+   // the command it holds.
    auto result = GuardedCall<bool>(
-      [&] { return mCommand->Apply(context); }
+      [&] { 
+      bool bResult = mCommand->Apply(*( mCtx.get()));
+      return bResult; }
    );
-   wxString response = GetName();
+   wxString response = wxT( "\n" );
+
+   // PRL: it's all right to send untranslated strings to this channel
+   // I don't see _("") used with literal strings.
+   response += GetSymbol().Internal();
+
    // These three strings are deliberately not localised.
    // They are used in script responses and always happen in English.
    response += wxT(" finished: ");
@@ -87,17 +166,15 @@ bool ApplyAndSendResponse::Apply(CommandExecutionContext context)
    {
       response += wxT("Failed!");
    }
-   Status(response);
+   mCtx->Status(response);
    return result;
 }
 
-CommandImplementation::CommandImplementation(CommandType &type,
-      std::unique_ptr<CommandOutputTarget> &&output)
+CommandImplementation::CommandImplementation(OldStyleCommandType &type)
 : mType(type),
    mParams(type.GetSignature().GetDefaults()),
-   mOutput(std::move(output))
+   mSetParams()
 {
-   wxASSERT(mOutput);
 }
 
 CommandImplementation::~CommandImplementation()
@@ -110,7 +187,7 @@ void CommandImplementation::TypeCheck(const wxString &typeName,
 {
    // this macro is empty if wxWidgets is not compiled in debug mode
    wxASSERT_MSG(param.IsType(typeName),
-                GetName()
+                GetSymbol().Internal()
                 + wxT("command tried to get '")
                 + paramName
                 + wxT("' parameter as a ")
@@ -122,10 +199,18 @@ void CommandImplementation::CheckParam(const wxString &paramName)
 {
    // this macro is empty if wxWidgets is not compiled in debug mode
    wxASSERT_MSG(mParams.find(paramName) != mParams.end(),
-                GetName()
+                GetSymbol().Internal()
                 + wxT("command tried to get '")
                 + paramName
                 + wxT("' parameter, but that parameter doesn't exist in the command signature!"));
+}
+
+bool CommandImplementation::HasParam( const wxString &paramName) 
+{
+   // Test for not even in map...
+   if( mParams.count(paramName) < 1)
+      return false;
+   return mSetParams[paramName];
 }
 
 bool CommandImplementation::GetBool(const wxString &paramName)
@@ -160,26 +245,10 @@ wxString CommandImplementation::GetString(const wxString &paramName)
    return v.GetString();
 }
 
-// Convenience methods for passing messages to the output target
-void CommandImplementation::Progress(double completed)
-{
-   mOutput->Progress(completed);
-}
-
-void CommandImplementation::Status(const wxString &status)
-{
-   mOutput->Status(status);
-}
-
-void CommandImplementation::Error(const wxString &message)
-{
-   mOutput->Error(message);
-}
-
 /// Get the name of the command
-wxString CommandImplementation::GetName()
+IdentInterfaceSymbol CommandImplementation::GetSymbol()
 {
-   return mType.GetName();
+   return mType.GetSymbol();
 }
 
 /// Get the signature of the command
@@ -191,31 +260,38 @@ CommandSignature &CommandImplementation::GetSignature()
 bool CommandImplementation::SetParameter(const wxString &paramName, const wxVariant &paramValue)
 {
    wxASSERT(!paramValue.IsType(wxT("null")));
-
+   CommandContext context( * GetActiveProject());
    ParamValueMap::iterator iter = mParams.find(paramName);
    if (iter == mParams.end())
    {
-      Error(paramName + wxT(" is not a parameter accepted by ") + GetName());
+      // Translated format, but untranslated command name substituted into it?
+      // Perhaps these formats that don't need translating.
+      context.Error( wxString::Format(
+         _("%s is not a parameter accepted by %s"),
+            paramName, GetSymbol().Internal() ) );
       return false;
    }
 
    Validator &validator = mType.GetSignature().GetValidator(iter->first);
    if (!validator.Validate(paramValue))
    {
-      Error(wxT("Invalid value for parameter '")
-            + paramName + wxT("': should be ")
-            + validator.GetDescription());
+      context.Error( wxString::Format(
+         _("Invalid value for parameter '%s': should be %s"),
+            paramName, validator.GetDescription() ) );
       return false;
    }
    mParams[paramName] = validator.GetConverted();
+   mSetParams[ paramName ] = true;
 
    // (debug)
-   // Status(wxT("Set parameter ") + paramName + wxT(" to type ") + mParams[paramName].GetType() + wxT(", value ") + mParams[paramName].MakeString());
+   // context.Status(wxT("Set parameter ") + paramName + wxT(" to type ") + mParams[paramName].GetType() + wxT(", value ") + mParams[paramName].MakeString());
 
    return true;
 }
 
-bool CommandImplementation::Apply(CommandExecutionContext WXUNUSED(context))
+bool CommandImplementation::Apply(const CommandContext & WXUNUSED(context))
 {
    return true;
 }
+
+

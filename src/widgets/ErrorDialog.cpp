@@ -232,3 +232,14 @@ void ShowAliasMissingDialog(AudacityProject *parent,
    // PRL: answer is that the parent window guarantees destruction of the dialog
    // but in practice Destroy() in OnOK does that
 }
+
+extern wxString AudacityMessageBoxCaptionStr()
+{
+   return _("Message");
+}
+
+void AudacityTextEntryDialog::SetInsertionPointEnd()
+{
+   // m_textctrl is protected member of wxTextEntryDialog
+   m_textctrl->SetInsertionPointEnd();
+}

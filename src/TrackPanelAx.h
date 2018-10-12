@@ -16,6 +16,7 @@
 
 #if wxUSE_ACCESSIBILITY
 #include <wx/access.h>
+#include "widgets/WindowAccessible.h"
 #endif
 
 #include "Track.h"
@@ -23,7 +24,7 @@
 
 class TrackPanelAx final
 #if wxUSE_ACCESSIBILITY
-   : public wxWindowAccessible
+   : public WindowAccessible
 #endif
 {
 public:
@@ -39,7 +40,7 @@ public:
    std::shared_ptr<Track> SetFocus( std::shared_ptr<Track> track = {} );
 
    // Returns TRUE if passed track has the focus
-   bool IsFocused( Track *track );
+   bool IsFocused( const Track *track );
 
    // Called to signal changes to a track
    void Updated();
@@ -104,6 +105,12 @@ public:
    // Returns a localized string representing the value for the object
    // or child.
    wxAccStatus GetValue(int childId, wxString* strValue) override;
+
+   // Navigates from fromId to toId/toObject
+   wxAccStatus Navigate(wxNavDir navDir, int fromId, int* toId, wxAccessible** toObject) override;
+
+   // Modify focus or selection
+   wxAccStatus Select(int childId, wxAccSelectionFlags selectFlags) override;
 #endif
 
 private:
@@ -114,6 +121,7 @@ private:
    TrackPanel *mTrackPanel;
 
    std::weak_ptr<Track> mFocusedTrack;
+   int mNumFocusedTrack;
 
    wxString mMessage;
    bool mTrackName;

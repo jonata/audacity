@@ -22,22 +22,22 @@
 #include "xml/XMLTagHandler.h"
 #include "wxFileNameWrapper.h"
 
+#include <unordered_map>
+
 class wxHashTable;
 class BlockArray;
 class BlockFile;
-class SequenceTest;
 
 #define FSCKstatus_CLOSE_REQ 0x1
 #define FSCKstatus_CHANGED   0x2
 #define FSCKstatus_SAVE_AUP  0x4 // used in combination with FSCKstatus_CHANGED
 
-WX_DECLARE_HASH_MAP(int, int, wxIntegerHash, wxIntegerEqual, DirHash);
+using DirHash = std::unordered_map<int, int>;
 
 class BlockFile;
 using BlockFilePtr = std::shared_ptr<BlockFile>;
 
-WX_DECLARE_HASH_MAP(wxString, std::weak_ptr<BlockFile>, wxStringHash,
-                    wxStringEqual, BlockHash);
+using BlockHash = std::unordered_map< wxString, std::weak_ptr<BlockFile> >;
 
 wxMemorySize GetFreeMemory();
 
@@ -229,8 +229,6 @@ class PROFILE_DLL_API DirManager final : public XMLTagHandler {
    wxString mytemp;
    static int numDirManagers;
    static bool dontDeleteTempFiles;
-
-   friend class SequenceTest;
 };
 
 #endif

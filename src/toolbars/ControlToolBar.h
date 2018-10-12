@@ -38,6 +38,11 @@ class SelectedRegion;
 // Defined in Project.h
 enum class PlayMode : int;
 
+class WaveTrack;
+using WaveTrackArray = std::vector < std::shared_ptr < WaveTrack > >;
+
+struct TransportTracks;
+
 // In the GUI, ControlToolBar appears as the "Transport Toolbar". "Control Toolbar" is historic.
 class ControlToolBar final : public ToolBar {
 
@@ -46,10 +51,17 @@ class ControlToolBar final : public ToolBar {
    ControlToolBar();
    virtual ~ControlToolBar();
 
+   static bool IsTransportingPinned();
+
    void Create(wxWindow *parent) override;
 
    void UpdatePrefs() override;
    void OnKeyEvent(wxKeyEvent & event);
+
+   // Find suitable tracks to record into, or return an empty array.
+   static WaveTrackArray ChooseExistingRecordingTracks(AudacityProject &proj, bool selectedOnly);
+
+   static bool UseDuplex();
 
    // msmeyer: These are public, but it's far better to
    // call the "real" interface functions like PlayCurrentRegion() and
@@ -58,6 +70,11 @@ class ControlToolBar final : public ToolBar {
    void OnPlay(wxCommandEvent & evt);
    void OnStop(wxCommandEvent & evt);
    void OnRecord(wxCommandEvent & evt);
+   bool DoRecord(AudacityProject &project,
+      const TransportTracks &transportTracks, // If captureTracks is empty, then tracks are created
+      double t0, double t1,
+      bool altAppearance,
+      const AudioIOStartStreamOptions &options);
    void OnFF(wxCommandEvent & evt);
    void OnPause(wxCommandEvent & evt);
 
@@ -69,7 +86,7 @@ class ControlToolBar final : public ToolBar {
    //These allow buttons to be controlled externally:
    void SetPlay(bool down, PlayAppearance appearance = PlayAppearance::Straight);
    void SetStop(bool down);
-   void SetRecord(bool down, bool append=false);
+   void SetRecord(bool down, bool altAppearance = false);
 
    bool IsPauseDown() const;
    bool IsRecordDown() const;
@@ -112,9 +129,17 @@ class ControlToolBar final : public ToolBar {
    void StartScrolling();
    void StopScrolling();
 
+   // Commit the addition of temporary recording tracks into the project
+   void CommitRecording();
+
+   // Cancel the addition of temporary recording tracks into the project
+   void CancelRecording();
+
  private:
 
-   AButton *MakeButton(teBmps eEnabledUp, teBmps eEnabledDown, teBmps eDisabled,
+   static AButton *MakeButton(
+      ControlToolBar *pBar,
+      teBmps eEnabledUp, teBmps eEnabledDown, teBmps eDisabled,
       int id,
       bool processdownevents,
       const wxChar *label);
@@ -133,12 +158,12 @@ class ControlToolBar final : public ToolBar {
 
    enum
    {
-      ID_PLAY_BUTTON = 11000,
-      ID_RECORD_BUTTON,
-      ID_PAUSE_BUTTON,
+      ID_PAUSE_BUTTON = 11000,
+      ID_PLAY_BUTTON,
       ID_STOP_BUTTON,
       ID_FF_BUTTON,
       ID_REW_BUTTON,
+      ID_RECORD_BUTTON,
       BUTTON_COUNT,
    };
 

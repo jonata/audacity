@@ -35,7 +35,6 @@ It handles initialization and termination by subclassing wxApp.
 #include <wx/window.h>
 #include <wx/intl.h>
 #include <wx/menu.h>
-#include <wx/msgdlg.h>
 #include <wx/snglinst.h>
 #include <wx/splash.h>
 #include <wx/stdpaths.h>
@@ -69,6 +68,7 @@ It handles initialization and termination by subclassing wxApp.
 #include "DirManager.h"
 #include "commands/CommandHandler.h"
 #include "commands/AppCommandEvent.h"
+#include "commands/CommandContext.h"
 #include "effects/Contrast.h"
 #include "widgets/ASlider.h"
 #include "FFmpeg.h"
@@ -81,7 +81,6 @@ It handles initialization and termination by subclassing wxApp.
 #include "Screenshot.h"
 #include "Sequence.h"
 #include "WaveTrack.h"
-#include "Internat.h"
 #include "prefs/PrefsDialog.h"
 #include "Theme.h"
 #include "PlatformCompatibility.h"
@@ -242,16 +241,16 @@ It handles initialization and termination by subclassing wxApp.
 ////////////////////////////////////////////////////////////
 
 DEFINE_EVENT_TYPE(EVT_OPEN_AUDIO_FILE);
-DEFINE_EVENT_TYPE(EVT_LANGUAGE_CHANGE);
+wxDEFINE_EVENT(EVT_LANGUAGE_CHANGE, wxCommandEvent);
 
 #if 0
 #ifdef __WXGTK__
 static void wxOnAssert(const wxChar *fileName, int lineNumber, const wxChar *msg)
 {
    if (msg)
-      printf("ASSERTION FAILED: %s\n%s: %d\n", (const char *)wxString(msg).mb_str(), (const char *)wxString(fileName).mb_str(), lineNumber);
+      wxPrintf("ASSERTION FAILED: %s\n%s: %d\n", (const char *)wxString(msg).mb_str(), (const char *)wxString(fileName).mb_str(), lineNumber);
    else
-      printf("ASSERTION FAILED!\n%s: %d\n", (const char *)wxString(fileName).mb_str(), lineNumber);
+      wxPrintf("ASSERTION FAILED!\n%s: %d\n", (const char *)wxString(fileName).mb_str(), lineNumber);
 
    // Force core dump
    int *i = 0;
@@ -802,8 +801,8 @@ bool AudacityApp::MRUOpen(const wxString &fullPathStr) {
       }
       else {
          // File doesn't exist - remove file from history
-         wxMessageBox(wxString::Format(_("%s could not be found.\n\nIt has been removed from the list of recent files."),
-                      fullPathStr.c_str()));
+         AudacityMessageBox(wxString::Format(_("%s could not be found.\n\nIt has been removed from the list of recent files."),
+                      fullPathStr));
          return(false);
       }
    }
@@ -906,8 +905,8 @@ Silence is being substituted for the affected audio.\n\
 The first detected missing file is:\n\
 %s\n\
 There may be additional missing files.\n\
-Choose File > Check Dependencies to view a list of \
-locations of the missing files."), missingFileName.c_str());
+Choose Help > Diagnostics > Check Dependencies to view a list of \
+locations of the missing files."), missingFileName);
 
          // if an old dialog exists, raise it if it is
          if (offendingProject->GetMissingAliasFileDialog()) {
@@ -1008,7 +1007,7 @@ wxString AudacityApp::InitLang( const wxString & lang )
    if (!lang.empty()) {
       info = wxLocale::FindLanguageInfo(lang);
       if (!info)
-         ::wxMessageBox(wxString::Format(_("Language \"%s\" is unknown"), lang));
+         ::AudacityMessageBox(wxString::Format(_("Language \"%s\" is unknown"), lang));
    }
    if (!info)
    {
@@ -1064,6 +1063,13 @@ void AudacityApp::OnFatalException()
    exit(-1);
 }
 
+
+#ifdef _MSC_VER
+// If this is compiled with MSVC (Visual Studio)
+#pragma warning( push )
+#pragma warning( disable : 4702) // unreachable code warning.
+#endif //_MSC_VER
+
 bool AudacityApp::OnExceptionInMainLoop()
 {
    // This function is invoked from catch blocks in the wxWidgets framework,
@@ -1072,12 +1078,13 @@ bool AudacityApp::OnExceptionInMainLoop()
 
    try { throw; }
    catch ( AudacityException &e ) {
+      (void)e;// Compiler food
       // Here is the catch-all for our own exceptions
 
       // Use CallAfter to delay this to the next pass of the event loop,
       // rather than risk doing it inside stack unwinding.
       auto pProject = ::GetActiveProject();
-      std::shared_ptr< AudacityException > pException { e.Move().release() };
+      auto pException = std::current_exception();
       CallAfter( [=]      // Capture pException by value!
       {
 
@@ -1085,10 +1092,15 @@ bool AudacityApp::OnExceptionInMainLoop()
          // failed operation
          pProject->RollbackState();
 
+         // Forget pending changes in the TrackList
+         pProject->GetTracks()->ClearPendingTracks();
+
          pProject->RedrawProject();
 
          // Give the user an alert
-         pException->DelayedHandlerAction();
+         try { std::rethrow_exception( pException ); }
+         catch( AudacityException &e )
+            { e.DelayedHandlerAction(); }
 
       } );
 
@@ -1100,10 +1112,12 @@ bool AudacityApp::OnExceptionInMainLoop()
       // Let the inherited function do throw; again and whatever else it does.
       return wxApp::OnExceptionInMainLoop();
    }
-
    // Shouldn't ever reach this line
    return false;
 }
+#ifdef _MSC_VER
+#pragma warning( pop )
+#endif //_MSC_VER
 
 #if defined(EXPERIMENTAL_CRASH_REPORT)
 void AudacityApp::GenerateCrashReport(wxDebugReport::Context ctx)
@@ -1138,7 +1152,7 @@ void AudacityApp::GenerateCrashReport(wxDebugReport::Context ctx)
 
    if (ok && rpt.Process())
    {
-      wxTextEntryDialog dlg(NULL,
+      AudacityTextEntryDialog dlg(NULL,
                               _("Report generated to:"),
                               _("Audacity Support Data"),
                               rpt.GetCompressedFileName(),
@@ -1147,7 +1161,7 @@ void AudacityApp::GenerateCrashReport(wxDebugReport::Context ctx)
       dlg.ShowModal();
 
       wxLogMessage(wxT("Report generated to: %s"),
-                     rpt.GetCompressedFileName().c_str());
+                     rpt.GetCompressedFileName());
 
       rpt.Reset();
    }
@@ -1278,8 +1292,15 @@ bool AudacityApp::OnInit()
       * The "share" and "share/doc" directories in their install path */
    wxString home = wxGetHomeDir();
 
-   /* On Unix systems, the default temp dir is in /var/tmp. */
-   defaultTempDir.Printf(wxT("/var/tmp/audacity-%s"), wxGetUserId().c_str());
+   wxString envTempDir = wxGetenv(wxT("TMPDIR"));
+   if (envTempDir != wxT("")) {
+      /* On Unix systems, the environment variable TMPDIR may point to
+         an unusual path when /tmp and /var/tmp are not desirable. */
+      defaultTempDir.Printf(wxT("%s/audacity-%s"), envTempDir, wxGetUserId());
+   } else {
+      /* On Unix systems, the default temp dir is in /var/tmp. */
+      defaultTempDir.Printf(wxT("/var/tmp/audacity-%s"), wxGetUserId());
+   }
 
 // DA: Path env variable.
 #ifndef EXPERIMENTAL_DA
@@ -1293,7 +1314,7 @@ bool AudacityApp::OnInit()
 
 #ifdef AUDACITY_NAME
    AddUniquePathToPathList(wxString::Format(wxT("%s/.%s-files"),
-      home.c_str(), wxT(AUDACITY_NAME)),
+      home, wxT(AUDACITY_NAME)),
       audacityPathList);
    AddUniquePathToPathList(wxString::Format(wxT("%s/share/%s"),
       wxT(INSTALL_PREFIX), wxT(AUDACITY_NAME)),
@@ -1303,7 +1324,7 @@ bool AudacityApp::OnInit()
       audacityPathList);
 #else //AUDACITY_NAME
    AddUniquePathToPathList(wxString::Format(wxT("%s/.audacity-files"),
-      home.c_str()),
+      home),
       audacityPathList);
    AddUniquePathToPathList(wxString::Format(wxT("%s/share/audacity"),
       wxT(INSTALL_PREFIX)),
@@ -1346,7 +1367,7 @@ bool AudacityApp::OnInit()
    // See bug #1271 for explanation of location
    tmpDirLoc = FileNames::MkDir(wxStandardPaths::Get().GetUserLocalDataDir());
    defaultTempDir.Printf(wxT("%s\\SessionData"),
-      tmpDirLoc.c_str());
+      tmpDirLoc);
 #endif //__WXWSW__
 
 #ifdef __WXMAC__
@@ -1365,11 +1386,11 @@ bool AudacityApp::OnInit()
    // JKC Bug 1220: Using an actual temp directory for session data on Mac was
    // wrong because it would get cleared out on a reboot.
    defaultTempDir.Printf(wxT("%s/Library/Application Support/audacity/SessionData"),
-      tmpDirLoc.c_str());
+      tmpDirLoc);
 
    //defaultTempDir.Printf(wxT("%s/audacity-%s"),
-   //   tmpDirLoc.c_str(),
-   //   wxGetUserId().c_str());
+   //   tmpDirLoc,
+   //   wxGetUserId());
 #endif //__WXMAC__
 
    // Define languanges for which we have translations, but that are not yet
@@ -1467,6 +1488,8 @@ bool AudacityApp::OnInit()
    // BG: Create a temporary window to set as the top window
    wxImage logoimage((const char **)AudacityLogoWithName_xpm);
    logoimage.Rescale(logoimage.GetWidth() / 2, logoimage.GetHeight() / 2);
+   if( GetLayoutDirection() == wxLayout_RightToLeft)
+      logoimage = logoimage.Mirror();
    wxBitmap logo(logoimage);
 
    AudacityProject *project;
@@ -1492,7 +1515,7 @@ bool AudacityApp::OnInit()
       // now appears before setting its position.
       // On a dual monitor screen it will appear on one screen and then 
       // possibly jump to the second.
-      // We could fix this by writing outr own splash screen and using Hide() 
+      // We could fix this by writing our own splash screen and using Hide() 
       // until the splash scren was correctly positioned, then Show()
 
       // Possibly move it on to the second screen...
@@ -1571,7 +1594,7 @@ bool AudacityApp::OnInit()
       // Mainly this is to tell users of ALPHAS who don't know that they have an ALPHA.
       // Disabled for now, after discussion.
       // project->MayCheckForUpdates();
-      project->OnHelpWelcome();
+      GetMenuCommandHandler(*project).OnHelpWelcome(*project);
    }
 
    // JKC 10-Sep-2007: Enable monitoring from the start.
@@ -1638,7 +1661,7 @@ bool AudacityApp::OnInit()
 
 void AudacityApp::InitCommandHandler()
 {
-   mCmdHandler = std::make_unique<CommandHandler>(*this);
+   mCmdHandler = std::make_unique<CommandHandler>();
    //SetNextHandler(mCmdHandler);
 }
 
@@ -1656,7 +1679,7 @@ void AudacityApp::OnKeyDown(wxKeyEvent &event)
       auto project = ::GetActiveProject();
       auto token = project->GetAudioIOToken();
       auto &scrubber = project->GetScrubber();
-      auto scrubbing = scrubber.HasStartedScrubbing();
+      auto scrubbing = scrubber.HasMark();
       if (scrubbing)
          scrubber.Cancel();
       if((token > 0 &&
@@ -1664,7 +1687,7 @@ void AudacityApp::OnKeyDown(wxKeyEvent &event)
                gAudioIO->GetNumCaptureChannels() == 0) ||
          scrubbing)
          // ESC out of other play (but not record)
-         project->OnStop();
+         GetMenuCommandHandler(*project).OnStop(*project);
       else
          event.Skip();
    }
@@ -1761,9 +1784,9 @@ bool AudacityApp::InitTempDir()
    if (temp == wxT("")) {
       // Failed
       if( !IsTempDirectoryNameOK( tempFromPrefs ) ) {
-         wxMessageBox(_("Audacity could not find a safe place to store temporary files.\nAudacity needs a place where automatic cleanup programs won't delete the temporary files.\nPlease enter an appropriate directory in the preferences dialog."));
+         AudacityMessageBox(_("Audacity could not find a safe place to store temporary files.\nAudacity needs a place where automatic cleanup programs won't delete the temporary files.\nPlease enter an appropriate directory in the preferences dialog."));
       } else {
-         wxMessageBox(_("Audacity could not find a place to store temporary files.\nPlease enter an appropriate directory in the preferences dialog."));
+         AudacityMessageBox(_("Audacity could not find a place to store temporary files.\nPlease enter an appropriate directory in the preferences dialog."));
       }
 
       // Only want one page of the preferences
@@ -1773,7 +1796,7 @@ bool AudacityApp::InitTempDir()
       GlobalPrefsDialog dialog(NULL, factories);
       dialog.ShowModal();
 
-      wxMessageBox(_("Audacity is now going to exit. Please launch Audacity again to use the new temporary directory."));
+      AudacityMessageBox(_("Audacity is now going to exit. Please launch Audacity again to use the new temporary directory."));
       return false;
    }
 
@@ -1800,7 +1823,7 @@ bool AudacityApp::InitTempDir()
 
 bool AudacityApp::CreateSingleInstanceChecker(const wxString &dir)
 {
-   wxString name = wxString::Format(wxT("audacity-lock-%s"), wxGetUserId().c_str());
+   wxString name = wxString::Format(wxT("audacity-lock-%s"), wxGetUserId());
    mChecker.reset();
    auto checker = std::make_unique<wxSingleInstanceChecker>();
 
@@ -1818,7 +1841,7 @@ bool AudacityApp::CreateSingleInstanceChecker(const wxString &dir)
          _("Audacity was not able to lock the temporary files directory.\nThis folder may be in use by another copy of Audacity.\n") +
          runningTwoCopiesStr +
          _("Do you still want to start Audacity?");
-      int action = wxMessageBox(prompt,
+      int action = AudacityMessageBox(prompt,
                                 _("Error Locking Temporary Folder"),
                                 wxYES_NO | wxICON_EXCLAMATION,
                                 NULL);
@@ -1853,9 +1876,9 @@ bool AudacityApp::CreateSingleInstanceChecker(const wxString &dir)
             if (parser->GetParamCount() > 0)
             {
                // Send each parameter to existing Audacity
-               for (size_t i = 0, cnt = parser->GetParamCount(); i < cnt; i++)
+               for (size_t j = 0, cnt = parser->GetParamCount(); j < cnt; j++)
                {
-                  ok = conn->Execute(parser->GetParam(i));
+                  ok = conn->Execute(parser->GetParam(j));
                }
              }
             else
@@ -1892,14 +1915,22 @@ bool AudacityApp::CreateSingleInstanceChecker(const wxString &dir)
             sock->Connect(addr, true);
             if (sock->IsConnected())
             {
-               for (size_t i = 0, cnt = parser->GetParamCount(); i < cnt; i++)
+               if (parser->GetParamCount() > 0)
                {
-                  // Send the filename
-                  wxString param = parser->GetParam(i);
-                  sock->WriteMsg((const wxChar *) param.c_str(), (param.Len() + 1) * sizeof(wxChar));
+                  for (size_t i = 0, cnt = parser->GetParamCount(); i < cnt; i++)
+                  {
+                     // Send the filename
+                     wxString param = parser->GetParam(i);
+                     sock->WriteMsg((const wxChar *) param, (param.Len() + 1) * sizeof(wxChar));
+                  }
+               }
+               else
+               {
+                  // Send an empty string to force existing Audacity to front
+                  sock->WriteMsg(wxEmptyString, sizeof(wxChar));
                }
 
-               return false;
+               return sock->Error();
             }
 
             wxMilliSleep(100);
@@ -1912,7 +1943,7 @@ bool AudacityApp::CreateSingleInstanceChecker(const wxString &dir)
          _("The system has detected that another copy of Audacity is running.\n") +
          runningTwoCopiesStr +
          _("Use the New or Open commands in the currently running Audacity\nprocess to open multiple projects simultaneously.\n");
-      wxMessageBox(prompt, _("Audacity is already running"),
+      AudacityMessageBox(prompt, _("Audacity is already running"),
             wxOK | wxICON_ERROR);
       return false;
    }
@@ -2287,7 +2318,7 @@ void AudacityApp::AssociateFileTypes()
          // Either there's no pref or user does want associations
          // and they got stepped on, so ask.
          int wantAssoc =
-            wxMessageBox(
+            AudacityMessageBox(
                _("Audacity project (.AUP) files are not currently \nassociated with Audacity. \n\nAssociate them, so they open on double-click?"),
                _("Audacity Project Files"),
                wxYES_NO | wxICON_QUESTION);

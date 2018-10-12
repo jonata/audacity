@@ -34,8 +34,6 @@
 
 #include <math.h>
 
-#include <wx/arrimpl.cpp>
-
 #include "Equalization48x.h"
 #include "../RealFFTf.h"
 #include "../RealFFTf48x.h"
@@ -298,10 +296,9 @@ bool EffectEqualization48x::Process(EffectEqualization* effectEqualization)
       mEffectEqualization->mM=(mEffectEqualization->mM&(~15))+1;
    AllocateBuffersWorkers(sMathPath&MATH_FUNCTION_THREADED);
    auto cleanup = finally( [&] { FreeBuffersWorkers(); } );
-   SelectedTrackListOfKindIterator iter(Track::Wave, mEffectEqualization->mOutputTracks.get());
-   WaveTrack *track = (WaveTrack *) iter.First();
    int count = 0;
-   while (track) {
+   for( auto track :
+        mEffectEqualization->mOutputTracks->Selected< WaveTrack >() {
       double trackStart = track->GetStartTime();
       double trackEnd = track->GetEndTime();
       double t0 = mEffectEqualization->mT0 < trackStart? trackStart: mEffectEqualization->mT0;
@@ -315,7 +312,6 @@ bool EffectEqualization48x::Process(EffectEqualization* effectEqualization)
          if( bBreakLoop )
             break;
       }
-      track = (WaveTrack *) iter.Next();
       count++;
    }
 
@@ -342,14 +338,12 @@ bool EffectEqualization48x::TrackCompare()
    
    TrackList      SecondOutputTracks;
 
-   //iterate over tracks of type trackType (All types if Track::All)
-   TrackListOfKindIterator aIt(mEffectEqualization->mOutputTracksType, mEffectEqualization->mTracks);
-
-   for (Track *aTrack = aIt.First(); aTrack; aTrack = aIt.Next()) {
+   for (auto aTrack : mEffectEqualization->mTracks->Any< WaveTrack >()) {
 
       // Include selected tracks, plus sync-lock selected tracks for Track::All.
       if (aTrack->GetSelected() ||
-         (mEffectEqualization->mOutputTracksType == Track::All && aTrack->IsSyncLockSelected()))
+         (// mEffectEqualization->mOutputTracksType == TrackKind::All &&
+          aTrack->IsSyncLockSelected()))
       {
          auto o = aTrack->Duplicate();
          SecondIMap.push_back(aTrack);
@@ -358,15 +352,12 @@ bool EffectEqualization48x::TrackCompare()
       }
    }
 
-   for(int i=0;i<2;i++) {
-      SelectedTrackListOfKindIterator iter
-         (Track::Wave, i
-          ? mEffectEqualization->mOutputTracks.get()
-          : &SecondOutputTracks);
+   for(int i = 0; i < 2; i++) {
       i?sMathPath=sMathPath:sMathPath=0;
-      WaveTrack *track = (WaveTrack *) iter.First();
       int count = 0;
-      while (track) {
+      for( auto track :
+           ( i ? mEffectEqualization->mOutputTracks.get()
+               : &SecondOutputTracks ) -> Selected< WaveTrack >() {
          double trackStart = track->GetStartTime();
          double trackEnd = track->GetEndTime();
          double t0 = mEffectEqualization->mT0 < trackStart? trackStart: mEffectEqualization->mT0;
@@ -380,16 +371,14 @@ bool EffectEqualization48x::TrackCompare()
             if( bBreakLoop )
                break;
          }
-         track = (WaveTrack *) iter.Next();
          count++;
       }
    }
-   SelectedTrackListOfKindIterator
-      iter(Track::Wave, mEffectEqualization->mOutputTracks.get());
-   SelectedTrackListOfKindIterator iter2(Track::Wave, &SecondOutputTracks);
-   WaveTrack *track =  (WaveTrack *) iter.First();
-   WaveTrack *track2 = (WaveTrack *) iter2.First();
-   while (track) {
+
+   auto iter2 = (SecondOutputTracks.Selected< const WaveTrack >()).first;
+   auto track2 = *iter2;
+   for ( auto track :
+         mEffectEqualization->mOutputTracks->Selected< const WaveTrack >() {
       double trackStart = track->GetStartTime();
       double trackEnd = track->GetEndTime();
       double t0 = mEffectEqualization->mT0 < trackStart? trackStart: mEffectEqualization->mT0;
@@ -401,8 +390,7 @@ bool EffectEqualization48x::TrackCompare()
          auto len = end - start;
          DeltaTrack(track, track2, start, len);
       }
-      track = (WaveTrack *) iter.Next();
-      track2 = (WaveTrack *) iter2.Next();
+      track2 = * ++iter2;
    }
    mEffectEqualization->ReplaceProcessedTracks(!bBreakLoop);
    return bBreakLoop; // return !bBreakLoop ?
@@ -448,12 +436,10 @@ bool EffectEqualization48x::Benchmark(EffectEqualization* effectEqualization)
       mEffectEqualization->mM=(mEffectEqualization->mM&(~15))+1;
    AllocateBuffersWorkers(MATH_FUNCTION_THREADED);
    auto cleanup = finally( [&] { FreeBuffersWorkers(); } );
-   SelectedTrackListOfKindIterator
-      iter(Track::Wave, mEffectEqualization->mOutputTracks.get());
    long times[] = { 0,0,0,0,0 };
    wxStopWatch timer;
-   mBenching=true;
-   for(int i=0;i<5 && !bBreakLoop;i++) {
+   mBenching = true;
+   for(int i = 0; i < 5 && !bBreakLoop; i++) {
       int localMathPath;
       switch(i) {
          case 0: localMathPath=MATH_FUNCTION_SSE|MATH_FUNCTION_THREADED;
@@ -472,11 +458,11 @@ bool EffectEqualization48x::Benchmark(EffectEqualization* effectEqualization)
             break;
          default: localMathPath=-1;
       }
-      if(localMathPath>=0) {
+      if(localMathPath >= 0) {
          timer.Start();
-         WaveTrack *track = (WaveTrack *) iter.First();
          int count = 0;
-         while (track) {
+         for (auto track :
+              mEffectEqualization->mOutputTracks->Selected< WaveTrack >() {
             double trackStart = track->GetStartTime();
             double trackEnd = track->GetEndTime();
             double t0 = mEffectEqualization->mT0 < trackStart? trackStart: mEffectEqualization->mT0;
@@ -490,7 +476,6 @@ bool EffectEqualization48x::Benchmark(EffectEqualization* effectEqualization)
                if( bBreakLoop )
                   break;
             }
-            track = (WaveTrack *) iter.Next();
             count++;
          }
          times[i]=timer.Time();
@@ -506,8 +491,8 @@ bool EffectEqualization48x::Benchmark(EffectEqualization* effectEqualization)
    wxTimeSpan tsDefaultThreaded(0, 0, 0, times[3]);
    wxTimeSpan tsDefault(0, 0, 0, times[4]);
 
-   wxMessageBox(wxString::Format(_("Benchmark times:\nOriginal: %s\nDefault Segmented: %s\nDefault Threaded: %s\nSSE: %s\nSSE Threaded: %s\n"),tsDefault.Format(wxT("%M:%S.%l")).c_str(), 
-      tsDefaultEnhanced.Format(wxT("%M:%S.%l")).c_str(), tsDefaultThreaded.Format(wxT("%M:%S.%l")).c_str(),tsSSE.Format(wxT("%M:%S.%l")).c_str(),tsSSEThreaded.Format(wxT("%M:%S.%l")).c_str()));
+   Effect::MessageBox(wxString::Format(_("Benchmark times:\nOriginal: %s\nDefault Segmented: %s\nDefault Threaded: %s\nSSE: %s\nSSE Threaded: %s\n"),tsDefault.Format(wxT("%M:%S.%l")),
+      tsDefaultEnhanced.Format(wxT("%M:%S.%l")), tsDefaultThreaded.Format(wxT("%M:%S.%l")),tsSSE.Format(wxT("%M:%S.%l")),tsSSEThreaded.Format(wxT("%M:%S.%l"))));
    return bBreakLoop; // return !bBreakLoop ?
 }
 

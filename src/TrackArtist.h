@@ -55,7 +55,7 @@ class AUDACITY_DLL_API TrackArtist {
 
    void SetColours(int iColorIndex);
    void DrawTracks(TrackPanelDrawingContext &context,
-                   TrackList *tracks, Track *start,
+                   const TrackList *tracks,
                    const wxRegion & reg,
                    const wxRect & rect, const wxRect & clip,
                    const SelectedRegion &selectedRegion, const ZoomInfo &zoomInfo,
@@ -77,12 +77,12 @@ class AUDACITY_DLL_API TrackArtist {
 
    void UpdatePrefs();
 
-   void SetBackgroundBrushes(wxBrush unselectedBrush, wxBrush selectedBrush,
-                             wxPen unselectedPen, wxPen selectedPen) {
-     this->unselectedBrush = unselectedBrush;
-     this->selectedBrush = selectedBrush;
-     this->unselectedPen = unselectedPen;
-     this->selectedPen = selectedPen;
+   void SetBackgroundBrushes(wxBrush unselectedBrushIn, wxBrush selectedBrushIn,
+                             wxPen unselectedPenIn, wxPen selectedPenIn) {
+     this->unselectedBrush = unselectedBrushIn;
+     this->selectedBrush = selectedBrushIn;
+     this->unselectedPen = unselectedPenIn;
+     this->selectedPen = selectedPenIn;
    }
 
    // Helper: draws the "sync-locked" watermark tiled to a rectangle
@@ -160,11 +160,7 @@ class AUDACITY_DLL_API TrackArtist {
                       float zoomMin, float zoomMax,
                       bool dB, float dBRange,
                       const float *min, const float *max, const float *rms, const int *bl,
-                      bool /* showProgress */, bool muted
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-                      , const float gain
-#endif
-   );
+                      bool /* showProgress */, bool muted);
    void DrawIndividualSamples(wxDC & dc, int leftOffset, const wxRect & rect,
                               float zoomMin, float zoomMax,
                               bool dB, float dBRange,
@@ -183,7 +179,7 @@ class AUDACITY_DLL_API TrackArtist {
    // Preference values
    float mdBrange;            // "/GUI/EnvdBRange"
    long mShowClipping;        // "/GUI/ShowClipping"
-   int  mSampleDisplay;       // "/GUI/SampleView"
+   int  mSampleDisplay;
    bool mbShowTrackNameInWaveform;  // "/GUI/ShowTrackNameInWaveform"
 
    int mMarginLeft;

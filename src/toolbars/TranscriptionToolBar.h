@@ -82,6 +82,8 @@ class TranscriptionToolBar final : public ToolBar {
    void Repaint(wxDC * WXUNUSED(dc)) override {};
    void EnableDisableButtons() override;
    void UpdatePrefs() override;
+   int GetInitialWidth()  override { return 191; }
+   int GetMinToolbarWidth() override { return 125; }
 
    void OnFocus(wxFocusEvent &event);
    void OnCaptureKey(wxCommandEvent &event);
@@ -122,7 +124,8 @@ class TranscriptionToolBar final : public ToolBar {
  private:
 
    void InitializeTranscriptionToolBar();
-   AButton *AddButton(
+   static AButton *AddButton(
+      TranscriptionToolBar *pBar,
       teBmps eFore, teBmps eDisabled,
       int id,
       const wxChar *label);

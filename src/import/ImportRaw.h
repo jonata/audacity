@@ -21,27 +21,10 @@ class wxWindow;
 
 #include <vector>
 
-#ifdef __AUDACITY_OLD_STD__
-
-class TrackHolder : public std::shared_ptr < WaveTrack >
-{
-public:
-   // shared_ptr can construct from unique_ptr&& in newer std, but not older,
-   // so define it here
-   TrackHolder &operator=(std::unique_ptr<WaveTrack> &&that)
-   {
-      reset(that.release());
-      return *this;
-   }
-};
-
-using TrackHolders = std::vector<TrackHolder>;
-
-#else
-
-using TrackHolders = std::vector<std::unique_ptr<WaveTrack>>;
-
-#endif
+// Newly constructed WaveTracks that are not yet owned by a TrackList
+// are held in unique_ptr not shared_ptr
+using NewChannelGroup = std::vector< std::unique_ptr<WaveTrack> >;
+using TrackHolders = std::vector< NewChannelGroup >;
 
 
 void ImportRaw(wxWindow *parent, const wxString &fileName,

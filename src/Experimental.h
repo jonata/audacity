@@ -48,14 +48,18 @@
 // feature to link audio tracks to a label track
 #define EXPERIMENTAL_SYNC_LOCK
 
-// JKC: Enable to get extra buttons in the screenshot tools.
-//#define EXPERIMENTAL_DOCS_AUTOMATION
-// JKC: Enable to get experiemental code to move
-// mod-script-pipe towards being mainstream.
-//#define EXPERIMENTAL_AUTOMATION
-
 // DA: Enables dark audacity theme and customisations.
 //#define EXPERIMENTAL_DA
+
+// These CFG macros allow easy distinction between Audacity and DA defaults.
+#ifdef EXPERIMENTAL_DA
+#define CFG_A( x ) 
+#define CFG_DA( x ) x
+#else
+#define CFG_A( x ) x
+#define CFG_DA( x ) 
+#endif
+
 
 // Define this so that sync-lock tiles shine through spectrogram.
 // The spectrogram pastes a bitmap over the tiles.
@@ -67,6 +71,10 @@
 // Wavetrack, and draws its notes and lines over the top.
 #define EXPERIMENTAL_NOTETRACK_OVERLAY
 
+// Define this, and the option to zoom to half wave is added in the VZoom menu.
+// Also we go to half wave on collapse, full wave on restore.
+#define EXPERIMENTAL_HALF_WAVE
+
 // EXPERIMENTAL_THEMING is mostly mainstream now.
 // the define is still present to mark out old code before theming, that we might
 // conceivably need.
@@ -76,6 +84,9 @@
 //August 2009 - Theming not locked down enough for a stable release.
 // This turns on the Theme panel in Prefs dialog. It is independent of EXPERIMENTAL_THEMING.
 //#define EXPERIMENTAL_THEME_PREFS
+
+// This shows the zoom toggle button on the edit toolbar.
+#define EXPERIMENTAL_ZOOM_TOGGLE_BUTTON
 
 //Next line enables Mic monitoring at times when it was previously off.
 //More work is needed as after recording or playing it results in an
@@ -162,10 +173,6 @@
    //#define EXPERIMENTAL_AUTOMATED_INPUT_LEVEL_ADJUSTMENT
 #endif
 
-// John (Thales) work to make the display show the result of the pan and gain sliders, rather than their input.
-// First committed by Martyn, 30th May 2013.
-//#define EXPERIMENTAL_OUTPUT_DISPLAY
-
 // Module prefs provides a panel in prefs where users can choose which modules
 // to enable.
 #define EXPERIMENTAL_MODULE_PREFS
@@ -230,11 +237,30 @@
 // with themes
 //#define EXPERIMENTAL_TRACK_PANEL_HIGHLIGHTING
 
+<<<<<<< HEAD
 // Jonatã Bolzan Loss 23 Nov 2017
 // Print cursor position in seconds to stdout, useful if used with some video
 // playback engine, for example. It prints in SelectioBar everytime the
 // timecode is changed, and add a "(seek)" string to make sure it is a
 // position information that is being printed
 //#define PRINT_POSITION_TO_STDOUT
+=======
+// Paul Licameli (PRL) 28 Dec 2017
+// Easy drag-and-drop to add Nyquist, LADSPA, and VST plug-ins
+// #define EXPERIMENTAL_DRAG_DROP_PLUG_INS
+
+// PRL 5 Jan 2018
+// Easy change of keystroke bindings for menu items
+#define EXPERIMENTAL_EASY_CHANGE_KEY_BINDINGS
+
+// PRL 1 Jun 2018
+#define EXPERIMENTAL_PUNCH_AND_ROLL
+
+// PRL 31 July 2018
+#define EXPERIMENTAL_DRAGGABLE_PLAY_HEAD
+
+// mmm-1 22 Aug 2018
+//#define EXPERIMENTAL_R128_NORM
+>>>>>>> upstream/master
 
 #endif

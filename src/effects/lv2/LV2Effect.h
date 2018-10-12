@@ -17,7 +17,6 @@
 #include <vector>
 #include <wx/checkbox.h>
 #include <wx/dialog.h>
-#include <wx/dynarray.h>
 #include <wx/event.h>
 #include <wx/slider.h>
 #include <wx/stattext.h>
@@ -39,8 +38,12 @@
 
 #include "LoadLV2.h"
 
+#include <unordered_map>
+
 #define LV2EFFECTS_VERSION wxT("1.0.0.0")
-#define LV2EFFECTS_FAMILY wxT("LV2")
+/* i18n-hint: abbreviates
+   "Linux Audio Developer's Simple Plugin API (LADSPA) version 2" */
+#define LV2EFFECTS_FAMILY XO("LV2")
 
 /** A structure that contains information about a single LV2 plugin port. */
 class LV2Port
@@ -58,6 +61,10 @@ public:
       mHasLo = false;
       mHasHi = false;
    }
+   LV2Port( const LV2Port & ) = default;
+   LV2Port& operator = ( const LV2Port & ) = default;
+   //LV2Port( LV2Port && ) = default;
+   //LV2Port& operator = ( LV2Port && ) = default;
 
    uint32_t mIndex;
    wxString mSymbol;
@@ -84,13 +91,11 @@ public:
    LilvPort *mPort;
 
    // ScalePoints
-   wxArrayDouble mScaleValues;
+   std::vector<double> mScaleValues;
    wxArrayString mScaleLabels;
 };
 
-WX_DECLARE_OBJARRAY(LV2Port, LV2PortArray);
-WX_DECLARE_STRING_HASH_MAP(wxArrayInt, LV2GroupMap);
-WX_DEFINE_ARRAY_PTR(LilvInstance *, LV2SlaveArray);
+using LV2GroupMap = std::unordered_map<wxString, std::vector<int>>;
 
 class LV2EffectSettingsDialog;
 
@@ -105,16 +110,15 @@ public:
    // IdentInterface implementation
 
    wxString GetPath() override;
-   wxString GetSymbol() override;
-   wxString GetName() override;
-   wxString GetVendor() override;
+   IdentInterfaceSymbol GetSymbol() override;
+   IdentInterfaceSymbol GetVendor() override;
    wxString GetVersion() override;
    wxString GetDescription() override;
 
-   // EffectIdentInterface implementation
+   // EffectDefinitionInterface implementation
 
    EffectType GetType() override;
-   wxString GetFamily() override;
+   IdentInterfaceSymbol GetFamilyId() override;
    bool IsInteractive() override;
    bool IsDefault() override;
    bool IsLegacy() override;
@@ -156,8 +160,8 @@ public:
 
    bool ShowInterface(wxWindow *parent, bool forceModal = false) override;
 
-   bool GetAutomationParameters(EffectAutomationParameters & parms) override;
-   bool SetAutomationParameters(EffectAutomationParameters & parms) override;
+   bool GetAutomationParameters(CommandParameters & parms) override;
+   bool SetAutomationParameters(CommandParameters & parms) override;
 
    // EffectUIClientInterface implementation
 
@@ -261,9 +265,9 @@ private:
    double mSampleRate;
 
    wxLongToLongHashMap mControlsMap;
-   LV2PortArray mControls;
-   wxArrayInt mAudioInputs;
-   wxArrayInt mAudioOutputs;
+   std::vector<LV2Port> mControls;
+   std::vector<int> mAudioInputs;
+   std::vector<int> mAudioOutputs;
 
    LV2GroupMap mGroupMap;
    wxArrayString mGroups;
@@ -275,7 +279,7 @@ private:
 
    LilvInstance *mMaster;
    LilvInstance *mProcess;
-   LV2SlaveArray mSlaves;
+   std::vector<LilvInstance*> mSlaves;
 
    FloatBuffers mMasterIn, mMasterOut;
    size_t mNumSamples;
@@ -288,7 +292,7 @@ private:
 
    bool mUseGUI;
 
-   std::vector< movable_ptr_with_deleter<char, freer> > mURIMap;
+   std::vector< std::unique_ptr<char, freer> > mURIMap;
 
    LV2_URI_Map_Feature mUriMapFeature;
    LV2_URID_Map mURIDMapFeature;
@@ -302,7 +306,7 @@ private:
    LV2_Options_Interface *mOptionsInterface;
    std::vector<LV2_Options_Option> mOptions;
 
-   std::vector<movable_ptr<LV2_Feature>> mFeatures;
+   std::vector<std::unique_ptr<LV2_Feature>> mFeatures;
 
    LV2_Feature *mInstanceAccessFeature;
    LV2_Feature *mParentFeature;

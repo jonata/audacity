@@ -45,6 +45,7 @@
 #include "ImportPlugin.h"
 #include "../Internat.h"
 #include "../Tags.h"
+#include "../prefs/QualityPrefs.h"
 
 #define DESC _("MP3 files")
 
@@ -61,7 +62,7 @@ void GetMP3ImportPlugin(ImportPluginList &importPluginList,
                         UnusableImportPluginList &unusableImportPluginList)
 {
    unusableImportPluginList.push_back(
-      make_movable<UnusableImportPlugin>
+      std::make_unique<UnusableImportPlugin>
          (DESC, wxArrayString(WXSIZEOF(exts), exts))
   );
 }
@@ -71,7 +72,6 @@ void GetMP3ImportPlugin(ImportPluginList &importPluginList,
 #include <wx/textctrl.h>
 #include <wx/file.h>
 #include <wx/thread.h>
-#include <wx/msgdlg.h>
 #include <wx/progdlg.h>
 #include <wx/string.h>
 #include <wx/timer.h>
@@ -87,7 +87,7 @@ extern "C" {
 
 #include "../WaveTrack.h"
 
-#define INPUT_BUFFER_SIZE 65535u
+#define INPUT_BUFFER_SIZE 65535
 #define PROGRESS_SCALING_FACTOR 100000
 
 /* this is a private structure we can use for whatever we like, and it will get
@@ -95,10 +95,10 @@ extern "C" {
  * things. */
 struct private_data {
    wxFile *file;            /* the file containing the mp3 data we're feeding the encoder */
-   ArrayOf<unsigned char> inputBuffer{ INPUT_BUFFER_SIZE };
+   ArrayOf<unsigned char> inputBuffer{ static_cast<unsigned int>(INPUT_BUFFER_SIZE) };
    int inputBufferFill;     /* amount of data in inputBuffer */
    TrackFactory *trackFactory;
-   TrackHolders channels;
+   NewChannelGroup channels;
    ProgressDialog *progress;
    unsigned numChannels;
    ProgressResult updateResult;
@@ -116,8 +116,8 @@ public:
 
    ~MP3ImportPlugin() { }
 
-   wxString GetPluginStringID() { return wxT("libmad"); }
-   wxString GetPluginFormatDescription();
+   wxString GetPluginStringID() override { return wxT("libmad"); }
+   wxString GetPluginFormatDescription() override;
    std::unique_ptr<ImportFileHandle> Open(const wxString &Filename) override;
 };
 
@@ -159,7 +159,7 @@ private:
 void GetMP3ImportPlugin(ImportPluginList &importPluginList,
                         UnusableImportPluginList & WXUNUSED(unusableImportPluginList))
 {
-   importPluginList.push_back( make_movable<MP3ImportPlugin>() );
+   importPluginList.push_back( std::make_unique<MP3ImportPlugin>() );
 }
 
 /* The MAD callbacks */
@@ -208,8 +208,9 @@ auto MP3ImportFileHandle::GetFileUncompressedBytes() -> ByteCount
    return 0;
 }
 
-ProgressResult MP3ImportFileHandle::Import(TrackFactory *trackFactory, TrackHolders &outTracks,
-                                Tags *tags)
+ProgressResult MP3ImportFileHandle::Import(
+   TrackFactory *trackFactory, TrackHolders &outTracks,
+   Tags *tags)
 {
    outTracks.clear();
 
@@ -240,19 +241,20 @@ ProgressResult MP3ImportFileHandle::Import(TrackFactory *trackFactory, TrackHold
 
    if (!res) {
       /* failure */
-      /* printf("failure\n"); */
+      /* wxPrintf("failure\n"); */
       return (privateData.updateResult);
    }
 
    /* success */
-   /* printf("success\n"); */
+   /* wxPrintf("success\n"); */
 
       /* copy the WaveTrack pointers into the Track pointer list that
        * we are expected to fill */
    for(const auto &channel : privateData.channels) {
       channel->Flush();
    }
-   outTracks.swap(privateData.channels);
+   if (!privateData.channels.empty())
+      outTracks.push_back(std::move(privateData.channels));
 
    /* Read in any metadata */
    ImportID3(tags);
@@ -299,14 +301,14 @@ void MP3ImportFileHandle::ImportID3(Tags *tags)
    for (int i = 0; i < (int) tp->nframes; i++) {
       struct id3_frame *frame = tp->frames[i];
 
-      // printf("ID: %08x '%4s'\n", (int) *(int *)frame->id, frame->id);
-      // printf("Desc: %s\n", frame->description);
-      // printf("Num fields: %d\n", frame->nfields);
+      // wxPrintf("ID: %08x '%4s'\n", (int) *(int *)frame->id, frame->id);
+      // wxPrintf("Desc: %s\n", frame->description);
+      // wxPrintf("Num fields: %d\n", frame->nfields);
 
       // for (int j = 0; j < (int) frame->nfields; j++) {
-      //    printf("field %d type %d\n", j, frame->fields[j].type );
+      //    wxPrintf("field %d type %d\n", j, frame->fields[j].type );
       //    if (frame->fields[j].type == ID3_FIELD_TYPE_STRINGLIST) {
-      //       printf("num strings %d\n", frame->fields[j].stringlist.nstrings);
+      //       wxPrintf("num strings %d\n", frame->fields[j].stringlist.nstrings);
       //    }
       // }
 
@@ -499,20 +501,11 @@ enum mad_flow output_cb(void *_data,
       if(data->channels.empty()) {
          data->channels.resize(channels);
 
-         sampleFormat format = (sampleFormat) gPrefs->
-            Read(wxT("/SamplingRate/DefaultProjectSampleFormat"), floatSample);
+         auto format = QualityPrefs::SampleFormatChoice();
 
-         for(auto &channel: data->channels) {
+         for(auto &channel: data->channels)
             channel = data->trackFactory->NewWaveTrack(format, samplerate);
-            channel->SetChannel(Track::MonoChannel);
-         }
 
-         /* special case: 2 channels is understood to be stereo */
-         if(channels == 2) {
-            data->channels.begin()->get()->SetChannel(Track::LeftChannel);
-            data->channels.rbegin()->get()->SetChannel(Track::RightChannel);
-            data->channels.begin()->get()->SetLinked(true);
-         }
          data->numChannels = channels;
       }
       else {
@@ -536,7 +529,7 @@ enum mad_flow output_cb(void *_data,
                                      floatSample,
                                      samples);
 
-         return MAD_FLOW_CONTINUE;
+      return MAD_FLOW_CONTINUE;
    }, MakeSimpleGuard(MAD_FLOW_BREAK) );
 }
 
@@ -550,7 +543,7 @@ enum mad_flow error_cb(void * WXUNUSED(_data), struct mad_stream * WXUNUSED(stre
      MAD_FLOW_IGNORE   = 0x0020
    }; */
    /*
-   printf("decoding error 0x%04x (%s)\n",
+   wxPrintf("decoding error 0x%04x (%s)\n",
       stream->error, mad_stream_errorstr(stream));
    */
 

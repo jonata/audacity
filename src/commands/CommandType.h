@@ -19,38 +19,53 @@
 #include "CommandMisc.h"
 #include "CommandSignature.h"
 #include "../MemoryX.h"
+#include "../commands/AudacityCommand.h"
 
-class Command;
-using CommandHolder = std::shared_ptr<Command>;
-class CommandOutputTarget;
+class OldStyleCommand;
+
+/**************************************************************//**
+
+\class OldStyleCommand 
+\brief OldStyleCommand is the key class that allows us to carry
+a converted (not textual) command from a non-GUI place to the GUI
+thread.  It contains the command AND the context that will be used 
+for its output.
+
+\class OldStyleCommandPointer
+\brief OldStyleCommandPointer is a shared_ptr to a OldStyleCommandPointer.
+
+*******************************************************************/
+
+using OldStyleCommandPointer = std::shared_ptr<OldStyleCommand>;
+class CommandOutputTargets;
 class CommandSignature;
 class wxString;
 
-class CommandType /* not final */
+class OldStyleCommandType : public AudacityCommand
 {
 private:
-   wxString mName;
+   IdentInterfaceSymbol mSymbol;
    Maybe<CommandSignature> mSignature;
 
 public:
-   CommandType();
-   virtual ~CommandType();
-   const wxString &GetName();
+   OldStyleCommandType();
+   virtual ~OldStyleCommandType();
+   IdentInterfaceSymbol GetSymbol() override;
    CommandSignature &GetSignature();
-   wxString Describe();
+   wxString Describe(); // for debugging only ?
 
    // Subclasses should override the following:
    // =========================================
 
    // Return the name of the command type
-   virtual wxString BuildName() = 0;
+   virtual IdentInterfaceSymbol BuildName() = 0;
 
    /// Postcondition: signature is a 'signature' map containing parameter
    // names, validators and default values.
    virtual void BuildSignature(CommandSignature &signature) = 0;
 
    // Create a command instance with the specified output target
-   virtual CommandHolder Create(std::unique_ptr<CommandOutputTarget> &&target) = 0;
+   virtual OldStyleCommandPointer Create(std::unique_ptr<CommandOutputTargets> &&target) = 0;
 };
 
 #endif /* End of include guard: __COMMANDTYPE__ */

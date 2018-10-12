@@ -30,17 +30,17 @@ EffectInvert::~EffectInvert()
 
 // IdentInterface implementation
 
-wxString EffectInvert::GetSymbol()
+IdentInterfaceSymbol EffectInvert::GetSymbol()
 {
    return INVERT_PLUGIN_SYMBOL;
 }
 
 wxString EffectInvert::GetDescription()
 {
-   return XO("Flips the audio samples upside-down, reversing their polarity");
+   return _("Flips the audio samples upside-down, reversing their polarity");
 }
 
-// EffectIdentInterface implementation
+// EffectDefinitionInterface implementation
 
 EffectType EffectInvert::GetType()
 {

@@ -47,12 +47,9 @@ UIHandle::Result GainSliderHandle::SetValue
    auto pTrack = GetWaveTrack();
 
    if (pTrack) {
-      pTrack->SetGain(newValue);
-
-      // Assume linked track is wave or null
-      const auto link = static_cast<WaveTrack*>(mpTrack.lock()->GetLink());
-      if (link)
-         link->SetGain(newValue);
+      for (auto channel :
+           TrackList::Channels(pTrack.get()))
+         channel->SetGain(newValue);
 
       MixerBoard *const pMixerBoard = pProject->GetMixerBoard();
       if (pMixerBoard)
@@ -79,11 +76,11 @@ UIHandlePtr GainSliderHandle::HitTest
 
    wxRect sliderRect;
    TrackInfo::GetGainRect(rect.GetTopLeft(), sliderRect);
-   if ( TrackInfo::HideTopItem( rect, sliderRect, kTrackInfoSliderAllowance ) )
+   if ( TrackInfo::HideTopItem( rect, sliderRect))
       return {};
    if (sliderRect.Contains(state.m_x, state.m_y)) {
-      wxRect sliderRect;
-      TrackInfo::GetGainRect(rect.GetTopLeft(), sliderRect);
+      wxRect sliderRect2;
+      TrackInfo::GetGainRect(rect.GetTopLeft(), sliderRect2);
       auto sliderFn =
       []( AudacityProject *pProject, const wxRect &sliderRect, Track *pTrack ) {
          return TrackInfo::GainSlider
@@ -91,7 +88,7 @@ UIHandlePtr GainSliderHandle::HitTest
              const_cast<TrackPanel*>(pProject->GetTrackPanel()));
       };
       auto result =
-         std::make_shared<GainSliderHandle>( sliderFn, sliderRect, pTrack );
+         std::make_shared<GainSliderHandle>( sliderFn, sliderRect2, pTrack );
       result = AssignUIHandlePtr(holder, result);
 
       return result;
@@ -131,26 +128,13 @@ UIHandle::Result PanSliderHandle::SetValue(AudacityProject *pProject, float newV
    auto pTrack = GetWaveTrack();
 
    if (pTrack) {
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-      bool panZero = false;
-      panZero = static_cast<WaveTrack*>(mpTrack)->SetPan(newValue);
-#else
-      pTrack->SetPan(newValue);
-#endif
-
-      // Assume linked track is wave or null
-      const auto link = static_cast<WaveTrack*>(pTrack->GetLink());
-      if (link)
-         link->SetPan(newValue);
+      for (auto channel :
+           TrackList::Channels(pTrack.get()))
+         channel->SetPan(newValue);
 
       MixerBoard *const pMixerBoard = pProject->GetMixerBoard();
       if (pMixerBoard)
          pMixerBoard->UpdatePan(pTrack.get());
-
-#ifdef EXPERIMENTAL_OUTPUT_DISPLAY
-      if(panZero)
-         result |= FixScrollbars;
-#endif
    }
 
    return result;
@@ -173,7 +157,7 @@ UIHandlePtr PanSliderHandle::HitTest
 
    wxRect sliderRect;
    TrackInfo::GetPanRect(rect.GetTopLeft(), sliderRect);
-   if ( TrackInfo::HideTopItem( rect, sliderRect, kTrackInfoSliderAllowance ) )
+   if ( TrackInfo::HideTopItem( rect, sliderRect))
       return {};
    if (sliderRect.Contains(state.m_x, state.m_y)) {
       auto sliderFn =
