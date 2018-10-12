@@ -1333,8 +1333,11 @@ auStaticText::auStaticText(wxWindow* parent, wxString textIn) :
 }
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 >>>>>>> 5d38ecf9a... Added Pro Tools theme
+=======
+>>>>>>> 73053762addec71933899d47a7fa4a9ffe520e93
 
 void auStaticText::OnPaint(wxPaintEvent & evt)
 =======
