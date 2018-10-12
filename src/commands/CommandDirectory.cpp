@@ -9,7 +9,8 @@
 ******************************************************************//**
 
 \file CommandDirectory.cpp
-\brief Contains definitions for the CommandDirectory class
+\brief A dictionary of supported scripting commands, including 
+functions to look up a command by name.
 
 *//*******************************************************************/
 
@@ -17,55 +18,56 @@
 #include "CommandDirectory.h"
 #include "CommandMisc.h"
 
-#include "ScreenshotCommand.h"
-#include "BatchEvalCommand.h"
-#include "ExecMenuCommand.h"
-#include "GetAllMenuCommands.h"
-#include "MessageCommand.h"
-#include "GetTrackInfoCommand.h"
-#include "GetProjectInfoCommand.h"
 #include "HelpCommand.h"
-#include "SelectCommand.h"
-#include "CompareAudioCommand.h"
-#include "SetTrackInfoCommand.h"
-#include "SetProjectInfoCommand.h"
-#include "PreferenceCommands.h"
-#include "ImportExportCommands.h"
-#include "OpenSaveCommands.h"
+#include "MessageCommand.h"
+#include "BatchEvalCommand.h"
 
 std::unique_ptr<CommandDirectory> CommandDirectory::mInstance;
 
 CommandDirectory::CommandDirectory()
 {
    // Create the command map.
-   // Adding an entry here is the easiest way to register a Command class.
-   AddCommand(make_movable<ScreenshotCommandType>());
-   AddCommand(make_movable<BatchEvalCommandType>());
-   AddCommand(make_movable<ExecMenuCommandType>());
-   AddCommand(make_movable<GetAllMenuCommandsType>());
-   AddCommand(make_movable<MessageCommandType>());
-   AddCommand(make_movable<GetTrackInfoCommandType>());
-   AddCommand(make_movable<GetProjectInfoCommandType>());
+   // First we have commands which return information
+   //AddCommand(std::make_unique<MessageCommandType>());
+   AddCommand(std::make_unique<BatchEvalCommandType>());
 
-   AddCommand(make_movable<HelpCommandType>());
-   AddCommand(make_movable<SelectCommandType>());
-   AddCommand(make_movable<CompareAudioCommandType>());
-   AddCommand(make_movable<SetTrackInfoCommandType>());
-   AddCommand(make_movable<SetProjectInfoCommandType>());
 
-   AddCommand(make_movable<SetPreferenceCommandType>());
-   AddCommand(make_movable<GetPreferenceCommandType>());
-   AddCommand(make_movable<ImportCommandType>());
-   AddCommand(make_movable<ExportCommandType>());
-   AddCommand(make_movable<OpenProjectCommandType>());
-   AddCommand(make_movable<SaveProjectCommandType>());
+   // Legacy adapter commands that previously was needed to 
+   // access menu items.
+   //AddCommand(std::make_unique<ExecMenuCommandType>());
+
+   // Not needed.  Sets selected/solo/mute on multiple tracks.
+   //AddCommand(std::make_unique<SetProjectInfoCommandType>());
+
+//   Moved to AudacityCommand
+//   AddCommand(std::make_unique<OpenProjectCommandType>());
+//   AddCommand(std::make_unique<SaveProjectCommandType>());
+//   AddCommand(std::make_unique<ImportCommandType>());
+//   AddCommand(std::make_unique<ExportCommandType>());
+//   AddCommand(std::make_unique<HelpCommandType>());
+//   AddCommand(std::make_unique<GetInfoCommandType>("GetAll"));
+//   AddCommand(std::make_unique<GetInfoCommandType>("GetCommands"));
+//   AddCommand(std::make_unique<GetInfoCommandType>("GetMenus"));
+//   AddCommand(std::make_unique<GetInfoCommandType>("GetMenusPlus"));
+//   AddCommand(std::make_unique<GetInfoCommandType>("GetBoxes"));
+//   AddCommand(std::make_unique<GetInfoCommandType>("GetClips"));
+
+//   AddCommand(std::make_unique<GetTrackInfoCommandType>());
+//   AddCommand(std::make_unique<GetProjectInfoCommandType>());
+//   AddCommand(std::make_unique<CompareAudioCommandType>());
+//   AddCommand(std::make_unique<GetPreferenceCommandType>());
+//   AddCommand(std::make_unique<SetPreferenceCommandType>());
+//   AddCommand(std::make_unique<ScreenshotCommandType>());
+//   AddCommand(std::make_unique<SelectCommandType>());
+//   AddCommand(std::make_unique<SetTrackInfoCommandType>());
+
 }
 
 CommandDirectory::~CommandDirectory()
 {
 }
 
-CommandType *CommandDirectory::LookUp(const wxString &cmdName) const
+OldStyleCommandType *CommandDirectory::LookUp(const wxString &cmdName) const
 {
    CommandMap::const_iterator iter = mCmdMap.find(cmdName);
    if (iter == mCmdMap.end())
@@ -75,10 +77,11 @@ CommandType *CommandDirectory::LookUp(const wxString &cmdName) const
    return iter->second.get();
 }
 
-void CommandDirectory::AddCommand(movable_ptr<CommandType> &&type)
+void CommandDirectory::AddCommand(std::unique_ptr<OldStyleCommandType> &&type)
 {
    wxASSERT(type != NULL);
-   wxString cmdName = type->GetName();
+   // Internal string is shown but only in assertion message
+   auto cmdName = type->GetSymbol().Internal();
    wxASSERT_MSG(mCmdMap.find(cmdName) == mCmdMap.end()
          , wxT("A command named ") + cmdName
          + wxT(" already exists."));

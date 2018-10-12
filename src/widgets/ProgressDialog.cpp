@@ -41,6 +41,7 @@
 #include <wx/evtloop.h>
 #include <wx/frame.h>
 #include <wx/intl.h>
+#include <wx/msgdlg.h>
 #include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/sound.h>
@@ -48,7 +49,9 @@
 #include <wx/window.h>
 
 #include "ProgressDialog.h"
+#include "ErrorDialog.h"
 #include "../Prefs.h"
+#include "../Internat.h"
 
 // This really should be a Preferences setting
 static const unsigned char beep[] =
@@ -994,7 +997,6 @@ END_EVENT_TABLE()
 ProgressDialog::ProgressDialog()
 :  wxDialogWrapper()
 {
-   Init();
 }
 
 ProgressDialog::ProgressDialog(const wxString & title,
@@ -1003,9 +1005,16 @@ ProgressDialog::ProgressDialog(const wxString & title,
                                const wxString & sRemainingLabelText /* = wxEmptyString */)
 :  wxDialogWrapper()
 {
-   Init();
-
    Create(title, message, flags, sRemainingLabelText);
+}
+
+ProgressDialog::ProgressDialog(const wxString & title,
+                               const MessageTable &columns,
+                               int flags /* = pdlgDefaultFlags */,
+                               const wxString & sRemainingLabelText /* = wxEmptyString */)
+:  wxDialogWrapper()
+{
+   Create(title, columns, flags, sRemainingLabelText);
 }
 
 //
@@ -1034,10 +1043,8 @@ ProgressDialog::~ProgressDialog()
 
    // Restore saved focus, but only if the window still exists.
    //
-   // It is possible that it was a deferred deletion and it was deleted since
-   // we captured the focused window.  So, we need to verify that the window
-   // still exists by searching all of the wxWidgets windows.  It's the only
-   // sure way.
+   // PRL:  I'm conservatively preserving the old existence test, but I think
+   // it's redundant now that we use wxWindowRef to avoid a dangling pointer
    if (mHadFocus && SearchForWindow(wxTopLevelWindows, mHadFocus)) {
       mHadFocus->SetFocus();
    }
@@ -1045,10 +1052,6 @@ ProgressDialog::~ProgressDialog()
 
 void ProgressDialog::Init()
 {
-   mLastValue = 0;
-   mDisable = NULL;
-   mIsTransparent = true;
-
    // There's a problem where the focus is not returned to the window that had
    // it before creating this object.  The reason is because the focus events
    // that are sent to the parent window after the wxWindowDisabler are created
@@ -1068,14 +1071,47 @@ void ProgressDialog::Init()
 #endif
 }
 
+void ProgressDialog::Reinit()
+{
+   mLastValue = 0;
+
+   mStartTime = wxGetUTCTimeMillis().GetValue();
+   mLastUpdate = mStartTime;
+   mYieldTimer = mStartTime;
+   mCancel = false;
+   mStop = false;
+
+   // Because wxGTK is very sensitive about maintaining focus when
+   // this window is not shown, we always show it.  But, since we
+   // want a 500ms delay before it's actually visible for those
+   // quick tasks, we show it as transparent.  If the initial
+   // delay is exceeded, then we reset the dialog to full opacity.
+   SetTransparent(0);
+   mIsTransparent = true;
+
+   auto button = FindWindowById(wxID_CANCEL, this);
+   if (button)
+      button->Enable();
+   button = FindWindowById(wxID_OK, this);
+   if (button)
+      button->Enable();
+
+   wxDialogWrapper::Show(true);
+}
+
 // Add a NEW text column each time this is called.
-void ProgressDialog::AddMessageAsColumn(wxBoxSizer * pSizer, const wxString & sText, bool bFirstColumn) {
+void ProgressDialog::AddMessageAsColumn(wxBoxSizer * pSizer,
+                                        const MessageColumn & column,
+                                        bool bFirstColumn) {
 
    // Assuming that we don't want empty columns, bail out if there is no text.
-   if (sText.IsEmpty())
-   {
+   if (column.empty())
       return;
-   }
+
+   // Join strings
+   auto sText = column[0];
+   std::for_each( column.begin() + 1, column.end(),
+      [&](const wxString &text) { sText += wxT("\n") + text; });
 
    // Create a statictext object and add to the sizer
    wxStaticText* oText = safenew wxStaticText(this,
@@ -1087,7 +1123,7 @@ void ProgressDialog::AddMessageAsColumn(wxBoxSizer * pSizer, const wxString & sT
    oText->SetName(sText); // fix for bug 577 (NVDA/Narrator screen readers do not read static text in dialogs)
 
    // If this is the first column then set the mMessage pointer so non-TimerRecord usages
-   // will still work correctly
+   // will still work correctly in SetMessage()
    if (bFirstColumn) {
       mMessage = oText;
    }
@@ -1100,6 +1136,27 @@ bool ProgressDialog::Create(const wxString & title,
                             int flags /* = pdlgDefaultFlags */,
                             const wxString & sRemainingLabelText /* = wxEmptyString */)
 {
+   MessageTable columns(1);
+   columns.back().push_back(message);
+   auto result = Create(title, columns, flags, sRemainingLabelText);
+
+   if (result) {
+      // Record some values used in case of change of message
+      // TODO: make the following work in case of message tables
+      wxClientDC dc(this);
+      dc.GetMultiLineTextExtent(message, &mLastW, &mLastH);
+   }
+
+   return result;
+}
+
+bool ProgressDialog::Create(const wxString & title,
+                            const MessageTable & columns,
+                            int flags /* = pdlgDefaultFlags */,
+                            const wxString & sRemainingLabelText /* = wxEmptyString */)
+{
+   Init();
+
    wxWindow *parent = GetParentForModalDialog(NULL, 0);
 
    // Set this boolean to indicate if we are using the "Elapsed" labels
@@ -1124,15 +1181,19 @@ bool ProgressDialog::Create(const wxString & title,
 
    {
       wxWindow *window;
-      wxArrayString arMessages(wxSplit(message, ProgressDialog::ColoumnSplitMarker));
 
       // There may be more than one column, so create a BoxSizer container
       auto uColSizer = std::make_unique<wxBoxSizer>(wxHORIZONTAL);
       auto colSizer = uColSizer.get();
 
-      for (size_t column = 0; column < arMessages.GetCount(); column++) {
-         bool bFirstCol = (column == 0);
-         AddMessageAsColumn(colSizer, arMessages[column], bFirstCol);
+      // TODO:  this setting-up of a grid of text in a sizer might be worth
+      // extracting as a utility for building other dialogs.
+      {
+         bool bFirstCol = true;
+         for (const auto &column : columns) {
+            AddMessageAsColumn(colSizer, column, bFirstCol);
+            bFirstCol = false;
+         }
       }
 
       // and put message column(s) into a main vertical sizer.
@@ -1223,30 +1284,15 @@ bool ProgressDialog::Create(const wxString & title,
    }
    Layout();
 
-   wxClientDC dc(this);
-   dc.GetMultiLineTextExtent(message, &mLastW, &mLastH);
+   // Center progress bar on Parent if it is nice and wide, otherwise Center on screen.
+   int parentWidth = -1, parentHeight=-1;
+   if( GetParent() )  GetParent()->GetSize( &parentWidth, &parentHeight );
+   if (parentWidth > 400) 
+      CenterOnParent();
+   else
+      CenterOnScreen();
 
-   // Add a little bit more width when we have TABs to stop words wrapping
-   int iTabFreq = wxMax((message.Freq('\t') - 1), 0); 
-   mLastW = mLastW + (iTabFreq * 8);
-
-   Centre(wxCENTER_FRAME | wxBOTH);
-
-   mStartTime = wxGetLocalTimeMillis().GetValue();
-   mLastUpdate = mStartTime;
-   mYieldTimer = mStartTime;
-   mCancel = false;
-   mStop = false;
-
-   // Because wxGTK is very sensitive about maintaining focus when
-   // this window is not shown, we always show it.  But, since we
-   // want a 500ms delay before it's actually visible for those
-   // quick tasks, we show it as transparent.  If the initial
-   // delay is exceeded, then we reset the dialog to full opacity.
-   SetTransparent(0);
-   mIsTransparent = true;
-
-   wxDialogWrapper::Show(true);
+   Reinit();
 
    // Even though we won't necessarily show the dialog due to the 500ms
    // delay, we MUST disable other windows/menus anyway since we run the risk
@@ -1280,7 +1326,7 @@ ProgressResult ProgressDialog::Update(int value, const wxString & message)
       return ProgressResult::Stopped;
    }
 
-   wxLongLong_t now = wxGetLocalTimeMillis().GetValue();
+   wxLongLong_t now = wxGetUTCTimeMillis().GetValue();
    wxLongLong_t elapsed = now - mStartTime;
 
    if (elapsed < 500)
@@ -1457,6 +1503,7 @@ void ProgressDialog::SetMessage(const wxString & message)
       bool sizeUpdated = false;
       wxSize ds = GetClientSize();
 
+      // TODO: make the following work in case of message tables
       if (w > mLastW)
       {
          ds.x += (w - mLastW);
@@ -1539,7 +1586,7 @@ void ProgressDialog::Beep() const
    gPrefs->Read(wxT("/GUI/BeepAfterDuration"), &after, 60);
    gPrefs->Read(wxT("/GUI/BeepFileName"), &name, wxEmptyString);
 
-   if (should && wxGetLocalTimeMillis().GetValue() - mStartTime > after * 1000)
+   if (should && wxGetUTCTimeMillis().GetValue() - mStartTime > after * 1000)
    {
       wxBusyCursor busy;
       wxSound s;
@@ -1572,7 +1619,7 @@ bool ProgressDialog::ConfirmAction(const wxString & sPrompt,
       return true;
    }
 
-   wxMessageDialog dlgMessage(this,
+   AudacityMessageDialog dlgMessage(this,
       sPrompt,
       sTitle,
       wxYES_NO | wxICON_QUESTION | wxNO_DEFAULT | wxSTAY_ON_TOP);
@@ -1589,15 +1636,15 @@ bool ProgressDialog::ConfirmAction(const wxString & sPrompt,
 
 TimerProgressDialog::TimerProgressDialog(const wxLongLong_t duration,
                                          const wxString & title,
-                                         const wxString & message /* = wxEmptyString */,
+                                         const MessageTable & columns,
                                          int flags /* = pdlgDefaultFlags */,
                                          const wxString & sRemainingLabelText /* = wxEmptyString */)
-: ProgressDialog(title, message, flags, sRemainingLabelText)
+: ProgressDialog(title, columns, flags, sRemainingLabelText)
 {
    mDuration = duration;
 }
 
-ProgressResult TimerProgressDialog::Update(const wxString & message /*= wxEmptyString*/)
+ProgressResult TimerProgressDialog::UpdateProgress()
 {
    if (mCancel)
    {
@@ -1609,7 +1656,7 @@ ProgressResult TimerProgressDialog::Update(const wxString & message /*= wxEmptyS
       return ProgressResult::Stopped;
    }
 
-   wxLongLong_t now = wxGetLocalTimeMillis().GetValue();
+   wxLongLong_t now = wxGetUTCTimeMillis().GetValue();
    wxLongLong_t elapsed = now - mStartTime;
 
    if (elapsed < 500)
@@ -1622,8 +1669,6 @@ ProgressResult TimerProgressDialog::Update(const wxString & message /*= wxEmptyS
       SetTransparent(255);
       mIsTransparent = false;
    }
-
-   SetMessage(message);
 
    wxLongLong_t remains = mStartTime + mDuration - now;
 
@@ -1651,14 +1696,20 @@ ProgressResult TimerProgressDialog::Update(const wxString & message /*= wxEmptyS
    // Only update if a full second has passed.
    if (now - mLastUpdate > 1000)
    {
+      // Bug 1952:
+      // wxTimeSpan will assert on ridiculously large values.
+      // We silently wrap the displayed range at one day.
+      // You'll only see the remaining hours, mins and secs.
+      // With a + sign, if the time was wrapped.
+      const wxLongLong_t wrapTime = 24 * 60 * 60 * 1000;
       if (m_bShowElapsedTime) {
-         wxTimeSpan tsElapsed(0, 0, 0, elapsed);
-         mElapsed->SetLabel(tsElapsed.Format(wxT("%H:%M:%S")));
+         wxTimeSpan tsElapsed(0, 0, 0, elapsed % wrapTime);
+         mElapsed->SetLabel(tsElapsed.Format(wxT("%H:%M:%S")) + ((elapsed >= wrapTime) ? " +":""));
          mElapsed->Update();
       }
 
-      wxTimeSpan tsRemains(0, 0, 0, remains);
-      mRemaining->SetLabel(tsRemains.Format(wxT("%H:%M:%S")));
+      wxTimeSpan tsRemains(0, 0, 0, remains % wrapTime);
+      mRemaining->SetLabel(tsRemains.Format(wxT("%H:%M:%S")) + ((remains >= wrapTime) ? " +":""));
       mRemaining->Update();
 
       mLastUpdate = now;
@@ -1675,7 +1726,21 @@ ProgressResult TimerProgressDialog::Update(const wxString & message /*= wxEmptyS
    //      (and probably other things).  I do not yet know why this happens and
    //      I'm not too keen on having timer events processed here, but you do
    //      what you have to do.
-   wxEventLoopBase::GetActive()->YieldFor(wxEVT_CATEGORY_UI | wxEVT_CATEGORY_USER_INPUT | wxEVT_CATEGORY_TIMER);
+   // JKC: Added thread category, since blocking a thread message could cause things 
+   //      to gum up.  
+   //      See http://trac.wxwidgets.org/ticket/14027 for discussion of why
+   //      YieldFor is flaky.  
+   //      Conclusion...  use wxEVT_CATEGORY_ALL since with the list below, we 
+   //      are pretty much there already.
+   //           wxEVT_CATEGORY_UI |
+   //           wxEVT_CATEGORY_USER_INPUT |
+   //           wxEVT_CATEGORY_TIMER |
+   //           wxEVT_CATEGORY_THREAD
+
+   wxEventLoopBase::GetActive()->YieldFor(wxEVT_CATEGORY_ALL );
+   // JKC: Yielding twice, because e.g. a timer can build up a lot of events, and we 
+   //      really want to make sure they are worked through.
+   wxEventLoopBase::GetActive()->YieldFor(wxEVT_CATEGORY_ALL );
 
    // MY: Added this after the YieldFor to check we haven't changed the outcome based on buttons pressed...
    auto iReturn = ProgressResult::Success;

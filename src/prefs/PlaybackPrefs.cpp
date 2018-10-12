@@ -26,9 +26,10 @@
 
 #include "../ShuttleGui.h"
 #include "../Prefs.h"
+#include "../Internat.h"
 
-PlaybackPrefs::PlaybackPrefs(wxWindow * parent)
-:  PrefsPanel(parent, _("Playback"))
+PlaybackPrefs::PlaybackPrefs(wxWindow * parent, wxWindowID winid)
+:  PrefsPanel(parent, winid, _("Playback"))
 {
    Populate();
 }
@@ -48,10 +49,23 @@ void PlaybackPrefs::Populate()
    // ----------------------- End of main section --------------
 }
 
+namespace {
+   const char *UnpinnedScrubbingPreferenceKey()
+   {
+      return "/AudioIO/UnpinnedScrubbing";
+   }
+   bool UnpinnedScrubbingPreferenceDefault()
+   {
+      return true;
+   }
+   int iPreferenceUnpinned = -1;
+}
+
 void PlaybackPrefs::PopulateOrExchange(ShuttleGui & S)
 {
    wxTextCtrl *w;
 
+   S.StartScroller();
    S.SetBorder(2);
 
    S.StartStatic(_("Effects Preview"));
@@ -63,7 +77,7 @@ void PlaybackPrefs::PopulateOrExchange(ShuttleGui & S)
                                  6.0,
                                  9);
          S.AddUnits(_("seconds"));
-         w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
       }
       S.EndThreeColumn();
    }
@@ -79,14 +93,14 @@ void PlaybackPrefs::PopulateOrExchange(ShuttleGui & S)
                                  2.0,
                                  9);
          S.AddUnits(_("seconds"));
-         w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
 
          w = S.TieNumericTextBox(_("&After cut region:"),
                                  wxT("/AudioIO/CutPreviewAfterLen"),
                                  1.0,
                                  9);
          S.AddUnits(_("seconds"));
-         w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
       }
       S.EndThreeColumn();
    }
@@ -101,22 +115,57 @@ void PlaybackPrefs::PopulateOrExchange(ShuttleGui & S)
                                  1.0,
                                  9);
          S.AddUnits(_("seconds"));
-         w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
 
          w = S.TieNumericTextBox(_("Lo&ng period:"),
                                  wxT("/AudioIO/SeekLongPeriod"),
                                  15.0,
                                  9);
          S.AddUnits(_("seconds"));
-         w->SetName(w->GetName() + wxT(" ") + _("seconds"));
+         if( w ) w->SetName(w->GetName() + wxT(" ") + _("seconds"));
       }
       S.EndThreeColumn();
    }
    S.EndStatic();
+
+   S.StartStatic(_("Options"));
+   {
+      S.StartTwoColumn();
+      {
+         S.TieCheckBox(_("&Vari-Speed Play"), "/AudioIO/VariSpeedPlay", true);
+      }
+      S.EndTwoColumn();
+
+      S.StartTwoColumn();
+      {
+         S.TieCheckBox(_("Always scrub un&pinned"),
+            UnpinnedScrubbingPreferenceKey(),
+            UnpinnedScrubbingPreferenceDefault());
+      }
+      S.EndTwoColumn();
+   }
+   S.EndStatic();
+
+
+   S.EndScroller();
+
+}
+
+bool PlaybackPrefs::GetUnpinnedScrubbingPreference()
+{
+   if ( iPreferenceUnpinned >= 0 )
+      return iPreferenceUnpinned == 1;
+   bool bResult = gPrefs->ReadBool(
+      UnpinnedScrubbingPreferenceKey(),
+      UnpinnedScrubbingPreferenceDefault());
+   iPreferenceUnpinned = bResult ? 1: 0;
+   return bResult;
 }
 
 bool PlaybackPrefs::Commit()
 {
+   iPreferenceUnpinned = -1;
+
    ShuttleGui S(this, eIsSavingToPrefs);
    PopulateOrExchange(S);
 
@@ -128,9 +177,9 @@ wxString PlaybackPrefs::HelpPageName()
    return "Playback_Preferences";
 }
 
-PrefsPanel *PlaybackPrefsFactory::Create(wxWindow *parent)
+PrefsPanel *PlaybackPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
-   return safenew PlaybackPrefs(parent);
+   return safenew PlaybackPrefs(parent, winid);
 }
 

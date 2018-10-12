@@ -20,10 +20,11 @@
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
 #include "../Experimental.h"
+#include "../Internat.h"
 
-TracksBehaviorsPrefs::TracksBehaviorsPrefs(wxWindow * parent)
+TracksBehaviorsPrefs::TracksBehaviorsPrefs(wxWindow * parent, wxWindowID winid)
 /* i18n-hint: two nouns */
-:  PrefsPanel(parent, _("Tracks Behaviors"))
+:  PrefsPanel(parent, winid, _("Tracks Behaviors"))
 {
    Populate();
 }
@@ -58,6 +59,7 @@ void TracksBehaviorsPrefs::Populate()
 void TracksBehaviorsPrefs::PopulateOrExchange(ShuttleGui & S)
 {
    S.SetBorder(2);
+   S.StartScroller();
 
    S.StartStatic(_("Behaviors"));
    {
@@ -80,11 +82,17 @@ void TracksBehaviorsPrefs::PopulateOrExchange(ShuttleGui & S)
       S.TieCheckBox(_("&Type to create a label"),
                     wxT("/GUI/TypeToCreateLabel"),
                     true);
+      S.TieCheckBox(_("Use dialog for the &name of a new label"),
+                    wxT("/GUI/DialogForNameNewLabel"),
+                    false);
 #ifdef EXPERIMENTAL_SCROLLING_LIMITS
       S.TieCheckBox(_("Enable scrolling left of &zero"),
                     ScrollingPreferenceKey(),
                     ScrollingPreferenceDefault());
 #endif
+      S.TieCheckBox(_("Advanced &vertical zooming"),
+                    wxT("/GUI/VerticalZooming"),
+                    false);
 
       S.AddSpace(10);
 
@@ -95,11 +103,11 @@ void TracksBehaviorsPrefs::PopulateOrExchange(ShuttleGui & S)
                      wxT("Standard"),
                      mSoloChoices,
                      mSoloCodes);
-         S.SetSizeHints(mSoloChoices);
       }
       S.EndMultiColumn();
    }
    S.EndStatic();
+   S.EndScroller();
 }
 
 bool TracksBehaviorsPrefs::Commit()
@@ -119,8 +127,8 @@ TracksBehaviorsPrefsFactory::TracksBehaviorsPrefsFactory()
 {
 }
 
-PrefsPanel *TracksBehaviorsPrefsFactory::Create(wxWindow *parent)
+PrefsPanel *TracksBehaviorsPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
-   return safenew TracksBehaviorsPrefs(parent);
+   return safenew TracksBehaviorsPrefs(parent, winid);
 }

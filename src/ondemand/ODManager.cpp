@@ -142,7 +142,7 @@ void ODManager::RemoveTaskIfInQueue(ODTask* task)
 ///
 ///@param task the task to add
 ///@param lockMutex locks the mutexes if true (default).  This function is used within other ODManager calls, which many need to set this to false.
-void ODManager::AddNewTask(movable_ptr<ODTask> &&mtask, bool lockMutex)
+void ODManager::AddNewTask(std::unique_ptr<ODTask> &&mtask, bool lockMutex)
 {
    auto task = mtask.get();
    ODWaveTrackTaskQueue* queue = NULL;
@@ -168,7 +168,7 @@ void ODManager::AddNewTask(movable_ptr<ODTask> &&mtask, bool lockMutex)
    {
       //Make a NEW one, add it to the local track queue, and to the immediate running task list,
       //since this task is definitely at the head
-      auto newqueue = make_movable<ODWaveTrackTaskQueue>();
+      auto newqueue = std::make_unique<ODWaveTrackTaskQueue>();
       newqueue->AddTask(std::move(mtask));
       mQueues.push_back(std::move(newqueue));
       if(lockMutex)
@@ -224,10 +224,10 @@ void ODManager::Init()
 
 //   startThread->SetPriority(0);//default of 50.
    startThread->Create();
-//   printf("starting thread from init\n");
+//   wxPrintf("starting thread from init\n");
    startThread->Run();
 
-//   printf("started thread from init\n");
+//   wxPrintf("started thread from init\n");
    //destruction of thread is taken care of by thread library
 }
 
@@ -248,14 +248,14 @@ void ODManager::Start()
    mNeedsDraw=0;
 
    //wxLog calls not threadsafe.  are printfs?  thread-messy for sure, but safe?
-//   printf("ODManager thread strating \n");
+//   wxPrintf("ODManager thread strating \n");
    //TODO: Figure out why this has no effect at all.
    //wxThread::This()->SetPriority(30);
    mTerminateMutex.Lock();
    while(!mTerminate)
    {
       mTerminateMutex.Unlock();
-//    printf("ODManager thread running \n");
+//    wxPrintf("ODManager thread running \n");
 
       //we should look at our WaveTrack queues to see if we can process a NEW task to the running queue.
       UpdateQueues();
@@ -331,7 +331,7 @@ void ODManager::Start()
    mTerminatedMutex.Unlock();
 
    //wxLogDebug Not thread safe.
-   //printf("ODManager thread terminating\n");
+   //wxPrintf("ODManager thread terminating\n");
 }
 
 //static function that prevents ODTasks from being scheduled
@@ -381,12 +381,12 @@ void ODManager::RemoveWaveTrack(WaveTrack* track)
 }
 
 ///replace the wavetrack whose wavecache the gui watches for updates
-void ODManager::ReplaceWaveTrack(WaveTrack* oldTrack,WaveTrack* newTrack)
+void ODManager::ReplaceWaveTrack(Track *oldTrack, Track *newTrack)
 {
    mQueuesMutex.Lock();
    for(unsigned int i=0;i<mQueues.size();i++)
    {
-      mQueues[i]->ReplaceWaveTrack(oldTrack,newTrack);
+      mQueues[i]->ReplaceWaveTrack( oldTrack, newTrack );
    }
    mQueuesMutex.Unlock();
 }

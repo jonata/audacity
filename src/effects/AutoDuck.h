@@ -26,7 +26,7 @@ class ShuttleGui;
 
 #define AUTO_DUCK_PANEL_NUM_CONTROL_POINTS 5
 
-#define AUTODUCK_PLUGIN_SYMBOL XO("Auto Duck")
+#define AUTODUCK_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Auto Duck") }
 
 class EffectAutoDuck final : public Effect
 {
@@ -36,18 +36,19 @@ public:
 
    // IdentInterface implementation
 
-   wxString GetSymbol() override;
+   IdentInterfaceSymbol GetSymbol() override;
    wxString GetDescription() override;
    wxString ManualPage() override;
 
-   // EffectIdentInterface implementation
+   // EffectDefinitionInterface implementation
 
    EffectType GetType() override;
 
    // EffectClientInterface implementation
 
-   bool GetAutomationParameters(EffectAutomationParameters & parms) override;
-   bool SetAutomationParameters(EffectAutomationParameters & parms) override;
+   bool DefineParams( ShuttleParams & S ) override;
+   bool GetAutomationParameters(CommandParameters & parms) override;
+   bool SetAutomationParameters(CommandParameters & parms) override;
 
    // Effect implementation
 
@@ -62,7 +63,7 @@ public:
 private:
    // EffectAutoDuck implementation
 
-   bool ApplyDuckFade(int trackNumber, WaveTrack *t, double t0, double t1);
+   bool ApplyDuckFade(int trackNum, WaveTrack *t, double t0, double t1);
 
    void OnValueChanged(wxCommandEvent & evt);
 
@@ -94,7 +95,8 @@ private:
 class EffectAutoDuckPanel final : public wxPanelWrapper
 {
 public:
-   EffectAutoDuckPanel(wxWindow *parent, EffectAutoDuck *effect);
+   EffectAutoDuckPanel(
+      wxWindow *parent, wxWindowID winid, EffectAutoDuck *effect);
    virtual ~EffectAutoDuckPanel();
 
 private:

@@ -20,7 +20,7 @@
 
 #if defined(USE_MIDI)
 
-#include "allegro.h"
+#include "../lib-src/header-substitutes/allegro.h"
 
 // define this switch to play MIDI during redisplay to sonify run times
 // Note that if SONIFY is defined, the default MIDI device will be opened
@@ -78,13 +78,11 @@ class AUDACITY_DLL_API NoteTrack final
    using Holder = std::unique_ptr<NoteTrack>;
    Track::Holder Duplicate() const override;
 
-   int GetKind() const override { return Note; }
-
    double GetOffset() const override;
    double GetStartTime() const override;
    double GetEndTime() const override;
 
-   void SetHeight(int h) override;
+   void DoSetHeight(int h) override;
 
    Alg_seq &GetSeq() const;
 
@@ -238,6 +236,9 @@ class AUDACITY_DLL_API NoteTrack final
    }
 
  private:
+
+   TrackKind GetKind() const override { return TrackKind::Note; }
+
    void AddToDuration( double delta );
 
    // These are mutable to allow NoteTrack to switch details of representation

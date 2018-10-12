@@ -55,7 +55,7 @@ class ODTask /* not final */
    virtual ~ODTask(){};
 
    //clones everything except information about the tracks.
-   virtual movable_ptr<ODTask> Clone() const = 0;
+   virtual std::unique_ptr<ODTask> Clone() const = 0;
 
    ///Subclasses should override to return respective type.
    virtual unsigned int GetODType(){return eODNone;}
@@ -84,7 +84,7 @@ class ODTask /* not final */
 
    ///Replaces all instances to a wavetrack with a NEW one, effectively transferring the task.
    ///ODTask has no wavetrack, so it does nothing.  But subclasses that do should override this.
-   virtual void ReplaceWaveTrack(WaveTrack* oldTrack,WaveTrack* newTrack);
+   virtual void ReplaceWaveTrack(Track *oldTrack, Track *newTrack);
 
     ///Adds a WaveTrack to do the task for
    void AddWaveTrack(WaveTrack* track);

@@ -48,10 +48,9 @@ enum {
 
    ETBZoomInID,
    ETBZoomOutID,
-
-   #if 0 // Disabled for version 1.2.0 since it doesn't work quite right...
+#ifdef EXPERIMENTAL_ZOOM_TOGGLE_BUTTON
    ETBZoomToggleID,
-   #endif
+#endif
 
    ETBZoomSelID,
    ETBZoomFitID,
@@ -62,6 +61,8 @@ enum {
 
    ETBNumButtons
 };
+
+const int first_ETB_ID = 11300;
 
 // flags so 1,2,4,8 etc.
 enum {
@@ -87,7 +88,9 @@ class EditToolBar final : public ToolBar {
 
  private:
 
-   AButton *AddButton(teBmps eEnabledUp, teBmps eEnabledDown, teBmps eDisabled,
+   static AButton *AddButton(
+      EditToolBar *pBar,
+      teBmps eEnabledUp, teBmps eEnabledDown, teBmps eDisabled,
       int id, const wxChar *label, bool toggle = false);
 
    void AddSeparator();

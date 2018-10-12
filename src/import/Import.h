@@ -44,8 +44,7 @@ public:
 class ExtImportItem;
 
 using FormatList = std::vector<Format> ;
-WX_DEFINE_ARRAY_PTR(ImportPlugin *, ImportPluginPtrArray);
-using ExtImportItems = std::vector< movable_ptr<ExtImportItem> >;
+using ExtImportItems = std::vector< std::unique_ptr<ExtImportItem> >;
 
 class ExtImportItem
 {
@@ -71,7 +70,7 @@ class ExtImportItem
   /**
    * Array of pointers to import plugins (members of FormatList)
    */
-  ImportPluginPtrArray filter_objects;
+  std::vector<ImportPlugin*> filter_objects;
 
   /**
    * File extensions. Each one is a string with simple wildcards,
@@ -135,7 +134,7 @@ public:
     * Allocates NEW ExtImportItem, fills it with default data
     * and returns a pointer to it.
     */
-    movable_ptr<ExtImportItem> CreateDefaultImportItem();
+    std::unique_ptr<ExtImportItem> CreateDefaultImportItem();
 
    static bool IsMidi(const wxString &fName);
 

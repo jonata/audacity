@@ -40,6 +40,8 @@
 #include "../WaveTrack.h"
 #include "../widgets/AButton.h"
 #include "../widgets/ASlider.h"
+#include "../tracks/ui/Scrubbing.h"
+#include "../Prefs.h"
 
 #ifdef EXPERIMENTAL_VOICE_DETECTION
 #include "../VoiceKey.h"
@@ -88,7 +90,7 @@ END_EVENT_TABLE()
 
 ////Standard Constructor
 TranscriptionToolBar::TranscriptionToolBar()
-: ToolBar(TranscriptionBarID, _("Transcription"), wxT("Transcription"))
+: ToolBar(TranscriptionBarID, _("Play-at-Speed"), wxT("Transcription"),true)
 {
    mPlaySpeed = 1.0 * 100.0;
 #ifdef EXPERIMENTAL_VOICE_DETECTION
@@ -131,20 +133,26 @@ void TranscriptionToolBar::Create(wxWindow * parent)
    //then stop Audio if it is playing, so we can be playing
    //audio and open a second project.
    mPlaySpeed = (mPlaySpeedSlider->Get()) * 100;
+
+   // Simulate a size event to set initial placement/size
+   wxSizeEvent event(GetSize(), GetId());
+   event.SetEventObject(this);
+   GetEventHandler()->ProcessEvent(event);
 }
 
 /// This is a convenience function that allows for button creation in
 /// MakeButtons() with fewer arguments
 /// Very similar to code in ControlToolBar...
 AButton *TranscriptionToolBar::AddButton(
+   TranscriptionToolBar *pBar,
    teBmps eFore, teBmps eDisabled,
    int id,
    const wxChar *label)
 {
-   AButton *&r = mButtons[id];
+   AButton *&r = pBar->mButtons[id];
 
-   r = ToolBar::MakeButton(this,
-      bmpRecoloredUpSmall, bmpRecoloredDownSmall, bmpRecoloredHiliteSmall,
+   r = ToolBar::MakeButton(pBar,
+      bmpRecoloredUpSmall, bmpRecoloredDownSmall, bmpRecoloredUpHiliteSmall,bmpRecoloredHiliteSmall,
       eFore, eFore, eDisabled,
       wxWindowID(id),
       wxDefaultPosition,
@@ -155,7 +163,7 @@ AButton *TranscriptionToolBar::AddButton(
 // JKC: Unlike ControlToolBar, does not have a focus rect.  Shouldn't it?
 // r->SetFocusRect( r->GetRect().Deflate( 4, 4 ) );
 
-   Add( r, 0, wxALIGN_CENTER );
+   pBar->Add( r, 0, wxALIGN_CENTER );
 
    return r;
 }
@@ -165,7 +173,7 @@ void TranscriptionToolBar::MakeAlternateImages(
    int id, unsigned altIdx)
 {
    ToolBar::MakeAlternateImages(*mButtons[id], altIdx,
-      bmpRecoloredUpSmall, bmpRecoloredDownSmall, bmpRecoloredHiliteSmall,
+      bmpRecoloredUpSmall, bmpRecoloredDownSmall, bmpRecoloredUpHiliteSmall,bmpRecoloredHiliteSmall,
       eFore, eFore, eDisabled,
       theTheme.ImageSize( bmpRecoloredUpSmall ));
 }
@@ -177,7 +185,7 @@ void TranscriptionToolBar::Populate()
 // Very similar to code in EditToolBar
    MakeButtonBackgroundsSmall();
 
-   AddButton(bmpPlay,     bmpPlayDisabled,   TTB_PlaySpeed,
+   AddButton(this, bmpPlay,     bmpPlayDisabled,   TTB_PlaySpeed,
       _("Play at selected speed"));
    MakeAlternateImages(bmpLoop, bmpLoopDisabled, TTB_PlaySpeed, 1);
    MakeAlternateImages(bmpCutPreview, bmpCutPreviewDisabled, TTB_PlaySpeed, 2);
@@ -186,46 +194,48 @@ void TranscriptionToolBar::Populate()
    //Add a slider that controls the speed of playback.
    const int SliderWidth=100;
    mPlaySpeedSlider = safenew ASlider(this,
-                                  TTB_PlaySpeedSlider,
-                                  _("Playback Speed"),
-                                  wxDefaultPosition,
-                                  wxSize(SliderWidth,25),
-                                  SPEED_SLIDER);
+      TTB_PlaySpeedSlider,
+      _("Playback Speed"),
+      wxDefaultPosition,
+      wxSize(SliderWidth,25),
+      ASlider::Options{}
+         .Style( SPEED_SLIDER )
+         //  6 steps using page up/down, and 60 using arrow keys
+         .Line( 0.16667f )
+         .Page( 1.6667f )
+   );
+   mPlaySpeedSlider->SetSizeHints(wxSize(100, 25), wxSize(2000, 25));
    mPlaySpeedSlider->Set(mPlaySpeed / 100.0);
    mPlaySpeedSlider->SetLabel(_("Playback Speed"));
-   //  6 steps using page up/down, and 60 using arrow keys
-   mPlaySpeedSlider->SetScroll(0.16667f, 1.6667f);
-   Add( mPlaySpeedSlider, 0, wxALIGN_CENTER );
-   mPlaySpeedSlider->Connect(wxEVT_SET_FOCUS,
-                 wxFocusEventHandler(TranscriptionToolBar::OnFocus),
-                 NULL,
+   Add( mPlaySpeedSlider, 1, wxALIGN_CENTER );
+   mPlaySpeedSlider->Bind(wxEVT_SET_FOCUS,
+                 &TranscriptionToolBar::OnFocus,
                  this);
-   mPlaySpeedSlider->Connect(wxEVT_KILL_FOCUS,
-                 wxFocusEventHandler(TranscriptionToolBar::OnFocus),
-                 NULL,
+   mPlaySpeedSlider->Bind(wxEVT_KILL_FOCUS,
+                 &TranscriptionToolBar::OnFocus,
                  this);
 
 #ifdef EXPERIMENTAL_VOICE_DETECTION
 // If we need these strings translated, then search and replace
 // TRANSLATBLE by _ and remove this #define.
 #define TRANSLATABLE( x ) wxT( x )
-   AddButton(bmpTnStartOn,     bmpTnStartOnDisabled,  TTB_StartOn,
+   AddButton(this, bmpTnStartOn,     bmpTnStartOnDisabled,  TTB_StartOn,
       TRANSLATABLE("Adjust left selection to next onset"));
-   AddButton(bmpTnEndOn,       bmpTnEndOnDisabled,   TTB_EndOn,
+   AddButton(this, bmpTnEndOn,       bmpTnEndOnDisabled,   TTB_EndOn,
       TRANSLATABLE("Adjust right selection to previous offset"));
-   AddButton(bmpTnStartOff,    bmpTnStartOffDisabled,  TTB_StartOff,
+   AddButton(this, bmpTnStartOff,    bmpTnStartOffDisabled,  TTB_StartOff,
       TRANSLATABLE("Adjust left selection to next offset"));
-   AddButton(bmpTnEndOff,      bmpTnEndOffDisabled,    TTB_EndOff,
+   AddButton(this, bmpTnEndOff,      bmpTnEndOffDisabled,    TTB_EndOff,
       TRANSLATABLE("Adjust right selection to previous onset"));
-   AddButton(bmpTnSelectSound, bmpTnSelectSoundDisabled, TTB_SelectSound,
+   AddButton(this, bmpTnSelectSound, bmpTnSelectSoundDisabled, TTB_SelectSound,
       TRANSLATABLE("Select region of sound around cursor"));
-   AddButton(bmpTnSelectSilence, bmpTnSelectSilenceDisabled, TTB_SelectSilence,
+   AddButton(this, bmpTnSelectSilence, bmpTnSelectSilenceDisabled, TTB_SelectSilence,
       TRANSLATABLE("Select region of silence around cursor"));
-   AddButton(bmpTnAutomateSelection,   bmpTnAutomateSelectionDisabled,  TTB_AutomateSelection,
+   AddButton(this, bmpTnAutomateSelection,   bmpTnAutomateSelectionDisabled,  TTB_AutomateSelection,
       TRANSLATABLE("Automatically make labels from words"));
-   AddButton(bmpTnMakeTag, bmpTnMakeTagDisabled,  TTB_MakeLabel,
+   AddButton(this, bmpTnMakeTag, bmpTnMakeTagDisabled,  TTB_MakeLabel,
       TRANSLATABLE("Add label at selection"));
-   AddButton(bmpTnCalibrate, bmpTnCalibrateDisabled, TTB_Calibrate,
+   AddButton(this, bmpTnCalibrate, bmpTnCalibrateDisabled, TTB_Calibrate,
       TRANSLATABLE("Calibrate voicekey"));
 
    mSensitivitySlider = safenew ASlider(this,
@@ -269,14 +279,7 @@ void TranscriptionToolBar::EnableDisableButtons()
    AudacityProject *p = GetActiveProject();
    if (!p) return;
    // Is anything selected?
-   bool selection = false;
-   TrackListIterator iter(p->GetTracks());
-   for (Track *t = iter.First(); t; t = iter.Next())
-      if (t->GetSelected()) {
-         selection = true;
-         break;
-      }
-   selection &= (p->GetSel0() < p->GetSel1());
+   auto selection = p->GetSel0() < p->GetSel1() && p->GetTracks()->Selected();
 
    mButtons[TTB_Calibrate]->SetEnabled(selection);
 #endif
@@ -287,7 +290,7 @@ void TranscriptionToolBar::UpdatePrefs()
    RegenerateTooltips();
 
    // Set label to pull in language change
-   SetLabel(_("Transcription"));
+   SetLabel(_("Play-at-Speed"));
 
    // Give base class a chance
    ToolBar::UpdatePrefs();
@@ -310,16 +313,13 @@ void TranscriptionToolBar::RegenerateTooltips()
       },
    };
 
-   std::vector<wxString> commands;
    for (const auto &entry : table) {
-      commands.clear();
-      commands.push_back(wxGetTranslation(entry.untranslatedLabel));
-      commands.push_back(entry.commandName);
-      commands.push_back(wxGetTranslation(entry.untranslatedLabel2));
-      commands.push_back(entry.commandName2);
-      ToolBar::SetButtonToolTip(*mButtons[entry.tool], commands);
+      TranslatedInternalString commands[] = {
+         { entry.commandName,  wxGetTranslation(entry.untranslatedLabel)  },
+         { entry.commandName2, wxGetTranslation(entry.untranslatedLabel2) },
+      };
+      ToolBar::SetButtonToolTip( *mButtons[entry.tool], commands, 2u );
    }
-
 
 #ifdef EXPERIMENTAL_VOICE_DETECTION
    mButtons[TTB_StartOn]->SetToolTip(TRANSLATABLE("Left-to-On"));
@@ -447,12 +447,29 @@ void TranscriptionToolBar::PlayAtSpeed(bool looped, bool cutPreview)
       return;
    }
 
-   // Create a TimeTrack if we haven't done so already
-   if (!mTimeTrack) {
-      mTimeTrack = p->GetTrackFactory()->NewTimeTrack();
+   // Fixed speed play is the old method, that uses a time track.
+   // VariSpeed play reuses Scrubbing.
+   bool bFixedSpeedPlay = !gPrefs->ReadBool(wxT("/AudioIO/VariSpeedPlay"), true);
+   // Scrubbing doesn't support note tracks, but the fixed-speed method using time tracks does.
+   if (p->GetTracks()->Any<NoteTrack>())
+      bFixedSpeedPlay = true;
+
+   // Scrubbing only supports straight through play.
+   // So if looped or cutPreview, we have to fall back to fixed speed.
+   bFixedSpeedPlay = bFixedSpeedPlay || looped || cutPreview;
+   if (bFixedSpeedPlay)
+   {
+      // Create a TimeTrack if we haven't done so already
       if (!mTimeTrack) {
-         return;
+         mTimeTrack = p->GetTrackFactory()->NewTimeTrack();
+         if (!mTimeTrack) {
+            return;
+         }
       }
+      // Set the speed range
+      //mTimeTrack->SetRangeUpper((double)mPlaySpeed / 100.0);
+      //mTimeTrack->SetRangeLower((double)mPlaySpeed / 100.0);
+      mTimeTrack->GetEnvelope()->Flatten((double)mPlaySpeed / 100.0);
    }
 
    // Pop up the button
@@ -463,20 +480,20 @@ void TranscriptionToolBar::PlayAtSpeed(bool looped, bool cutPreview)
       p->GetControlToolBar()->StopPlaying();
    }
 
-   // Set the speed range
-   //mTimeTrack->SetRangeUpper((double)mPlaySpeed / 100.0);
-   //mTimeTrack->SetRangeLower((double)mPlaySpeed / 100.0);
-   mTimeTrack->GetEnvelope()->Flatten((double)mPlaySpeed / 100.0);
-
    // Get the current play region
    double playRegionStart, playRegionEnd;
    p->GetPlayRegion(&playRegionStart, &playRegionEnd);
 
    // Start playing
-   if (playRegionStart >= 0) {
-//      playRegionEnd = playRegionStart + (playRegionEnd-playRegionStart)* 100.0/mPlaySpeed;
+   if (playRegionStart < 0)
+      return;
+   if (bFixedSpeedPlay)
+   {
       AudioIOStartStreamOptions options(p->GetDefaultPlayOptions());
       options.playLooped = looped;
+      // No need to set cutPreview options.
+      // Due to a rather hacky approach, the appearance is used
+      // to signal use of cutpreview to code below.
       options.timeTrack = mTimeTrack.get();
       ControlToolBar::PlayAppearance appearance =
          cutPreview ? ControlToolBar::PlayAppearance::CutPreview
@@ -484,9 +501,14 @@ void TranscriptionToolBar::PlayAtSpeed(bool looped, bool cutPreview)
          : ControlToolBar::PlayAppearance::Straight;
       p->GetControlToolBar()->PlayPlayRegion
          (SelectedRegion(playRegionStart, playRegionEnd),
-          options,
-          PlayMode::normalPlay,
-          appearance);
+            options,
+            PlayMode::normalPlay,
+            appearance);
+   }
+   else
+   {
+      Scrubber &Scrubber = p->GetScrubber();
+      Scrubber.StartSpeedPlay(GetPlaySpeed(), playRegionStart, playRegionEnd);
    }
 }
 
@@ -527,10 +549,7 @@ void TranscriptionToolBar::OnStartOn(wxCommandEvent & WXUNUSED(event))
    mVk->AdjustThreshold(GetSensitivity());
    AudacityProject *p = GetActiveProject();
 
-   TrackList *tl = p->GetTracks();
-   TrackListOfKindIterator iter(Track::Wave, tl);
-
-   Track *t = iter.First();   //Make a track
+   auto t = *p->GetTracks()->Any< const WaveTrack >().begin();
    if(t ) {
       auto wt = static_cast<const WaveTrack*>(t);
       sampleCount start, len;
@@ -560,11 +579,8 @@ void TranscriptionToolBar::OnStartOff(wxCommandEvent & WXUNUSED(event))
    mVk->AdjustThreshold(GetSensitivity());
    AudacityProject *p = GetActiveProject();
 
-   TrackList *tl = p->GetTracks();
-   TrackListOfKindIterator iter(Track::Wave, tl);
-
    SetButton(false, mButtons[TTB_StartOff]);
-   Track *t = iter.First();   //Make a track
+   auto t = *p->GetTracks()->Any< const WaveTrack >().begin();
    if(t) {
       auto wt = static_cast<const WaveTrack*>(t);
       sampleCount start, len;
@@ -595,10 +611,7 @@ void TranscriptionToolBar::OnEndOn(wxCommandEvent & WXUNUSED(event))
 
    mVk->AdjustThreshold(GetSensitivity());
    AudacityProject *p = GetActiveProject();
-   TrackList *tl = p->GetTracks();
-   TrackListOfKindIterator iter(Track::Wave, tl);
-
-   Track *t = iter.First();   //Make a track
+   auto t = *p->GetTracks()->Any< const WaveTrack >().begin();
    if(t) {
       auto wt = static_cast<const WaveTrack*>(t);
       sampleCount start, len;
@@ -632,10 +645,8 @@ void TranscriptionToolBar::OnEndOff(wxCommandEvent & WXUNUSED(event))
    }
    mVk->AdjustThreshold(GetSensitivity());
    AudacityProject *p = GetActiveProject();
-   TrackList *tl = p->GetTracks();
-   TrackListOfKindIterator iter(Track::Wave, tl);
 
-   Track *t = iter.First();   //Make a track
+   auto t = *p->GetTracks()->Any< const WaveTrack >().begin();
    if(t) {
       auto wt = static_cast<const WaveTrack*>(t);
       sampleCount start, len;
@@ -673,30 +684,25 @@ void TranscriptionToolBar::OnSelectSound(wxCommandEvent & WXUNUSED(event))
 
 
    TrackList *tl = p->GetTracks();
-   TrackListOfKindIterator iter(Track::Wave, tl);
+   if(auto wt = *tl->Any<const WaveTrack>().begin()) {
+      sampleCount start, len;
+      GetSamples(wt, &start, &len);
 
-   Track *t = iter.First();   //Make a track
-   if(t)
-      {
-         auto wt = static_cast<const WaveTrack*>(t);
-         sampleCount start, len;
-         GetSamples(wt, &start, &len);
+      //Adjust length to end if selection is null
+      //if(len == 0)
+      //len = wt->GetSequence()->GetNumSamples()-start;
 
-         //Adjust length to end if selection is null
-         //if(len == 0)
-         //len = wt->GetSequence()->GetNumSamples()-start;
+      double rate =  wt->GetRate();
+      auto newstart = mVk->OffBackward(*wt, start, start);
+      auto newend   =
+      mVk->OffForward(*wt, start + len, (int)(tl->GetEndTime() * rate));
 
-         double rate =  wt->GetRate();
-         auto newstart = mVk->OffBackward(*wt, start, start);
-         auto newend   =
-            mVk->OffForward(*wt, start + len, (int)(tl->GetEndTime() * rate));
+      //reset the selection bounds.
+      p->SetSel0(newstart.as_double() / rate);
+      p->SetSel1(newend.as_double() /  rate);
+      p->RedrawProject();
 
-         //reset the selection bounds.
-         p->SetSel0(newstart.as_double() / rate);
-         p->SetSel1(newend.as_double() /  rate);
-         p->RedrawProject();
-
-      }
+   }
 
    SetButton(false,mButtons[TTB_SelectSound]);
 }
@@ -715,29 +721,24 @@ void TranscriptionToolBar::OnSelectSilence(wxCommandEvent & WXUNUSED(event))
 
 
    TrackList *tl = p->GetTracks();
-   TrackListOfKindIterator iter(Track::Wave, tl);
+   if(auto wt = *tl->Any<const WaveTrack>().begin()) {
+      sampleCount start, len;
+      GetSamples(wt, &start, &len);
 
-   Track *t = iter.First();   //Make a track
-   if(t)
-      {
-         auto wt = static_cast<const WaveTrack*>(t);
-         sampleCount start, len;
-         GetSamples(wt, &start, &len);
+      //Adjust length to end if selection is null
+      //if(len == 0)
+      //len = wt->GetSequence()->GetNumSamples()-start;
+      double rate =  wt->GetRate();
+      auto newstart = mVk->OnBackward(*wt, start, start);
+      auto newend   =
+      mVk->OnForward(*wt, start + len, (int)(tl->GetEndTime() * rate));
 
-         //Adjust length to end if selection is null
-         //if(len == 0)
-         //len = wt->GetSequence()->GetNumSamples()-start;
-         double rate =  wt->GetRate();
-         auto newstart = mVk->OnBackward(*wt, start, start);
-         auto newend   =
-            mVk->OnForward(*wt, start + len, (int)(tl->GetEndTime() * rate));
+      //reset the selection bounds.
+      p->SetSel0(newstart.as_double() /  rate);
+      p->SetSel1(newend.as_double() / rate);
+      p->RedrawProject();
 
-         //reset the selection bounds.
-         p->SetSel0(newstart.as_double() /  rate);
-         p->SetSel1(newend.as_double() / rate);
-         p->RedrawProject();
-
-      }
+   }
 
    SetButton(false,mButtons[TTB_SelectSilence]);
 
@@ -757,26 +758,21 @@ void TranscriptionToolBar::OnCalibrate(wxCommandEvent & WXUNUSED(event))
    AudacityProject *p = GetActiveProject();
 
    TrackList *tl = p->GetTracks();
-   TrackListOfKindIterator iter(Track::Wave, tl);
-   Track *t = iter.First();   //Get a track
+   if(auto wt = *tl->Any<const WaveTrack>().begin()) {
+      sampleCount start, len;
+      GetSamples(wt, &start, &len);
 
-   if(t)
-      {
-         auto wt = static_cast<const WaveTrack*>(t);
-         sampleCount start, len;
-         GetSamples(wt, &start, &len);
+      mVk->CalibrateNoise(*wt, start, len);
+      mVk->AdjustThreshold(3);
 
-         mVk->CalibrateNoise(*wt, start, len);
-         mVk->AdjustThreshold(3);
+      mButtons[TTB_StartOn]->Enable();
+      mButtons[TTB_StartOff]->Enable();
+      mButtons[TTB_EndOn]->Enable();
+      mButtons[TTB_EndOff]->Enable();
+      //mThresholdSensitivity->Set(3);
 
-         mButtons[TTB_StartOn]->Enable();
-         mButtons[TTB_StartOff]->Enable();
-         mButtons[TTB_EndOn]->Enable();
-         mButtons[TTB_EndOff]->Enable();
-         //mThresholdSensitivity->Set(3);
-
-         SetButton(false,mButtons[TTB_Calibrate]);
-      }
+      SetButton(false,mButtons[TTB_Calibrate]);
+   }
 
    mButtons[TTB_StartOn]->Enable();
    mButtons[TTB_StartOff]->Enable();
@@ -811,77 +807,71 @@ void TranscriptionToolBar::OnAutomateSelection(wxCommandEvent & WXUNUSED(event))
    mVk->AdjustThreshold(GetSensitivity());
    AudacityProject *p = GetActiveProject();
    TrackList *tl = p->GetTracks();
-   TrackListOfKindIterator iter(Track::Wave, tl);
+   if(auto wt = *tl->Any<const WaveTrack>().begin()) {
+      sampleCount start, len;
+      GetSamples(wt, &start, &len);
 
-   Track *t = iter.First();   //Make a track
-   if(t)
+      //Adjust length to end if selection is null
+      if(len == 0)
       {
-         auto wt = static_cast<const WaveTrack*>(t);
-         sampleCount start, len;
-         GetSamples(wt, &start, &len);
-
-         //Adjust length to end if selection is null
-         if(len == 0)
-            {
-               len = start;
-               start = 0;
-            }
-         sampleCount lastlen = 0;
-         double newStartPos, newEndPos;
-
-
-         //This is the minumum word size in samples (.05 is 50 ms)
-         int minWordSize = (int)(wt->GetRate() * .05);
-
-         //Continue until we have processed the entire
-         //region, or we are making no progress.
-         while(len > 0 && lastlen != len)
-            {
-
-               lastlen = len;
-
-               auto newStart = mVk->OnForward(*wt, start, len);
-
-               //JKC: If no start found then don't add any labels.
-               if( newStart==start)
-                  break;
-
-               //Adjust len by the NEW start position
-               len -= (newStart - start);
-
-               //Adjust len by the minimum word size
-               len -= minWordSize;
-
-
-
-               //OK, now we have found a NEW starting point.  A 'word' should be at least
-               //50 ms long, so jump ahead minWordSize
-
-               auto newEnd   =
-                  mVk->OffForward(*wt, newStart + minWordSize, len);
-
-               //If newEnd didn't move, we should give up, because
-               // there isn't another end before the end of the selection.
-               if(newEnd == (newStart + minWordSize))
-                  break;
-
-
-               //Adjust len by the NEW word end
-               len -= (newEnd - newStart);
-
-               //Calculate the start and end of the words, in seconds
-               newStartPos = newStart.as_double() / wt->GetRate();
-               newEndPos = newEnd.as_double() / wt->GetRate();
-
-
-               //Increment
-               start = newEnd;
-
-               p->DoAddLabel(SelectedRegion(newStartPos, newEndPos));
-               p->RedrawProject();
-            }
-         SetButton(false, mButtons[TTB_AutomateSelection]);
+         len = start;
+         start = 0;
       }
+      sampleCount lastlen = 0;
+      double newStartPos, newEndPos;
+
+      //This is the minumum word size in samples (.05 is 50 ms)
+      int minWordSize = (int)(wt->GetRate() * .05);
+
+      //Continue until we have processed the entire
+      //region, or we are making no progress.
+      while(len > 0 && lastlen != len)
+      {
+
+         lastlen = len;
+
+         auto newStart = mVk->OnForward(*wt, start, len);
+
+         //JKC: If no start found then don't add any labels.
+         if( newStart==start)
+            break;
+
+         //Adjust len by the NEW start position
+         len -= (newStart - start);
+
+         //Adjust len by the minimum word size
+         len -= minWordSize;
+
+
+
+         //OK, now we have found a NEW starting point.  A 'word' should be at least
+         //50 ms long, so jump ahead minWordSize
+
+         auto newEnd   =
+         mVk->OffForward(*wt, newStart + minWordSize, len);
+
+         //If newEnd didn't move, we should give up, because
+         // there isn't another end before the end of the selection.
+         if(newEnd == (newStart + minWordSize))
+            break;
+
+
+         //Adjust len by the NEW word end
+         len -= (newEnd - newStart);
+
+         //Calculate the start and end of the words, in seconds
+         newStartPos = newStart.as_double() / wt->GetRate();
+         newEndPos = newEnd.as_double() / wt->GetRate();
+
+
+         //Increment
+         start = newEnd;
+
+         p->DoAddLabel(SelectedRegion(newStartPos, newEndPos));
+         p->RedrawProject();
+      }
+      SetButton(false, mButtons[TTB_AutomateSelection]);
+   }
 }
 
 void TranscriptionToolBar::OnMakeLabel(wxCommandEvent & WXUNUSED(event))

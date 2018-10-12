@@ -39,6 +39,7 @@
 #include "../Project.h"
 #include "../Theme.h"
 #include "../widgets/ASlider.h"
+#include "../widgets/Grabber.h"
 
 IMPLEMENT_CLASS(MixerToolBar, ToolBar);
 
@@ -55,7 +56,7 @@ END_EVENT_TABLE()
 
 //Standard contructor
 MixerToolBar::MixerToolBar()
-: ToolBar(MixerBarID, _("Mixer"), wxT("Mixer"))
+: ToolBar(MixerBarID, _("Mixer"), wxT("Mixer"), true)
 {
    mInputSliderVolume = 0.0;
    mOutputSliderVolume = 0.0;
@@ -74,41 +75,37 @@ void MixerToolBar::Populate()
 {
    SetBackgroundColour( theTheme.Colour( clrMedium  ) );
    // Recording icon and slider
-   Add(safenew wxStaticBitmap(this,
+   Add(safenew AStaticBitmap(this,
                           wxID_ANY,
                           theTheme.Bitmap(bmpMic)), 0, wxALIGN_CENTER);
    mInputSlider = safenew ASlider(this, wxID_ANY, _("Recording Volume"),
-                              wxDefaultPosition, wxSize(130, 25));
-   mInputSlider->SetScroll(0.1f, 2.0f);
-   mInputSlider->SetName(_("Slider Recording"));
-   Add(mInputSlider, 0, wxALIGN_CENTER);
+                              wxDefaultPosition, wxSize(130, 25),
+                              ASlider::Options{}.Line( 0.1f ).Page( 2.0f ));
+   Add(mInputSlider, 1, wxALIGN_CENTER);
+   mInputSlider->SetSizeHints(wxSize(75, 25), wxSize(1000, 25));
 
    // Playback icon and slider
-   Add(safenew wxStaticBitmap(this,
+   Add(safenew AStaticBitmap(this,
                           wxID_ANY,
                           theTheme.Bitmap(bmpSpeaker)), 0, wxALIGN_CENTER);
    mOutputSlider = safenew ASlider(this, wxID_ANY, _("Playback Volume"),
-                               wxDefaultPosition, wxSize(130, 25));
-   mOutputSlider->SetScroll(0.1f, 2.0f);
-   mOutputSlider->SetName(_("Slider Playback"));
-   Add(mOutputSlider, 0, wxALIGN_CENTER);
+                               wxDefaultPosition, wxSize(130, 25),
+                               ASlider::Options{}.Line( 0.1f ).Page( 2.0f ));
+   Add(mOutputSlider, 1, wxALIGN_CENTER);
+   mOutputSlider->SetSizeHints(wxSize(75, 25), wxSize(1000, 25));
 
    // this bit taken from SelectionBar::Populate()
-   mInputSlider->Connect(wxEVT_SET_FOCUS,
-                 wxFocusEventHandler(MixerToolBar::OnFocus),
-                 NULL,
+   mInputSlider->Bind(wxEVT_SET_FOCUS,
+                 &MixerToolBar::OnFocus,
                  this);
-   mInputSlider->Connect(wxEVT_KILL_FOCUS,
-                 wxFocusEventHandler(MixerToolBar::OnFocus),
-                 NULL,
+   mInputSlider->Bind(wxEVT_KILL_FOCUS,
+                 &MixerToolBar::OnFocus,
                  this);
-   mOutputSlider->Connect(wxEVT_SET_FOCUS,
-                 wxFocusEventHandler(MixerToolBar::OnFocus),
-                 NULL,
+   mOutputSlider->Bind(wxEVT_SET_FOCUS,
+                 &MixerToolBar::OnFocus,
                  this);
-   mOutputSlider->Connect(wxEVT_KILL_FOCUS,
-                 wxFocusEventHandler(MixerToolBar::OnFocus),
-                 NULL,
+   mOutputSlider->Bind(wxEVT_KILL_FOCUS,
+                 &MixerToolBar::OnFocus,
                  this);
    // Show or hide the input slider based on whether it works
    mInputSlider->Enable(gAudioIO->InputMixerWorks());
@@ -168,19 +165,29 @@ void MixerToolBar::UpdatePrefs()
 
    // Show or hide the input slider based on whether it works
    mInputSlider->Enable(gAudioIO->InputMixerWorks());
-
-   // Layout the toolbar
    Layout();
 
+// This code is from before the mixer toolbar was resizable.
+// Now that it is resizable we trust the user to resize the mixer toolbar themselves.
+#if 0
+   wxSize oldSize( GetSize() );
+   // Layout the toolbar
+   Layout();
    // Resize the toolbar to fit the contents
-   Fit();
-
+   //Fit();
    // And make that size the minimum
-   SetMinSize( wxWindow::GetSizer()->GetMinSize() );
-   SetSize( GetMinSize() );
-
-   // Notify someone that we've changed our size
-   Updated();
+   wxSize newMinSize( wxWindow::GetSizer()->GetMinSize() );
+   SetMinSize( newMinSize  );
+   // IF size must increase, do so.
+   if( newMinSize.x > oldSize.x ){
+      SetSize( newMinSize );
+      // Notify someone that we've changed our size
+      Updated();
+   }
+   // ELSE preserve original size.
+   else
+      SetSize( oldSize );
+#endif
 #endif
 
    // Set label to pull in language change
@@ -286,8 +293,14 @@ void MixerToolBar::SetToolTips()
    }
 
    if (mOutputSlider->IsEnabled()) {
-      mOutputSlider->SetToolTipTemplate(wxString::Format(
-            _("Playback Volume: %%.2f%s"), gAudioIO->OutputMixerEmulated() ? _(" (emulated)") : wxT("")));
+      wxString format;
+      if (gAudioIO->OutputMixerEmulated())
+         format = _("Playback Volume: %s (emulated)");
+      else
+         format = _("Playback Volume: %s");
+
+      mOutputSlider->SetToolTipTemplate(
+         wxString::Format( format, "%.2f" ) );
    }
    else {
       mOutputSlider->SetToolTipTemplate(_("Playback Volume (Unavailable; use system mixer.)"));

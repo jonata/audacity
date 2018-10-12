@@ -62,7 +62,7 @@ class ODManager final
    void DecrementCurrentThreads();
 
    ///Adds a wavetrack, creates a queue member.
-   void AddNewTask(movable_ptr<ODTask> &&mtask, bool lockMutex=true);
+   void AddNewTask(std::unique_ptr<ODTask> &&mtask, bool lockMutex=true);
 
    ///Wakes the queue loop up by signalling its condition variable.
    void SignalTaskQueueLoop();
@@ -77,8 +77,9 @@ class ODManager final
    ///Returns success if it was possible..  Some ODTask conditions make it impossible until the Tasks finish.
    bool MakeWaveTrackDependent(WaveTrack* dependentTrack,WaveTrack* masterTrack);
 
+   ///if oldTrack is being watched,
    ///replace the wavetrack whose wavecache the gui watches for updates
-   void ReplaceWaveTrack(WaveTrack* oldTrack,WaveTrack* newTrack);
+   void ReplaceWaveTrack(Track *oldTrack, Track *newTrack);
 
    ///Adds a task to the running queue.  Threas-safe.
    void AddTask(ODTask* task);
@@ -140,7 +141,7 @@ class ODManager final
    static std::unique_ptr<ODManager> pMan;
 
    //List of tracks and their active and inactive tasks.
-   std::vector<movable_ptr<ODWaveTrackTaskQueue>> mQueues;
+   std::vector<std::unique_ptr<ODWaveTrackTaskQueue>> mQueues;
    ODLock mQueuesMutex;
 
    //List of current Task to do.

@@ -34,17 +34,18 @@ and sample size to help you importing data of an unknown format.
 #include "../ShuttleGui.h"
 #include "../UserException.h"
 #include "../WaveTrack.h"
+#include "../prefs/QualityPrefs.h"
 
 #include <cmath>
 #include <cstdio>
 #include <stdint.h>
 #include <vector>
 
+#include <wx/crt.h>
 #include <wx/defs.h>
 #include <wx/button.h>
 #include <wx/choice.h>
 #include <wx/intl.h>
-#include <wx/msgdlg.h>
 #include <wx/panel.h>
 #include <wx/progdlg.h>
 #include <wx/sizer.h>
@@ -106,13 +107,11 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
    sf_count_t offset = 0;
    double rate = 44100.0;
    double percent = 100.0;
-   TrackHolders channels;
+   TrackHolders results;
    auto updateResult = ProgressResult::Success;
 
    {
       SF_INFO sndInfo;
-      int result;
-
       unsigned numChannels = 0;
 
       try {
@@ -165,20 +164,22 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
       if (!sndFile){
          char str[1000];
          sf_error_str((SNDFILE *)NULL, str, 1000);
-         printf("%s\n", str);
+         wxPrintf("%s\n", str);
 
          throw FileException{ FileException::Cause::Open, fileName };
       }
 
-      result = sf_command(sndFile.get(), SFC_SET_RAW_START_OFFSET, &offset, sizeof(offset));
-      if (result != 0) {
-         char str[1000];
-         sf_error_str(sndFile.get(), str, 1000);
-         printf("%s\n", str);
 
-         throw FileException{ FileException::Cause::Read, fileName };
+      {
+         int result = sf_command(sndFile.get(), SFC_SET_RAW_START_OFFSET, &offset, sizeof(offset));
+         if (result != 0) {
+            char str[1000];
+            sf_error_str(sndFile.get(), str, 1000);
+            wxPrintf("%s\n", str);
+
+            throw FileException{ FileException::Cause::Read, fileName };
+         }
       }
-
       SFCall<sf_count_t>(sf_seek, sndFile.get(), 0, SEEK_SET);
 
       auto totalFrames =
@@ -193,38 +194,23 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
       // the quality of the original file.
       //
 
-      format = (sampleFormat)
-      gPrefs->Read(wxT("/SamplingRate/DefaultProjectSampleFormat"), floatSample);
+      format = QualityPrefs::SampleFormatChoice();
 
       if (format != floatSample &&
           sf_subtype_more_than_16_bits(encoding))
          format = floatSample;
 
+      results.resize(1);
+      auto &channels = results[0];
       channels.resize(numChannels);
 
-      auto iter = channels.begin();
-      for (decltype(numChannels) c = 0; c < numChannels; ++iter, ++c) {
-         const auto channel =
-         (*iter = trackFactory->NewWaveTrack(format, rate)).get();
-
-         if (numChannels > 1)
-            switch (c) {
-               case 0:
-                  channel->SetChannel(Track::LeftChannel);
-                  break;
-               case 1:
-                  channel->SetChannel(Track::RightChannel);
-                  break;
-               default:
-                  channel->SetChannel(Track::MonoChannel);
-            }
+      {
+         // iter not used outside this scope.
+         auto iter = channels.begin();
+         for (decltype(numChannels) c = 0; c < numChannels; ++iter, ++c)
+            *iter = trackFactory->NewWaveTrack(format, rate);
       }
-
       const auto firstChannel = channels.begin()->get();
-      if (numChannels == 2) {
-         firstChannel->SetLinked(true);
-      }
-
       auto maxBlockSize = firstChannel->GetMaxBlockSize();
 
       SampleBuffer srcbuffer(maxBlockSize * numChannels, format);
@@ -238,7 +224,7 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
 
       wxString msg;
 
-      msg.Printf(_("Importing %s"), wxFileName::FileName(fileName).GetFullName().c_str());
+      msg.Printf(_("Importing %s"), wxFileName::FileName(fileName).GetFullName());
 
       /* i18n-hint: 'Raw' means 'unprocessed' here and should usually be tanslated.*/
       ProgressDialog progress(_("Import Raw"), msg);
@@ -248,14 +234,14 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
          block =
             limitSampleBufferSize( maxBlockSize, totalFrames - framescompleted );
 
-         sf_count_t result;
+         sf_count_t sf_result;
          if (format == int16Sample)
-            result = SFCall<sf_count_t>(sf_readf_short, sndFile.get(), (short *)srcbuffer.ptr(), block);
+            sf_result = SFCall<sf_count_t>(sf_readf_short, sndFile.get(), (short *)srcbuffer.ptr(), block);
          else
-            result = SFCall<sf_count_t>(sf_readf_float, sndFile.get(), (float *)srcbuffer.ptr(), block);
+            sf_result = SFCall<sf_count_t>(sf_readf_float, sndFile.get(), (float *)srcbuffer.ptr(), block);
 
-         if (result >= 0) {
-            block = result;
+         if (sf_result >= 0) {
+            block = sf_result;
          }
          else {
             // This is not supposed to happen, sndfile.h says result is always
@@ -295,9 +281,11 @@ void ImportRaw(wxWindow *parent, const wxString &fileName,
    if (updateResult == ProgressResult::Failed || updateResult == ProgressResult::Cancelled)
       throw UserException{};
 
-   for (const auto &channel : channels)
-      channel->Flush();
-   outTracks.swap(channels);
+   if (!results.empty() && !results[0].empty()) {
+      for (const auto &channel : results[0])
+         channel->Flush();
+      outTracks.swap(results);
+   }
 }
 
 //
@@ -490,8 +478,9 @@ void ImportRawDialog::OnOK(wxCommandEvent & WXUNUSED(event))
       mPercent = 100.0;
    if (mRate < 100.0)
       mRate = 100.0;
-   if (mRate > 100000.0)
-      mRate = 100000.0;
+   // Highest preset sample rate supported in Audacity 2.3.0 is 384 kHz
+   if (mRate > 384000.0)
+      mRate = 384000.0;
 
    EndModal(true);
 }

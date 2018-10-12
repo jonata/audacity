@@ -1,5 +1,5 @@
 #
-# FileDialog
+# mod-nyq-bench
 #
 
 AC_PREREQ([2.59])
@@ -44,7 +44,7 @@ AC_ARG_ENABLE(debug,
             debug_preference="")
 
 AC_ARG_WITH(wx-version,
-            [AS_HELP_STRING([--with-wx-version],[override default wxWidgets version [2.6,2.8]])],
+            [AS_HELP_STRING([--with-wx-version],[override default wxWidgets version [3.1,3.0]])],
             wx_preference="--version=$withval",
             wx_preference="")
 
@@ -54,7 +54,7 @@ AC_ARG_WITH(wx-config,
             wx_config="")
 
 dnl wxWidgets -- we assume that if wx-config is found, wxWidgets is successfully installed.
-AC_PATH_PROGS(WX_CONFIG, wx-config wx-config-3.0, no, $PATH:/usr/local/bin )
+AC_PATH_PROGS(WX_CONFIG, wx-config wx-config-3.1, no, $PATH:/usr/local/bin )
 if [[ "$WX_CONFIG" = "no" ]] ; then
    AC_MSG_ERROR("Could not find wx-config: is wxWidgets installed? is wx-config in your path?")
 fi

@@ -42,6 +42,7 @@
 #include "../Prefs.h"
 #include "../Internat.h"
 #include "../Tags.h"
+#include "../prefs/QualityPrefs.h"
 
 
 #define DESC _("Ogg Vorbis files")
@@ -59,7 +60,7 @@ void GetOGGImportPlugin(ImportPluginList &importPluginList,
                         UnusableImportPluginList &unusableImportPluginList)
 {
    unusableImportPluginList.push_back(
-      make_movable<UnusableImportPlugin>
+      std::make_unique<UnusableImportPlugin>
          (DESC, wxArrayString(WXSIZEOF(exts), exts))
    );
 }
@@ -91,8 +92,8 @@ public:
 
    ~OggImportPlugin() { }
 
-   wxString GetPluginStringID() { return wxT("liboggvorbis"); }
-   wxString GetPluginFormatDescription();
+   wxString GetPluginStringID() override { return wxT("liboggvorbis"); }
+   wxString GetPluginFormatDescription() override;
    std::unique_ptr<ImportFileHandle> Open(const wxString &Filename) override;
 };
 
@@ -108,8 +109,7 @@ public:
       mVorbisFile(std::move(vorbisFile))
       , mStreamUsage{ static_cast<size_t>(mVorbisFile->links) }
    {
-      mFormat = (sampleFormat)
-         gPrefs->Read(wxT("/SamplingRate/DefaultProjectSampleFormat"), floatSample);
+      mFormat = QualityPrefs::SampleFormatChoice();
 
       for (int i = 0; i < mVorbisFile->links; i++)
       {
@@ -155,7 +155,7 @@ private:
 
    ArrayOf<int> mStreamUsage;
    wxArrayString   mStreamInfo;
-   std::list<TrackHolders> mChannels;
+   std::list<NewChannelGroup> mChannels;
 
    sampleFormat   mFormat;
 };
@@ -163,7 +163,7 @@ private:
 void GetOGGImportPlugin(ImportPluginList &importPluginList,
                         UnusableImportPluginList & WXUNUSED(unusableImportPluginList))
 {
-   importPluginList.push_back( make_movable<OggImportPlugin>() );
+   importPluginList.push_back( std::make_unique<OggImportPlugin>() );
 }
 
 wxString OggImportPlugin::GetPluginFormatDescription()
@@ -228,7 +228,8 @@ auto OggImportFileHandle::GetFileUncompressedBytes() -> ByteCount
    return 0;
 }
 
-ProgressResult OggImportFileHandle::Import(TrackFactory *trackFactory, TrackHolders &outTracks,
+ProgressResult OggImportFileHandle::Import(
+   TrackFactory *trackFactory, TrackHolders &outTracks,
    Tags *tags)
 {
    outTracks.clear();
@@ -258,27 +259,8 @@ ProgressResult OggImportFileHandle::Import(TrackFactory *trackFactory, TrackHold
 
       link.resize(vi->channels);
 
-      int c = -1;
-      for (auto &channel : link) {
-         ++c;
-
+      for (auto &channel : link)
          channel = trackFactory->NewWaveTrack(mFormat, vi->rate);
-
-         if (vi->channels == 2) {
-            switch (c) {
-            case 0:
-               channel->SetChannel(Track::LeftChannel);
-               channel->SetLinked(true);
-               break;
-            case 1:
-               channel->SetChannel(Track::RightChannel);
-               break;
-            }
-         }
-         else {
-            channel->SetChannel(Track::MonoChannel);
-         }
-      }
    }
 
    /* The number of bytes to get from the codec in each run */
@@ -325,7 +307,7 @@ ProgressResult OggImportFileHandle::Import(TrackFactory *trackFactory, TrackHold
          if (bytesRead == OV_HOLE) {
             wxFileName ff(mFilename);
             wxLogError(wxT("Ogg Vorbis importer: file %s is malformed, ov_read() reported a hole"),
-               ff.GetFullName().c_str());
+               ff.GetFullName());
             /* http://lists.xiph.org/pipermail/vorbis-dev/2001-February/003223.html
              * is the justification for doing this - best effort for malformed file,
              * hence the message.
@@ -374,10 +356,9 @@ ProgressResult OggImportFileHandle::Import(TrackFactory *trackFactory, TrackHold
 
    for (auto &link : mChannels)
    {
-      for (auto &channel : link) {
+      for (auto &channel : link)
          channel->Flush();
-         outTracks.push_back(std::move(channel));
-      }
+      outTracks.push_back(std::move(link));
    }
 
    //\todo { Extract comments from each stream? }

@@ -36,8 +36,10 @@ UndoManager
 
 #include "UndoManager.h"
 
+#include <unordered_set>
+
 using ConstBlockFilePtr = const BlockFile*;
-WX_DECLARE_HASH_SET(ConstBlockFilePtr, wxPointerHash, wxPointerEqual, Set );
+using Set = std::unordered_set<ConstBlockFilePtr>;
 
 struct UndoStackElem {
 
@@ -76,9 +78,7 @@ namespace {
       SpaceArray::value_type result = 0;
 
       //TIMER_START( "CalculateSpaceUsage", space_calc );
-      TrackListOfKindIterator iter(Track::Wave);
-      WaveTrack *wt = (WaveTrack *) iter.First(tracks);
-      while (wt)
+      for (auto wt : tracks->Any< WaveTrack >())
       {
          // Scan all clips within current track
          for(const auto &clip : wt->GetAllClips())
@@ -102,8 +102,6 @@ namespace {
                   seen->insert( &*file );
             }
          }
-
-         wt = (WaveTrack *) iter.Next();
       }
 
       return result;
@@ -196,6 +194,8 @@ void UndoManager::RemoveStates(int num)
 void UndoManager::ClearStates()
 {
    RemoveStates(stack.size());
+   current = -1;
+   saved = -1;
 }
 
 unsigned int UndoManager::GetNumStates()
@@ -232,11 +232,11 @@ void UndoManager::ModifyState(const TrackList * l,
 
    // Duplicate
    auto tracksCopy = TrackList::Create();
-   TrackListConstIterator iter(l);
-   const Track *t = iter.First();
-   while (t) {
+   for (auto t : *l) {
+      if ( t->GetId() == TrackId{} )
+         // Don't copy a pending added track
+         continue;
       tracksCopy->Add(t->Duplicate());
-      t = iter.Next();
    }
 
    // Replace
@@ -268,6 +268,14 @@ void UndoManager::PushState(const TrackList * l,
       return;
    }
 
+   auto tracksCopy = TrackList::Create();
+   for (auto t : *l) {
+      if ( t->GetId() == TrackId{} )
+         // Don't copy a pending added track
+         continue;
+      tracksCopy->Add(t->Duplicate());
+   }
+
    mayConsolidate = true;
 
    i = current + 1;
@@ -275,18 +283,10 @@ void UndoManager::PushState(const TrackList * l,
       RemoveStateAt(i);
    }
 
-   auto tracksCopy = TrackList::Create();
-   TrackListConstIterator iter(l);
-   const Track *t = iter.First();
-   while (t) {
-      tracksCopy->Add(t->Duplicate());
-      t = iter.Next();
-   }
-
    // Assume tags was duplicted before any changes.
    // Just save a NEW shared_ptr to it.
    stack.push_back(
-      make_movable<UndoStackElem>
+      std::make_unique<UndoStackElem>
          (std::move(tracksCopy),
             longDescription, shortDescription, selectedRegion, tags)
    );
@@ -309,12 +309,7 @@ const UndoState &UndoManager::SetStateTo
 
    current = n;
 
-   if (current == (int)(stack.size()-1)) {
-      *selectedRegion = stack[current]->state.selectedRegion;
-   }
-   else {
-      *selectedRegion = stack[current + 1]->state.selectedRegion;
-   }
+   *selectedRegion = stack[current]->state.selectedRegion;
 
    lastAction = wxT("");
    mayConsolidate = false;
@@ -378,10 +373,10 @@ void UndoManager::StateSaved()
 //void UndoManager::Debug()
 //{
 //   for (unsigned int i = 0; i < stack.Count(); i++) {
-//      TrackListIterator iter(stack[i]->tracks);
-//      WaveTrack *t = (WaveTrack *) (iter.First());
-//      wxPrintf(wxT("*%d* %s %f\n"), i, (i == (unsigned int)current) ? wxT("-->") : wxT("   "),
-//             t ? t->GetEndTime()-t->GetStartTime() : 0);
+//      for (auto t : stack[i]->tracks->Any())
+//         wxPrintf(wxT("*%d* %s %f\n"),
+//                  i, (i == (unsigned int)current) ? wxT("-->") : wxT("   "),
+//                t ? t->GetEndTime()-t->GetStartTime() : 0);
 //   }
 //}
 

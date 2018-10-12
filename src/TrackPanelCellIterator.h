@@ -43,7 +43,8 @@ public:
    friend inline bool operator==
       (const TrackPanelCellIterator &lhs, const TrackPanelCellIterator &rhs)
    {
-      return lhs.mpCell == rhs.mpCell;
+      return lhs.mpCell == rhs.mpCell &&
+         lhs.mDidBackground == rhs.mDidBackground;
    }
 
    value_type operator * () const;
@@ -52,7 +53,7 @@ private:
    void UpdateRect();
 
    TrackPanel *mPanel;
-   VisibleTrackIterator mIter;
+   TrackIter<Track> mIter;
    std::shared_ptr<Track> mpTrack;
    std::shared_ptr<TrackPanelCell> mpCell;
    CellType mType{ CellType::Track };

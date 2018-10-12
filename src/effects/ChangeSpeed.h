@@ -25,7 +25,7 @@
 
 class ShuttleGui;
 
-#define CHANGESPEED_PLUGIN_SYMBOL XO("Change Speed")
+#define CHANGESPEED_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Change Speed") }
 
 class EffectChangeSpeed final : public Effect
 {
@@ -35,18 +35,19 @@ public:
 
    // IdentInterface implementation
 
-   wxString GetSymbol() override;
+   IdentInterfaceSymbol GetSymbol() override;
    wxString GetDescription() override;
    wxString ManualPage() override;
 
-   // EffectIdentInterface implementation
+   // EffectDefinitionInterface implementation
 
    EffectType GetType() override;
 
    // EffectClientInterface implementation
 
-   bool GetAutomationParameters(EffectAutomationParameters & parms) override;
-   bool SetAutomationParameters(EffectAutomationParameters & parms) override;
+   bool DefineParams( ShuttleParams & S ) override;
+   bool GetAutomationParameters(CommandParameters & parms) override;
+   bool SetAutomationParameters(CommandParameters & parms) override;
    bool LoadFactoryDefaults() override;
 
    // Effect implementation
@@ -114,7 +115,7 @@ private:
    // private effect parameters
    int      mToVinyl;         // to standard vinyl speed (rpm)
    double   mToLength;        // target length of selection
-   wxString mFormat;          // time control format
+   NumericFormatId mFormat;          // time control format
 
    DECLARE_EVENT_TABLE()
 };

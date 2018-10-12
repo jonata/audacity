@@ -19,7 +19,6 @@
 #include "../MemoryX.h"
 #include <wx/bmpbuttn.h>
 #include <wx/defs.h>
-#include <wx/dynarray.h>
 #include <wx/intl.h>
 #include <wx/string.h>
 #include <wx/tglbtn.h>
@@ -43,6 +42,7 @@ class wxWindow;
 #include "../Track.h"
 
 class ShuttleGui;
+class AudacityCommand;
 
 #define BUILTIN_EFFECT_PREFIX wxT("Built-in Effect: ")
 
@@ -79,16 +79,17 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    // IdentInterface implementation
 
    wxString GetPath() override;
-   wxString GetSymbol() override;
-   wxString GetName() override;
-   wxString GetVendor() override;
+
+   IdentInterfaceSymbol GetSymbol() override;
+
+   IdentInterfaceSymbol GetVendor() override;
    wxString GetVersion() override;
    wxString GetDescription() override;
 
-   // EffectIdentInterface implementation
+   // EffectDefinitionInterface implementation
 
    EffectType GetType() override;
-   wxString GetFamily() override;
+   IdentInterfaceSymbol GetFamilyId() override;
    bool IsInteractive() override;
    bool IsDefault() override;
    bool IsLegacy() override;
@@ -130,8 +131,8 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
 
    bool ShowInterface(wxWindow *parent, bool forceModal = false) override;
 
-   bool GetAutomationParameters(EffectAutomationParameters & parms) override;
-   bool SetAutomationParameters(EffectAutomationParameters & parms) override;
+   bool GetAutomationParameters(CommandParameters & parms) override;
+   bool SetAutomationParameters(CommandParameters & parms) override;
 
    bool LoadUserPreset(const wxString & name) override;
    bool SaveUserPreset(const wxString & name) override;
@@ -160,8 +161,8 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
 
    double GetDefaultDuration() override;
    double GetDuration() override;
-   wxString GetDurationFormat() override;
-   virtual wxString GetSelectionFormat() /* not override? */; // time format in Selection toolbar
+   NumericFormatId GetDurationFormat() override;
+   virtual NumericFormatId GetSelectionFormat() /* not override? */; // time format in Selection toolbar
    void SetDuration(double duration) override;
 
    bool Apply() override;
@@ -248,8 +249,7 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
                  TrackFactory *factory, SelectedRegion *selectedRegion,
                  bool shouldPrompt = true);
 
-   bool Delegate( Effect &delegate,
-      wxWindow *parent, SelectedRegion *selectedRegion, bool shouldPrompt);
+   bool Delegate( Effect &delegate, wxWindow *parent, bool shouldPrompt);
 
    // Realtime Effect Processing
    /* not virtual */ bool RealtimeAddProcessor(int group, unsigned chans, float rate);
@@ -269,6 +269,8 @@ class AUDACITY_DLL_API Effect /* not final */ : public wxEvtHandler,
    int MessageBox(const wxString& message,
                   long style = DefaultMessageBoxStyle,
                   const wxString& titleStr = wxString{});
+
+   static void IncEffectCounter(){ nEffectsDone++;};
 
 //
 // protected virtual methods
@@ -330,7 +332,7 @@ protected:
    // is okay, but don't try to undo).
 
    // Pass a fraction between 0.0 and 1.0
-   bool TotalProgress(double frac);
+   bool TotalProgress(double frac, const wxString & = wxEmptyString);
 
    // Pass a fraction between 0.0 and 1.0, for the current track
    // (when doing one track at a time)
@@ -341,7 +343,6 @@ protected:
    bool TrackGroupProgress(int whichGroup, double frac, const wxString & = wxEmptyString);
 
    int GetNumWaveTracks() { return mNumTracks; }
-
    int GetNumWaveGroups() { return mNumGroups; }
 
    // Calculates the start time and selection length in samples
@@ -365,10 +366,13 @@ protected:
    // preview copies of all wave tracks.
    void IncludeNotSelectedPreviewTracks(bool includeNotSelected);
 
-   // Use these two methods to copy the input tracks to mOutputTracks, if
+   // Use this method to copy the input tracks to mOutputTracks, if
    // doing the processing on them, and replacing the originals only on success (and not cancel).
-   void CopyInputTracks(); // trackType = Track::Wave
-   void CopyInputTracks(int trackType);
+   // If not all sync-locked selected, then only selected wave tracks.
+   void CopyInputTracks(bool allSyncLockSelected = false);
+
+   // A global counter of all the successful Effect invocations.
+   static int nEffectsDone;
 
    // For the use of analyzers, which don't need to make output wave tracks,
    // but may need to add label tracks.
@@ -453,8 +457,9 @@ protected:
    double         mProjectRate; // Sample rate of the project - NEW tracks should
                                // be created with this rate...
    double         mSampleRate;
+   SelectedRegion *mpSelectedRegion{};
    TrackFactory   *mFactory;
-   TrackList *inputTracks() const { return mTracks; }
+   const TrackList *inputTracks() const { return mTracks; }
    std::shared_ptr<TrackList> mOutputTracks; // used only if CopyInputTracks() is called.
    double         mT0;
    double         mT1;
@@ -472,9 +477,6 @@ protected:
    int            mUIResultID;
 
    sampleCount    mSampleCnt;
-
-   // type of the tracks on mOutputTracks
-   int            mOutputTracksType;
 
  // Used only by the base Effect class
  //
@@ -510,7 +512,7 @@ private:
 
    bool mIsSelection;
    double mDuration;
-   wxString mDurationFormat;
+   NumericFormatId mDurationFormat;
 
    bool mIsPreview;
 
@@ -531,7 +533,7 @@ private:
    size_t mBlockSize;
    unsigned mNumChannels;
 
-   wxArrayInt mGroupProcessor;
+   std::vector<int> mGroupProcessor;
    int mCurrentProcessor;
 
    wxCriticalSection mRealtimeSuspendLock;
@@ -594,6 +596,9 @@ public:
    EffectUIHost(wxWindow *parent,
                 Effect *effect,
                 EffectUIClientInterface *client);
+   EffectUIHost(wxWindow *parent,
+                AudacityCommand *command,
+                EffectUIClientInterface *client);
    virtual ~EffectUIHost();
 
    bool TransferDataToWindow() override;
@@ -630,7 +635,7 @@ private:
    void OnDefaults(wxCommandEvent & evt);
 
    void UpdateControls();
-   wxBitmap CreateBitmap(const char *xpm[], bool up, bool pusher);
+   wxBitmap CreateBitmap(const char * const xpm[], bool up, bool pusher);
    void LoadUserPresets();
 
    void InitializeRealtime();
@@ -641,6 +646,7 @@ private:
    AudacityProject *mProject;
    wxWindow *mParent;
    Effect *mEffect;
+   AudacityCommand * mCommand;
    EffectUIClientInterface *mClient;
 
    wxArrayString mUserPresets;
@@ -766,7 +772,7 @@ inline long TrapLong(long x, long min, long max)
    static const type SCL_ ## name = (scale);
 
 #define ReadParam(type, name) \
-   type name; \
+   type name = DEF_ ## name; \
    if (!parms.ReadAndVerify(KEY_ ## name, &name, DEF_ ## name, MIN_ ## name, MAX_ ## name)) \
       return false;
 
@@ -778,9 +784,15 @@ inline long TrapLong(long x, long min, long max)
    if (!parms.ReadAndVerify(KEY_ ## name, &name, DEF_ ## name)) \
       return false;
 
-#define ReadAndVerifyEnum(name, list) \
+#define ReadAndVerifyEnum(name, list, listSize) \
    int name; \
-   if (!parms.ReadAndVerify(KEY_ ## name, &name, DEF_ ## name, list)) \
+   if (!parms.ReadAndVerify(KEY_ ## name, &name, DEF_ ## name, list, listSize)) \
+      return false;
+
+#define ReadAndVerifyEnumWithObsoletes(name, list, listSize, obsoleteList, nObsolete) \
+   int name; \
+   if (!parms.ReadAndVerify(KEY_ ## name, &name, DEF_ ## name, \
+                            list, listSize, obsoleteList, nObsolete)) \
       return false;
 
 #define ReadAndVerifyInt(name) ReadParam(int, name)

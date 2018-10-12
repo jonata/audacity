@@ -26,6 +26,7 @@ tasks associated with a WaveTrack.
 #include <vector>
 #include "ODTaskThread.h"
 #include <wx/wx.h>
+class Track;
 class WaveTrack;
 class ODTask;
 /// A class representing a modular task to be used with the On-Demand structures.
@@ -52,7 +53,7 @@ class ODWaveTrackTaskQueue final
    void DemandTrackUpdate(WaveTrack* track, double seconds);
 
    ///replaces all instances of a WaveTrack within this task with another.
-   void ReplaceWaveTrack(WaveTrack* oldTrack,WaveTrack* newTrack);
+   void ReplaceWaveTrack(Track *oldTrack, Track *newTrack);
 
    //if the wavetrack is in this queue, and is not the only wavetrack, clones the tasks and schedules it.
    void MakeWaveTrackIndependent(WaveTrack* track);
@@ -72,7 +73,7 @@ class ODWaveTrackTaskQueue final
    int GetNumWaveTracks();
 
    ///Add a task to the queue.
-   void AddTask(movable_ptr<ODTask> &&mtask);
+   void AddTask(std::unique_ptr<ODTask> &&mtask);
 
    //returns true if either tracks or tasks are empty
    bool IsEmpty();
@@ -106,7 +107,7 @@ class ODWaveTrackTaskQueue final
   ODLock mTracksMutex;
 
   ///the list of tasks associated with the tracks.  This class owns these tasks.
-  std::vector<movable_ptr<ODTask>> mTasks;
+  std::vector<std::unique_ptr<ODTask>> mTasks;
   ODLock    mTasksMutex;
 
 };

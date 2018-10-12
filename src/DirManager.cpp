@@ -73,7 +73,6 @@
 #include <wx/log.h>
 #include <wx/filefn.h>
 #include <wx/hash.h>
-#include <wx/msgdlg.h>
 #include <wx/progdlg.h>
 #include <wx/timer.h>
 #include <wx/intl.h>
@@ -91,6 +90,7 @@
 #include "AudacityException.h"
 #include "BlockFile.h"
 #include "FileException.h"
+#include "FileNames.h"
 #include "blockfile/LegacyBlockFile.h"
 #include "blockfile/LegacyAliasBlockFile.h"
 #include "blockfile/SimpleBlockFile.h"
@@ -105,6 +105,7 @@
 #include "Sequence.h"
 #include "widgets/Warning.h"
 #include "widgets/MultiDialog.h"
+#include "widgets/ErrorDialog.h"
 
 #include "ondemand/ODManager.h"
 
@@ -312,8 +313,8 @@ static void RecursivelyRemove(wxArrayString& filePathArray, int count, int bias,
       progress.create( _("Progress"), message );
 
    auto nn = filePathArray.size();
-   for (int i = 0; i < nn; i++) {
-      const wxChar *file = filePathArray[i].c_str();
+   for (unsigned int i = 0; i < nn; i++) {
+      const wxChar *file = filePathArray[i];
       if (bFiles)
          ::wxRemoveFile(file);
       if (bDirs) {
@@ -610,7 +611,7 @@ bool DirManager::SetProject(wxString& newProjPath, wxString& newProjName, const 
             if (b) {
                if (moving || !b->IsLocked()) {
                   auto result = b->GetFileName();
-                  auto oldPath = result.name.GetFullPath();
+                  oldPath = result.name.GetFullPath();
                   if (!oldPath.empty())
                      wxRemoveFile( oldPath );
                }
@@ -767,14 +768,14 @@ bool DirManager::AssignFile(wxFileNameWrapper &fileName,
       // set to true only if called from MakeFileBlockName().
 
       wxString filespec;
-      filespec.Printf(wxT("%s.*"),value.c_str());
+      filespec.Printf(wxT("%s.*"),value);
       if(checkit.HasFiles(filespec)){
          // collision with on-disk state!
          wxString collision;
          checkit.GetFirst(&collision,filespec);
 
          wxLogWarning(_("Audacity found an orphan block file: %s. \nPlease consider saving and reloading the project to perform a complete project check."),
-                      collision.c_str());
+                      collision);
 
          return FALSE;
       }
@@ -843,7 +844,7 @@ void DirManager::BalanceFileAdd(int midkey)
 
 void DirManager::BalanceInfoAdd(const wxString &file)
 {
-   const wxChar *s=file.c_str();
+   const wxChar *s=file;
    if(s[0]==wxT('e')){
       // this is one of the modern two-deep managed files
       // convert filename to keys
@@ -898,7 +899,7 @@ void DirManager::BalanceInfoDel(const wxString &file)
    auto &dirTopPool = balanceInfo.dirTopPool;
    auto &dirTopFull = balanceInfo.dirTopFull;
 
-   const wxChar *s=file.c_str();
+   const wxChar *s=file;
    if(s[0]==wxT('e')){
       // this is one of the modern two-deep managed files
 
@@ -944,7 +945,7 @@ void DirManager::BalanceInfoDel(const wxString &file)
                if(--dirTopPool[topnum]<1){
                   // do *not* erase the hash entry from dirTopPool
                   // *do* DELETE the actual directory
-                  wxString dir=(projFull != wxT("")? projFull: mytemp);
+                  dir=(projFull != wxT("")? projFull: mytemp);
                   dir += wxFILE_SEP_PATH;
                   dir += file.Mid(0,3);
                   wxFileName::Rmdir(dir);
@@ -1161,34 +1162,6 @@ bool DirManager::ContainsBlockFile(const wxString &filepath) const
       BlockFilePtr{ it->second.lock() };
 }
 
-namespace {
-   bool MyCopyFile(const wxString& file1, const wxString& file2,
-                                 bool overwrite = true)
-   {
-#ifdef __WXMSW__
-
-      // workaround not needed
-      return wxCopyFile(file1, file2, overwrite);
-
-#else
-      // PRL:  Compensate for buggy wxCopyFile that returns false success,
-      // which was a cause of case 4 in comment 10 of
-      // http://bugzilla.audacityteam.org/show_bug.cgi?id=1759
-      // Destination file was created, but was empty
-      // Bug was introduced after wxWidgets 2.8.12 at commit
-      // 0597e7f977c87d107e24bf3e95ebfa3d60efc249 of wxWidgets repo
-
-      bool existed = wxFileExists(file2);
-      bool result = wxCopyFile(file1, file2, overwrite) &&
-         wxFile{ file1 }.Length() == wxFile{ file2 }.Length();
-      if (!result && !existed)
-         wxRemoveFile(file2);
-      return result;
-
-#endif
-   }
-}
-
 // Adds one to the reference count of the block file,
 // UNLESS it is "locked", then it makes a NEW copy of
 // the BlockFile.
@@ -1232,7 +1205,7 @@ BlockFilePtr DirManager::CopyBlockFile(const BlockFilePtr &b)
       //a summary file, so we should check before we copy.
       if(b->IsSummaryAvailable())
       {
-         if( !MyCopyFile(fn.GetFullPath(),
+         if( !FileNames::CopyFile(fn.GetFullPath(),
                   newFile.GetFullPath()) )
             // Disk space exhaustion, maybe
             throw FileException{
@@ -1377,13 +1350,14 @@ std::pair<bool, wxString> DirManager::CopyToNewProjectDirectory(BlockFile *f)
        || newFileName.GetFullName().empty() )
       return { false, {} };
 
+   newPath = newFileName.GetFullPath();
+
    if (newFileName != oldFileNameRef) {
       //check to see that summary exists before we copy.
       bool summaryExisted = f->IsSummaryAvailable();
       auto oldPath = oldFileNameRef.GetFullPath();
-      newPath = newFileName.GetFullPath();
       if (summaryExisted) {
-         auto success = MyCopyFile(oldPath, newPath);
+         auto success = FileNames::CopyFile(oldPath, newPath);
          if (!success)
             return { false, {} };
       }
@@ -1414,7 +1388,7 @@ std::pair<bool, wxString> DirManager::CopyToNewProjectDirectory(BlockFile *f)
          //if it doesn't, we can assume it was written to the NEW name, which is fine.
          if (oldFileName.FileExists())
          {
-            bool ok = MyCopyFile(oldPath, newPath);
+            bool ok = FileNames::CopyFile(oldPath, newPath);
             if (!ok)
                return { false, {} };
          }
@@ -1445,7 +1419,7 @@ bool DirManager::EnsureSafeFilename(const wxFileName &fName)
       /* i18n-hint: This is the pattern for filenames that are created
        * when a file needs to be backed up to a different name.  For
        * example, mysong would become mysong-old1, mysong-old2, etc. */
-      renamedFileName.SetName(wxString::Format(_("%s-old%d"), fName.GetName().c_str(), i));
+      renamedFileName.SetName(wxString::Format(_("%s-old%d"), fName.GetName(), i));
    } while (renamedFileName.FileExists());
 
    // Test creating a file by that name to make sure it will
@@ -1456,7 +1430,7 @@ bool DirManager::EnsureSafeFilename(const wxFileName &fName)
    if (!testFile.IsOpened()) {
       { // need braces to avoid compiler warning about ambiguous else, see the macro
          wxLogSysError(_("Unable to open/create test file."),
-               renamedFullPath.c_str());
+               renamedFullPath);
       }
       return false;
    }
@@ -1468,12 +1442,12 @@ bool DirManager::EnsureSafeFilename(const wxFileName &fName)
       /* i18n-hint: %s is the name of a file.*/
       { // need braces to avoid compiler warning about ambiguous else, see the macro
          wxLogSysError(_("Unable to remove '%s'."),
-            renamedFullPath.c_str());
+            renamedFullPath);
       }
       return false;
    }
 
-   wxPrintf(_("Renamed file: %s\n"), renamedFullPath.c_str());
+   wxPrintf(_("Renamed file: %s\n"), renamedFullPath);
 
    // Go through our block files and see if any indeed point to
    // the file we're concerned about.  If so, point the block file
@@ -1523,8 +1497,8 @@ bool DirManager::EnsureSafeFilename(const wxFileName &fName)
 
          // Print error message and cancel the export
          wxLogSysError(_("Unable to rename '%s' to '%s'."),
-                       fullPath.c_str(),
-                       renamedFullPath.c_str());
+                       fullPath,
+                       renamedFullPath);
 
          // Destruction of readLocks puts things back where they were
          return false;
@@ -1532,10 +1506,10 @@ bool DirManager::EnsureSafeFilename(const wxFileName &fName)
       else
       {
          //point the aliases to the NEW filename.
-         BlockHash::iterator iter = mBlockFileHash.begin();
-         while (iter != mBlockFileHash.end())
+         BlockHash::iterator iter2 = mBlockFileHash.begin();
+         while (iter2 != mBlockFileHash.end())
          {
-            BlockFilePtr b = iter->second.lock();
+            BlockFilePtr b = iter2->second.lock();
             if (b) {
                auto ab = static_cast< AliasBlockFile * > ( &*b );
                auto db = static_cast< ODDecodeBlockFile * > ( &*b );
@@ -1544,14 +1518,14 @@ bool DirManager::EnsureSafeFilename(const wxFileName &fName)
                {
                   ab->ChangeAliasedFileName(wxFileNameWrapper{ renamedFileName });
                   wxPrintf(_("Changed block %s to new alias name\n"),
-                           b->GetFileName().name.GetFullName().c_str());
+                           b->GetFileName().name.GetFullName());
 
                }
                else if (!b->IsDataAvailable() && db->GetEncodedAudioFilename() == fName) {
                   db->ChangeAudioFile(wxFileNameWrapper{ renamedFileName });
                }
             }
-            ++iter;
+            ++iter2;
          }
 
       }
@@ -1648,7 +1622,7 @@ _("Project check of \"%s\" folder \
 \nproject in its current state, unless you \"Close \
 \nproject immediately\" on further error alerts.");
          wxString msg;
-         msg.Printf(msgA, this->projName.c_str(), (long long) missingAliasedFilePathHash.size());
+         msg.Printf(msgA, this->projName, (long long) missingAliasedFilePathHash.size());
          const wxChar *buttons[] =
             {_("Close project immediately with no changes"),
                _("Treat missing audio as silence (this session only)"),
@@ -1686,7 +1660,7 @@ _("Project check of \"%s\" folder \
                   // and don't try to recover other files but
                   // silence them too.  GuardedCall will cause an appropriate
                   // error message for the user.
-                  GuardedCall<void>(
+                  GuardedCall(
                      [&] { ab->Recover(); },
                      [&] (AudacityException*) { action = 1; }
                   );
@@ -1726,7 +1700,7 @@ _("Project check of \"%s\" folder \
 \nAudacity can fully regenerate these files \
 \nfrom the current audio in the project.");
          wxString msg;
-         msg.Printf(msgA, this->projName.c_str(), (long long) missingAUFHash.size());
+         msg.Printf(msgA, this->projName, (long long) missingAUFHash.size());
          const wxChar *buttons[] = {_("Regenerate alias summary files (safe and recommended)"),
                                     _("Fill in silence for missing display data (this session only)"),
                                     _("Close project immediately with no further changes"),
@@ -1752,7 +1726,7 @@ _("Project check of \"%s\" folder \
                   // and don't try to recover other files but
                   // silence them too.  GuardedCall will cause an appropriate
                   // error message for the user.
-                  GuardedCall<void>(
+                  GuardedCall(
                      [&] {
                         b->Recover();
                         nResult |= FSCKstatus_CHANGED;
@@ -1798,7 +1772,7 @@ _("Project check of \"%s\" folder \
 \n\nNote that for the second option, the waveform \
 \nmay not show silence.");
          wxString msg;
-         msg.Printf(msgA, this->projName.c_str(), (long long) missingAUHash.size());
+         msg.Printf(msgA, this->projName, (long long) missingAUHash.size());
          const wxChar *buttons[] =
             {_("Close project immediately with no further changes"),
                _("Treat missing audio as silence (this session only)"),
@@ -1826,7 +1800,7 @@ _("Project check of \"%s\" folder \
                   // and don't try to recover other files but
                   // silence them too.  GuardedCall will cause an appropriate
                   // error message for the user.
-                  GuardedCall<void>(
+                  GuardedCall(
                      [&] {
                         //regenerate with zeroes
                         b->Recover();
@@ -1870,7 +1844,7 @@ _("Project check of \"%s\" folder \
 other projects. \
 \nThey are doing no harm and are small.");
          wxString msg;
-         msg.Printf(msgA, this->projName.c_str(), (int)orphanFilePathArray.GetCount());
+         msg.Printf(msgA, this->projName, (int)orphanFilePathArray.GetCount());
 
          const wxChar *buttons[] =
             {_("Continue without deleting; ignore the extra files this session"),
@@ -1919,7 +1893,7 @@ other projects. \
 
       // In auto-recover mode, we didn't do any ShowMultiDialog calls above, so put up an alert.
       if (bAutoRecoverMode)
-         ::wxMessageBox(
+         ::AudacityMessageBox(
             _("Project check found file inconsistencies during automatic recovery.\n\nSelect 'Show Log...' in the Help menu to see details."),
             _("Warning: Problems in Automatic Recovery"),
             wxOK  | wxICON_EXCLAMATION);
@@ -1963,7 +1937,7 @@ void DirManager::FindMissingAliasedFiles(
    iter = missingAliasedFilePathHash.begin();
    while (iter != missingAliasedFilePathHash.end())
    {
-      wxLogWarning(_("Missing aliased audio file: '%s'"), iter->first.c_str());
+      wxLogWarning(_("Missing aliased audio file: '%s'"), iter->first);
       ++iter;
    }
 }
@@ -1988,7 +1962,7 @@ void DirManager::FindMissingAUFs(
             {
                missingAUFHash[key] = b;
                wxLogWarning(_("Missing alias (.auf) block file: '%s'"),
-                            fileName.GetFullPath().c_str());
+                            fileName.GetFullPath());
             }
          }
       }
@@ -2015,8 +1989,7 @@ void DirManager::FindMissingAUs(
                 wxFile{ path }.Length() == 0)
             {
                missingAUHash[key] = b;
-               wxLogWarning(_("Missing data block file: '%s'"),
-                            path.c_str());
+               wxLogWarning(_("Missing data block file: '%s'"), path);
             }
          }
       }
@@ -2046,8 +2019,7 @@ void DirManager::FindOrphanBlockFiles(
             TrackList *clipTracks = AudacityProject::GetClipboardTracks();
 
             if (clipTracks) {
-               TrackListIterator clipIter(clipTracks);
-               Track *track = clipIter.First();
+               auto track = *clipTracks->Any().first;
                if (track)
                   clipboardDM = track->GetDirManager().get();
             }
@@ -2059,7 +2031,7 @@ void DirManager::FindOrphanBlockFiles(
       }
    }
    for (size_t i = 0; i < orphanFilePathArray.GetCount(); i++)
-      wxLogWarning(_("Orphan block file: '%s'"), orphanFilePathArray[i].c_str());
+      wxLogWarning(_("Orphan block file: '%s'"), orphanFilePathArray[i]);
 }
 
 

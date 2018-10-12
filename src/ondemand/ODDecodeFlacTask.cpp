@@ -33,9 +33,9 @@ ODDecodeFlacTask::~ODDecodeFlacTask()
 }
 
 
-movable_ptr<ODTask> ODDecodeFlacTask::Clone() const
+std::unique_ptr<ODTask> ODDecodeFlacTask::Clone() const
 {
-   auto clone = make_movable<ODDecodeFlacTask>();
+   auto clone = std::make_unique<ODDecodeFlacTask>();
    clone->mDemandSample = GetDemandSample();
 
    //the decoders and blockfiles should not be copied.  They are created as the task runs.
@@ -83,7 +83,7 @@ void ODFLACFile::metadata_callback(const FLAC__StreamMetadata *metadata)
 
       // FIXME: not declared when compiling on Ubuntu.
       //case FLAC__MAX_METADATA_TYPE: // quiet compiler warning with this line
-
+      default:
       break;
    }
 }
@@ -96,16 +96,16 @@ void ODFLACFile::error_callback(FLAC__StreamDecoderErrorStatus status)
    switch (status)
    {
    case FLAC__STREAM_DECODER_ERROR_STATUS_LOST_SYNC:
-      printf("Flac Error: Lost sync\n");
+      wxPrintf("Flac Error: Lost sync\n");
       break;
    case FLAC__STREAM_DECODER_ERROR_STATUS_FRAME_CRC_MISMATCH:
-      printf("Flac Error: Crc mismatch\n");
+      wxPrintf("Flac Error: Crc mismatch\n");
       break;
    case FLAC__STREAM_DECODER_ERROR_STATUS_BAD_HEADER:
-      printf("Flac Error: Bad Header\n");
+      wxPrintf("Flac Error: Bad Header\n");
       break;
    default:
-      printf("Flac Error: Unknown error code\n");
+      wxPrintf("Flac Error: Unknown error code\n");
       break;
    }
 }
@@ -225,8 +225,7 @@ bool ODFlacDecoder::ReadHeader()
 {
    mFormat = int16Sample;//start with the smallest and move up in the metadata_callback.
                          //we want to use the native flac type for quick conversion.
-      /* (sampleFormat)
-      gPrefs->Read(wxT("/SamplingRate/DefaultProjectSampleFormat"), floatSample);*/
+      /* QualityPrefs::SampleFormatChoice(); */
    mFile = std::make_unique<ODFLACFile>(this);
 
 
@@ -305,7 +304,7 @@ ODFileDecoder* ODDecodeFlacTask::CreateFileDecoder(const wxString & fileName)
    }
 
    // Open the file for import
-   auto decoder = std::make_movable<ODFlacDecoder>(fileName);
+   auto decoder = std::std::make_unique<ODFlacDecoder>(fileName);
 */
 /*
    bool success = decoder->Init();
@@ -314,7 +313,7 @@ ODFileDecoder* ODDecodeFlacTask::CreateFileDecoder(const wxString & fileName)
    }
 */
    // Open the file for import
-   auto decoder = make_movable<ODFlacDecoder>(fileName);
+   auto decoder = std::make_unique<ODFlacDecoder>(fileName);
 
    mDecoders.push_back(std::move(decoder));
    return mDecoders.back().get();

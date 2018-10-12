@@ -36,7 +36,7 @@ the pitch without changing the tempo.
 
 class ShuttleGui;
 
-#define CHANGEPITCH_PLUGIN_SYMBOL XO("Change Pitch")
+#define CHANGEPITCH_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Change Pitch") }
 
 class EffectChangePitch final : public EffectSoundTouch
 {
@@ -46,18 +46,19 @@ public:
 
    // IdentInterface implementation
 
-   wxString GetSymbol() override;
+   IdentInterfaceSymbol GetSymbol() override;
    wxString GetDescription() override;
    wxString ManualPage() override;
 
-   // EffectIdentInterface implementation
+   // EffectDefinitionInterface implementation
 
    EffectType GetType() override;
 
    // EffectClientInterface implementation
 
-   bool GetAutomationParameters(EffectAutomationParameters & parms) override;
-   bool SetAutomationParameters(EffectAutomationParameters & parms) override;
+   bool DefineParams( ShuttleParams & S ) override;
+   bool GetAutomationParameters(CommandParameters & parms) override;
+   bool SetAutomationParameters(CommandParameters & parms) override;
    bool LoadFactoryDefaults() override;
 
    // Effect implementation

@@ -26,7 +26,7 @@
 class Envelope;
 class ShuttleGui;
 
-#define CLICKREMOVAL_PLUGIN_SYMBOL XO("Click Removal")
+#define CLICKREMOVAL_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Click Removal") }
 
 class EffectClickRemoval final : public Effect
 {
@@ -36,18 +36,19 @@ public:
 
    // IdentInterface implementation
 
-   wxString GetSymbol() override;
+   IdentInterfaceSymbol GetSymbol() override;
    wxString GetDescription() override;
    wxString ManualPage() override;
 
-   // EffectIdentInterface implementation
+   // EffectDefinitionInterface implementation
 
    EffectType GetType() override;
 
    // EffectClientInterface implementation
 
-   bool GetAutomationParameters(EffectAutomationParameters & parms) override;
-   bool SetAutomationParameters(EffectAutomationParameters & parms) override;
+   bool DefineParams( ShuttleParams & S ) override;
+   bool GetAutomationParameters(CommandParameters & parms) override;
+   bool SetAutomationParameters(CommandParameters & parms) override;
 
    // Effect implementation
 

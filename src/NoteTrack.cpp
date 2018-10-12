@@ -210,11 +210,11 @@ double NoteTrack::GetEndTime() const
    return GetStartTime() + GetSeq().get_real_dur();
 }
 
-void NoteTrack::SetHeight(int h)
+void NoteTrack::DoSetHeight(int h)
 {
    auto oldHeight = GetHeight();
    auto oldMargin = GetNoteMargin(oldHeight);
-   Track::SetHeight(h);
+   PlayableTrack::DoSetHeight(h);
    auto margin = GetNoteMargin(h);
    Zoom(
       wxRect{ 0, 0, 1, h }, // only height matters
@@ -399,7 +399,7 @@ void NoteTrack::PrintSequence()
    FILE *debugOutput;
 
    debugOutput = fopen("debugOutput.txt", "wt");
-   fprintf(debugOutput, "Importing MIDI...\n");
+   wxFprintf(debugOutput, "Importing MIDI...\n");
 
    // This is called for debugging purposes.  Do not compute mSeq on demand
    // with GetSeq()
@@ -407,38 +407,38 @@ void NoteTrack::PrintSequence()
       int i = 0;
 
       while(i < mSeq->length()) {
-         fprintf(debugOutput, "--\n");
-         fprintf(debugOutput, "type: %c\n",
+         wxFprintf(debugOutput, "--\n");
+         wxFprintf(debugOutput, "type: %c\n",
             ((Alg_event_ptr)mSeq->track_list.tracks[i])->get_type());
-         fprintf(debugOutput, "time: %f\n",
+         wxFprintf(debugOutput, "time: %f\n",
             ((Alg_event_ptr)mSeq->track_list.tracks[i])->time);
-         fprintf(debugOutput, "channel: %li\n",
+         wxFprintf(debugOutput, "channel: %li\n",
             ((Alg_event_ptr)mSeq->track_list.tracks[i])->chan);
 
          if(((Alg_event_ptr)mSeq->track_list.tracks[i])->get_type() == wxT('n'))
          {
-            fprintf(debugOutput, "pitch: %f\n",
+            wxFprintf(debugOutput, "pitch: %f\n",
                ((Alg_note_ptr)mSeq->track_list.tracks[i])->pitch);
-            fprintf(debugOutput, "duration: %f\n",
+            wxFprintf(debugOutput, "duration: %f\n",
                ((Alg_note_ptr)mSeq->track_list.tracks[i])->dur);
-            fprintf(debugOutput, "velocity: %f\n",
+            wxFprintf(debugOutput, "velocity: %f\n",
                ((Alg_note_ptr)mSeq->track_list.tracks[i])->loud);
          }
          else if(((Alg_event_ptr)mSeq->track_list.tracks[i])->get_type() == wxT('n'))
          {
-            fprintf(debugOutput, "key: %li\n", ((Alg_update_ptr)mSeq->track_list.tracks[i])->get_identifier());
-            fprintf(debugOutput, "attribute type: %c\n", ((Alg_update_ptr)mSeq->track_list.tracks[i])->parameter.attr_type());
-            fprintf(debugOutput, "attribute: %s\n", ((Alg_update_ptr)mSeq->track_list.tracks[i])->parameter.attr_name());
+            wxFprintf(debugOutput, "key: %li\n", ((Alg_update_ptr)mSeq->track_list.tracks[i])->get_identifier());
+            wxFprintf(debugOutput, "attribute type: %c\n", ((Alg_update_ptr)mSeq->track_list.tracks[i])->parameter.attr_type());
+            wxFprintf(debugOutput, "attribute: %s\n", ((Alg_update_ptr)mSeq->track_list.tracks[i])->parameter.attr_name());
 
             if(((Alg_update_ptr)mSeq->track_list.tracks[i])->parameter.attr_type() == wxT('r'))
             {
-               fprintf(debugOutput, "value: %f\n", ((Alg_update_ptr)mSeq->track_list.tracks[i])->parameter.r);
+               wxFprintf(debugOutput, "value: %f\n", ((Alg_update_ptr)mSeq->track_list.tracks[i])->parameter.r);
             }
             else if(((Alg_update_ptr)mSeq->track_list.tracks[i])->parameter.attr_type() == wxT('i')) {
-               fprintf(debugOutput, "value: %li\n", ((Alg_update_ptr)mSeq->track_list.tracks[i])->parameter.i);
+               wxFprintf(debugOutput, "value: %li\n", ((Alg_update_ptr)mSeq->track_list.tracks[i])->parameter.i);
             }
             else if(((Alg_update_ptr)mSeq->track_list.tracks[i])->parameter.attr_type() == wxT('s')) {
-               fprintf(debugOutput, "value: %s\n", ((Alg_update_ptr)mSeq->track_list.tracks[i])->parameter.s);
+               wxFprintf(debugOutput, "value: %s\n", ((Alg_update_ptr)mSeq->track_list.tracks[i])->parameter.s);
             }
             else {}
          }
@@ -447,7 +447,7 @@ void NoteTrack::PrintSequence()
       }
    }
    else {
-      fprintf(debugOutput, "No sequence defined!\n");
+      wxFprintf(debugOutput, "No sequence defined!\n");
    }
 
    fclose(debugOutput);
@@ -576,40 +576,43 @@ void NoteTrack::Paste(double t, const Track *src)
    // the destination track).
 
    //Check that src is a non-NULL NoteTrack
-   if (src == NULL || src->GetKind() != Track::Note)
+   bool bOk = src && src->TypeSwitch< bool >( [&](const NoteTrack *other) {
+
+      auto myOffset = this->GetOffset();
+      if (t < myOffset) {
+         // workaround strange behavior described at
+         // http://bugzilla.audacityteam.org/show_bug.cgi?id=1735#c3
+         SetOffset(t);
+         InsertSilence(t, myOffset - t);
+      }
+
+      double delta = 0.0;
+      auto &seq = GetSeq();
+      auto offset = other->GetOffset();
+      if ( offset > 0 ) {
+         seq.convert_to_seconds();
+         seq.insert_silence( t - GetOffset(), offset );
+         t += offset;
+         // Is this needed or does Alg_seq::insert_silence take care of it?
+         //delta += offset;
+      }
+
+      // This seems to be needed:
+      delta += std::max( 0.0, t - GetEndTime() );
+
+      // This, not:
+      //delta += other->GetSeq().get_real_dur();
+
+      seq.paste(t - GetOffset(), &other->GetSeq());
+
+      AddToDuration( delta );
+
+      return true;
+   });
+
+   if ( !bOk )
       // THROW_INCONSISTENCY_EXCEPTION; // ?
-      return;
-
-   auto myOffset = this->GetOffset();
-   if (t < myOffset) {
-      // workaround strange behavior described at
-      // http://bugzilla.audacityteam.org/show_bug.cgi?id=1735#c3
-      SetOffset(t);
-      InsertSilence(t, myOffset - t);
-   }
-
-   NoteTrack* other = (NoteTrack*)src;
-
-   double delta = 0.0;
-   auto &seq = GetSeq();
-   auto offset = other->GetOffset();
-   if ( offset > 0 ) {
-      seq.convert_to_seconds();
-      seq.insert_silence( t - GetOffset(), offset );
-      t += offset;
-      // Is this needed or does Alg_seq::insert_silence take care of it?
-      //delta += offset;
-   }
-
-   // This seems to be needed:
-   delta += std::max( 0.0, t - GetEndTime() );
-
-   // This, not:
-   //delta += other->GetSeq().get_real_dur();
-
-   seq.paste(t - GetOffset(), &other->GetSeq());
-
-   AddToDuration( delta );
+      (void)0;// intentionally do nothing
 }
 
 void NoteTrack::Silence(double t0, double t1)

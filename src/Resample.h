@@ -20,6 +20,8 @@
 
 #include "SampleFormat.h"
 
+class EncodedEnumSetting;
+
 struct soxr;
 extern "C" void soxr_delete(soxr*);
 struct soxr_deleter {
@@ -43,19 +45,14 @@ class Resample final
    Resample(const bool useBestMethod, const double dMinFactor, const double dMaxFactor);
    ~Resample();
 
-   static int GetNumMethods();
-   static wxString GetMethodName(int index);
-
-   static const wxString GetFastMethodKey();
-   static const wxString GetBestMethodKey();
-   static int GetFastMethodDefault();
-   static int GetBestMethodDefault();
+   static EncodedEnumSetting FastMethodSetting;
+   static EncodedEnumSetting BestMethodSetting;
 
    /** @brief Main processing function. Resamples from the input buffer to the
     * output buffer.
     *
     * Reads samples from the input buffer, and writes samples to the output
-    * buffer. Stops when either is exhaughsted, or we reach a convenient block
+    * buffer. Stops when either is exhausted, or we reach a convenient block
     * end, unless lastFlag is set to force emptying the input buffer.
     * The number of input samples used is returned in inBufferUsed, and the
     * number of output samples generated is the return value of the function.

@@ -18,9 +18,12 @@ Paul Licameli split from TrackPanel.cpp
 
 #include "../../Experimental.h"
 #include "../../widgets/Overlay.h"
+#include "../../commands/CommandFunctors.h"
+#include "../../commands/CommandContext.h"
 #include "../../../include/audacity/Types.h"
 
 class AudacityProject;
+extern AudacityProject *GetActiveProject();
 
 // Conditionally compile either a separate thead, or else use a timer in the main
 // thread, to poll the mouse and update scrubbing speed and direction.  The advantage of
@@ -38,10 +41,11 @@ struct ScrubbingOptions {
    bool adjustStart {};
 
    // usually from TrackList::GetEndTime()
-   sampleCount maxSample {};
-   sampleCount minSample {};
+   double maxTime {};
+   double minTime {};
 
-   bool enqueueBySpeed {};
+   bool bySpeed {};
+   bool isPlayingAtSpeed{};
 
    double delay {};
 
@@ -52,11 +56,7 @@ struct ScrubbingOptions {
 
    // When maximum speed scrubbing skips to follow the mouse,
    // this is the minimum amount of playback allowed at the maximum speed:
-   long minStutter {};
-
-   // Scrubbing needs the time of start of the mouse movement that began
-   // the scrub:
-   wxLongLong startClockTimeMillis { -1 };
+   double minStutterTime {};
 
    static double MaxAllowedScrubSpeed()
    { return 32.0; } // Is five octaves enough for your amusement?
@@ -68,15 +68,20 @@ struct ScrubbingOptions {
 class Scrubber : public wxEvtHandler
 {
 public:
+   static constexpr unsigned ScrubPollInterval_ms = 50;
+   
    Scrubber(AudacityProject *project);
    ~Scrubber();
 
+   static bool ShouldScrubPinned();
+   
    // Assume xx is relative to the left edge of TrackPanel!
    void MarkScrubStart(wxCoord xx, bool smoothScrolling, bool seek);
 
    // Returns true iff the event should be considered consumed by this:
    // Assume xx is relative to the left edge of TrackPanel!
    bool MaybeStartScrubbing(wxCoord xx);
+   bool StartSpeedPlay(double speed, double time0, double time1);
 
    void ContinueScrubbingUI();
    void ContinueScrubbingPoll();
@@ -87,13 +92,17 @@ public:
    wxCoord GetScrubStartPosition() const
    { return mScrubStartPosition; }
 
+   bool WasSpeedPlaying() const
+   { return mSpeedPlaying;}
+   bool IsSpeedPlaying() const
+   { return IsScrubbing() && mSpeedPlaying; }
    // True iff the user has clicked to start scrub and not yet stopped,
    // but IsScrubbing() may yet be false
-   bool HasStartedScrubbing() const
+   bool HasMark() const
    { return GetScrubStartPosition() >= 0; }
    bool IsScrubbing() const;
 
-   bool IsScrollScrubbing() const // If true, implies HasStartedScrubbing()
+   bool IsScrollScrubbing() const // If true, implies HasMark()
    { return mSmoothScrollingScrub; }
    void SetScrollScrubbing(bool value)
    { mSmoothScrollingScrub = value; }
@@ -123,9 +132,14 @@ public:
    void PopulatePopupMenu(wxMenu &menu);
 
    void OnScrubOrSeek(bool seek);
-   void OnScrub(wxCommandEvent&);
-   void OnSeek(wxCommandEvent&);
-   void OnToggleScrubRuler(wxCommandEvent&);
+   void OnScrub(const CommandContext&);
+   void OnSeek(const CommandContext&);
+   void OnToggleScrubRuler(const CommandContext&);
+
+   // Convenience wrapper for the above
+   template<void (Scrubber::*pfn)(const CommandContext&)>
+      void Thunk(wxCommandEvent &)
+         { (this->*pfn)(*GetActiveProject()); }
 
    // A string to put in the leftmost part of the status bar
    // when scrub or seek is in progress, or else empty.
@@ -138,11 +152,10 @@ public:
    void Pause(bool paused);
    bool IsPaused() const;
    void CheckMenuItems();
-   // Bug 1508
-   bool IsOneShotSeeking()const { return mInOneShotMode && IsScrubbing();};
-   bool mInOneShotMode;
 
 private:
+   void StartPolling();
+   void StopPolling();
    void DoScrub(bool seek);
    void OnActivateOrDeactivateApp(wxActivateEvent & event);
 
@@ -160,15 +173,15 @@ private:
 
 private:
    int mScrubToken;
-   bool mPaused;
    int mScrubSpeedDisplayCountdown;
    wxCoord mScrubStartPosition;
    wxCoord mLastScrubPosition {};
    bool mScrubSeekPress {};
    bool mSmoothScrollingScrub;
 
+   bool mPaused{};
    bool mSeeking {};
-
+   bool mSpeedPlaying{true};
    bool mDragging {};
 
    bool mCancelled {};
@@ -202,7 +215,6 @@ class ScrubbingOverlay final : public wxEvtHandler, public Overlay
 {
 public:
    ScrubbingOverlay(AudacityProject *project);
-   virtual ~ScrubbingOverlay();
 
 private:
    std::pair<wxRect, bool> DoGetRectangle(wxSize size) override;

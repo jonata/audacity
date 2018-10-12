@@ -22,8 +22,8 @@
 
 class ShuttleGui;
 
-#define CHIRP_PLUGIN_SYMBOL XO("Chirp")
-#define TONE_PLUGIN_SYMBOL XO("Tone")
+#define CHIRP_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Chirp") }
+#define TONE_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Tone") }
 
 class EffectToneGen final : public Effect
 {
@@ -33,11 +33,11 @@ public:
 
    // IdentInterface implementation
 
-   wxString GetSymbol() override;
+   IdentInterfaceSymbol GetSymbol() override;
    wxString GetDescription() override;
    wxString ManualPage() override;
 
-   // EffectIdentInterface implementation
+   // EffectDefinitionInterface implementation
 
    EffectType GetType() override;
 
@@ -46,12 +46,13 @@ public:
    unsigned GetAudioOutCount() override;
    bool ProcessInitialize(sampleCount totalLen, ChannelNames chanMap = NULL) override;
    size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
-   bool GetAutomationParameters(EffectAutomationParameters & parms) override;
-   bool SetAutomationParameters(EffectAutomationParameters & parms) override;
+   bool DefineParams( ShuttleParams & S ) override;
+   bool GetAutomationParameters(CommandParameters & parms) override;
+   bool SetAutomationParameters(CommandParameters & parms) override;
 
    // Effect implementation
 
-   void PopulateOrExchange(ShuttleGui & S);
+   void PopulateOrExchange(ShuttleGui & S) override;
    bool TransferDataFromWindow() override;
    bool TransferDataToWindow() override;
 
@@ -76,8 +77,6 @@ private:
    double mAmplitude[2];
    double mLogFrequency[2];
 
-   wxArrayString mWaveforms;
-   wxArrayString mInterpolations;
    NumericTextCtrl *mToneDurationT;
 
    DECLARE_EVENT_TABLE()

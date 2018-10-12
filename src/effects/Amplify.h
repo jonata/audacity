@@ -23,7 +23,7 @@
 
 #include "Effect.h"
 
-#define AMPLIFY_PLUGIN_SYMBOL XO("Amplify")
+#define AMPLIFY_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Amplify") }
 
 class ShuttleGui;
 
@@ -35,11 +35,11 @@ public:
 
    // IdentInterface implementation
 
-   wxString GetSymbol() override;
+   IdentInterfaceSymbol GetSymbol() override;
    wxString GetDescription() override;
    wxString ManualPage() override;
 
-   // EffectIdentInterface implementation
+   // EffectDefinitionInterface implementation
 
    EffectType GetType() override;
 
@@ -48,8 +48,9 @@ public:
    unsigned GetAudioInCount() override;
    unsigned GetAudioOutCount() override;
    size_t ProcessBlock(float **inBlock, float **outBlock, size_t blockLen) override;
-   bool GetAutomationParameters(EffectAutomationParameters & parms) override;
-   bool SetAutomationParameters(EffectAutomationParameters & parms) override;
+   bool DefineParams( ShuttleParams & S ) override;
+   bool GetAutomationParameters(CommandParameters & parms) override;
+   bool SetAutomationParameters(CommandParameters & parms) override;
    bool LoadFactoryDefaults() override;
 
    // Effect implementation

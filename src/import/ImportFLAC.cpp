@@ -42,6 +42,7 @@
 #include "ImportPlugin.h"
 
 #include "../Tags.h"
+#include "../prefs/QualityPrefs.h"
 
 #include "../Experimental.h"
 
@@ -61,7 +62,7 @@ void GetFLACImportPlugin(ImportPluginList &importPluginList,
                         UnusableImportPluginList &unusableImportPluginList)
 {
    unusableImportPluginList.push_back(
-      make_movable<UnusableImportPlugin>
+      std::make_unique<UnusableImportPlugin>
          (DESC, wxArrayString(WXSIZEOF(exts), exts))
    );
 }
@@ -138,8 +139,8 @@ class FLACImportPlugin final : public ImportPlugin
 
    ~FLACImportPlugin() { }
 
-   wxString GetPluginStringID() { return wxT("libflac"); }
-   wxString GetPluginFormatDescription();
+   wxString GetPluginStringID() override { return wxT("libflac"); }
+   wxString GetPluginFormatDescription() override;
    std::unique_ptr<ImportFileHandle> Open(const wxString &Filename)  override;
 };
 
@@ -180,8 +181,8 @@ private:
    FLAC__uint64          mSamplesDone;
    bool                  mStreamInfoDone;
    ProgressResult        mUpdateResult;
-   TrackHolders          mChannels;
-   movable_ptr<ODDecodeFlacTask> mDecoderTask;
+   NewChannelGroup       mChannels;
+   std::unique_ptr<ODDecodeFlacTask> mDecoderTask;
 };
 
 
@@ -224,7 +225,7 @@ void MyFLACFile::metadata_callback(const FLAC__StreamMetadata *metadata)
 
       // FIXME: not declared when compiling on Ubuntu.
       //case FLAC__MAX_METADATA_TYPE: // quiet compiler warning with this line
-
+      default:
       break;
    }
 }
@@ -292,7 +293,7 @@ FLAC__StreamDecoderWriteStatus MyFLACFile::write_callback(const FLAC__Frame *fra
 void GetFLACImportPlugin(ImportPluginList &importPluginList,
                          UnusableImportPluginList &WXUNUSED(unusableImportPluginList))
 {
-   importPluginList.push_back( make_movable<FLACImportPlugin>() );
+   importPluginList.push_back( std::make_unique<FLACImportPlugin>() );
 }
 
 
@@ -350,15 +351,14 @@ FLACImportFileHandle::FLACImportFileHandle(const wxString & name)
    mStreamInfoDone(false),
    mUpdateResult(ProgressResult::Success)
 {
-   mFormat = (sampleFormat)
-      gPrefs->Read(wxT("/SamplingRate/DefaultProjectSampleFormat"), floatSample);
+   mFormat = QualityPrefs::SampleFormatChoice();
    mFile = std::make_unique<MyFLACFile>(this);
 }
 
 bool FLACImportFileHandle::Init()
 {
 #ifdef EXPERIMENTAL_OD_FLAC
-   mDecoderTask = make_movable<ODDecodeFlacTask>();
+   mDecoderTask = std::make_unique<ODDecodeFlacTask>();
 
    ODFlacDecoder* odDecoder = (ODFlacDecoder*)mDecoderTask->CreateFileDecoder(mFilename);
    if(!odDecoder || !odDecoder->ReadHeader())
@@ -454,26 +454,11 @@ ProgressResult FLACImportFileHandle::Import(TrackFactory *trackFactory,
 
    mChannels.resize(mNumChannels);
 
-   auto iter = mChannels.begin();
-   for (size_t c = 0; c < mNumChannels; ++iter, ++c) {
-      *iter = trackFactory->NewWaveTrack(mFormat, mSampleRate);
-
-      if (mNumChannels == 2) {
-         switch (c) {
-         case 0:
-            iter->get()->SetChannel(Track::LeftChannel);
-            iter->get()->SetLinked(true);
-            break;
-         case 1:
-            iter->get()->SetChannel(Track::RightChannel);
-            break;
-         }
-      }
-      else {
-         iter->get()->SetChannel(Track::MonoChannel);
-      }
+   {
+      auto iter = mChannels.begin();
+      for (size_t c = 0; c < mNumChannels; ++iter, ++c)
+         *iter = trackFactory->NewWaveTrack(mFormat, mSampleRate);
    }
-
 
 //Start OD
    bool useOD = false;
@@ -522,7 +507,7 @@ ProgressResult FLACImportFileHandle::Import(TrackFactory *trackFactory,
          {
             //if we have 3 more channels, they get imported on seperate tracks, so we add individual tasks for each.
             ODManager::Instance()->AddNewTask(std::move(mDecoderTask));
-            mDecoderTask = make_movable<ODDecodeFlacTask>(); //TODO: see if we need to use clone to keep the metadata.
+            mDecoderTask = std::make_unique<ODDecodeFlacTask>(); //TODO: see if we need to use clone to keep the metadata.
          }
       }
       //if we have mono or a linked track (stereo), we add ONE task for the one linked wave track
@@ -536,10 +521,11 @@ ProgressResult FLACImportFileHandle::Import(TrackFactory *trackFactory,
       return mUpdateResult;
    }
 
-   for (const auto &channel : mChannels) {
+   for (const auto &channel : mChannels)
       channel->Flush();
-   }
-   outTracks.swap(mChannels);
+
+   if (!mChannels.empty())
+      outTracks.push_back(std::move(mChannels));
 
    tags->Clear();
    size_t cnt = mFile->mComments.GetCount();

@@ -11,7 +11,7 @@
 \file CommandType.cpp
 \brief Contains definitions for CommandType class
 
-\class CommandType
+\class OldStyleCommandType
 \brief Base class for containing data common to all commands of a given type.
 Also acts as a factory.
 
@@ -23,22 +23,22 @@ Also acts as a factory.
 #include "CommandSignature.h"
 #include <wx/string.h>
 
-CommandType::CommandType()
-   : mName{}, mSignature{}
+OldStyleCommandType::OldStyleCommandType()
+   : mSymbol{}, mSignature{}
 { }
 
-CommandType::~CommandType()
+OldStyleCommandType::~OldStyleCommandType()
 {
 }
 
-const wxString &CommandType::GetName()
+IdentInterfaceSymbol OldStyleCommandType::GetSymbol()
 {
-   if (mName.empty())
-      mName = BuildName();
-   return mName;
+   if (mSymbol.empty())
+      mSymbol = BuildName();
+   return mSymbol;
 }
 
-CommandSignature &CommandType::GetSignature()
+CommandSignature &OldStyleCommandType::GetSignature()
 {
    if (!mSignature)
    {
@@ -48,9 +48,11 @@ CommandSignature &CommandType::GetSignature()
    return *mSignature;
 }
 
-wxString CommandType::Describe()
+wxString OldStyleCommandType::Describe()
 {
-   wxString desc = GetName() + wxT("\nParameters:");
+   // PRL: Is this intended for end-user visibility or just debugging?  It did not
+   // use _(""), so I assume it is meant to use internal strings
+   wxString desc = GetSymbol().Internal() + wxT("\nParameters:");
    GetSignature();
    ParamValueMap::iterator iter;
    ParamValueMap defaults = mSignature->GetDefaults();

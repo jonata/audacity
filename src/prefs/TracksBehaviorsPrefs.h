@@ -21,7 +21,7 @@ class ShuttleGui;
 class TracksBehaviorsPrefs final : public PrefsPanel
 {
  public:
-   TracksBehaviorsPrefs(wxWindow * parent);
+   TracksBehaviorsPrefs(wxWindow * parent, wxWindowID winid);
    ~TracksBehaviorsPrefs();
    bool Commit() override;
    wxString HelpPageName() override;
@@ -31,7 +31,7 @@ class TracksBehaviorsPrefs final : public PrefsPanel
 
  private:
    void Populate();
-   void PopulateOrExchange(ShuttleGui & S);
+   void PopulateOrExchange(ShuttleGui & S) override;
 
    wxArrayString mSoloCodes;
    wxArrayString mSoloChoices;
@@ -41,7 +41,7 @@ class TracksBehaviorsPrefsFactory final : public PrefsPanelFactory
 {
 public:
    explicit TracksBehaviorsPrefsFactory();
-   PrefsPanel *Create(wxWindow *parent) override;
+   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
 
 };
 #endif

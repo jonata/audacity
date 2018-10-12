@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <wx/string.h>
 #include <wx/arrstr.h>
+#include <type_traits>
 
 // ----------------------------------------------------------------------------
 // TODO:  I'd imagine this header may be replaced by other public headers. But,
@@ -90,7 +91,7 @@ public:
 
    size_t as_size_t() const {
       wxASSERT(value >= 0);
-      wxASSERT(value <= std::numeric_limits<size_t>::max());
+      wxASSERT(static_cast<std::make_unsigned<type>::type>(value) <= std::numeric_limits<size_t>::max());
       return value;
    }
 
@@ -184,12 +185,12 @@ inline size_t limitSampleBufferSize( size_t bufferSize, sampleCount limit )
 // ----------------------------------------------------------------------------
 // Supported sample formats
 // ----------------------------------------------------------------------------
-typedef enum
+enum sampleFormat : unsigned
 {
    int16Sample = 0x00020001,
    int24Sample = 0x00040001,
    floatSample = 0x0004000F
-} sampleFormat;
+};
 
 // ----------------------------------------------------------------------------
 // Provide the number of bytes a specific sample will take
@@ -249,6 +250,7 @@ typedef enum
 //            it ugly, but a part of the game.  Remove it when
 //            the API is complete.
 
+
 #if !defined(AUDACITY_DLL_API)
    // This was copied from "Audacity.h" so these headers wouldn't have
    // to include it.
@@ -273,7 +275,10 @@ typedef enum
    #endif //_MSC_VER
 
    #ifdef __GNUC__
-   #include "configunix.h"
+      #ifndef __CONFIG_UNIX_INCLUDED
+         #define __CONFIG_UNIX_INCLUDED
+         #include "configunix.h"
+      #endif
    #endif
 
    /* The GCC-elf implementation */

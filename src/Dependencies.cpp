@@ -44,6 +44,8 @@ AliasedFile s.
 #include <wx/hashmap.h>
 #include <wx/progdlg.h>
 #include <wx/choice.h>
+#include <wx/clipbrd.h>
+#include <wx/dataobj.h>
 
 #include "BlockFile.h"
 #include "DirManager.h"
@@ -54,16 +56,16 @@ AliasedFile s.
 #include "ShuttleGui.h"
 #include "WaveTrack.h"
 #include "WaveClip.h"
+#include "widgets/ErrorDialog.h"
 
-WX_DECLARE_HASH_MAP(wxString, AliasedFile *,
-                    wxStringHash, wxStringEqual, AliasedFileHash);
+#include <unordered_map>
+
+using AliasedFileHash = std::unordered_map<wxString, AliasedFile*>;
 
 // These two hash types are used only inside short scopes
 // so it is safe to key them by plain pointers.
-WX_DECLARE_HASH_MAP(BlockFile *, BlockFilePtr,
-                    wxPointerHash, wxPointerEqual, ReplacedBlockFileHash);
-WX_DECLARE_HASH_MAP(BlockFile *, bool,
-                    wxPointerHash, wxPointerEqual, BoolBlockFileHash);
+using ReplacedBlockFileHash = std::unordered_map<BlockFile *, BlockFilePtr>;
+using BoolBlockFileHash = std::unordered_map<BlockFile *, bool>;
 
 // Given a project, returns a single array of all SeqBlocks
 // in the current set of tracks.  Enumerating that array allows
@@ -71,21 +73,13 @@ WX_DECLARE_HASH_MAP(BlockFile *, bool,
 static void GetAllSeqBlocks(AudacityProject *project,
                             BlockPtrArray *outBlocks)
 {
-   TrackList *tracks = project->GetTracks();
-   TrackListIterator iter(tracks);
-   Track *t = iter.First();
-   while (t) {
-      if (t->GetKind() == Track::Wave) {
-         WaveTrack *waveTrack = static_cast<WaveTrack*>(t);
-         for(const auto &clip : waveTrack->GetAllClips()) {
-            Sequence *sequence = clip->GetSequence();
-            BlockArray &blocks = sequence->GetBlockArray();
-            int i;
-            for (i = 0; i < (int)blocks.size(); i++)
-               outBlocks->push_back(&blocks[i]);
-         }
+   for (auto waveTrack : project->GetTracks()->Any< WaveTrack >()) {
+      for(const auto &clip : waveTrack->GetAllClips()) {
+         Sequence *sequence = clip->GetSequence();
+         BlockArray &blocks = sequence->GetBlockArray();
+         for (size_t i = 0; i < blocks.size(); i++)
+            outBlocks->push_back(&blocks[i]);
       }
-      t = iter.Next();
    }
 }
 
@@ -260,6 +254,9 @@ private:
    void OnSize(wxSizeEvent &evt);
    void OnNo(wxCommandEvent &evt);
    void OnYes(wxCommandEvent &evt);
+   void OnRightClick(wxListEvent& evt);
+   void OnCopyToClipboard( wxCommandEvent& evt );
+
 
    void SaveFutureActionChoice();
 
@@ -283,17 +280,20 @@ public:
 enum {
    FileListID = 6000,
    CopySelectedFilesButtonID,
+   CopyNamesToClipboardID,
    FutureActionChoiceID
 };
 
 BEGIN_EVENT_TABLE(DependencyDialog, wxDialogWrapper)
    EVT_LIST_ITEM_SELECTED(FileListID, DependencyDialog::OnList)
    EVT_LIST_ITEM_DESELECTED(FileListID, DependencyDialog::OnList)
+   EVT_LIST_ITEM_RIGHT_CLICK(FileListID, DependencyDialog::OnRightClick )
    EVT_BUTTON(CopySelectedFilesButtonID, DependencyDialog::OnCopySelectedFiles)
    EVT_SIZE(DependencyDialog::OnSize)
    EVT_BUTTON(wxID_NO, DependencyDialog::OnNo) // mIsSaving ? "Cancel Save" : "Save Without Copying"
    EVT_BUTTON(wxID_YES, DependencyDialog::OnYes) // "Copy All Files (Safer)"
    EVT_BUTTON(wxID_CANCEL, DependencyDialog::OnCancel)  // "Cancel Save"
+   EVT_MENU(CopyNamesToClipboardID,DependencyDialog::OnCopyToClipboard)
 END_EVENT_TABLE()
 
 DependencyDialog::DependencyDialog(wxWindow *parent,
@@ -344,7 +344,7 @@ void DependencyDialog::PopulateOrExchange(ShuttleGui& S)
    {
       mMessageStaticText = S.AddVariableText(kStdMsg(), false);
 
-      S.StartStatic(_("Project Dependencies"));
+      S.StartStatic(_("Project Dependencies"),1);
       {
          mFileListCtrl = S.Id(FileListID).AddListControlReportMode();
          mFileListCtrl->InsertColumn(0, _("Audio File"));
@@ -364,7 +364,7 @@ void DependencyDialog::PopulateOrExchange(ShuttleGui& S)
       }
       S.EndStatic();
 
-      S.StartHorizontalLay(wxALIGN_CENTRE);
+      S.StartHorizontalLay(wxALIGN_CENTRE,0);
       {
          if (mIsSaving) {
             S.Id(wxID_CANCEL).AddButton(_("Cancel Save"));
@@ -384,7 +384,7 @@ void DependencyDialog::PopulateOrExchange(ShuttleGui& S)
 
       if (mIsSaving)
       {
-         S.StartHorizontalLay(wxALIGN_LEFT);
+         S.StartHorizontalLay(wxALIGN_LEFT,0);
          {
             wxArrayString choices;
             /*i18n-hint: One of the choices of what you want Audacity to do when
@@ -430,7 +430,8 @@ void DependencyDialog::PopulateList()
       }
       else
       {
-         mFileListCtrl->InsertItem(i, _("MISSING ") + fileName.GetFullPath());
+         mFileListCtrl->InsertItem(i,
+            wxString::Format( _("MISSING %s"), fileName.GetFullPath() ) );
          mHasMissingFiles = true;
          mFileListCtrl->SetItemState(i, 0, wxLIST_STATE_SELECTED); // Deselect.
          mFileListCtrl->SetItemTextColour(i, *wxRED);
@@ -519,11 +520,42 @@ void DependencyDialog::OnCopySelectedFiles(wxCommandEvent & WXUNUSED(event))
    }
 }
 
+void DependencyDialog::OnRightClick( wxListEvent& event)
+{
+   static_cast<void>(event);
+   wxMenu menu;
+   menu.Append(CopyNamesToClipboardID, _("&Copy Names to Clipboard"));
+   PopupMenu(&menu);
+}
+
+void DependencyDialog::OnCopyToClipboard( wxCommandEvent& evt )
+{
+   static_cast<void>(evt);
+   wxString Files = "";
+   for (const auto &aliasedFile : mAliasedFiles) {
+      const wxFileName & fileName = aliasedFile.mFileName;
+      wxLongLong byteCount = (aliasedFile.mByteCount * 124) / 100;
+      bool bOriginalExists = aliasedFile.mbOriginalExists;
+      // All fields quoted, as e.g. size may contain a comma in the number.
+      Files += wxString::Format( "\"%s\", \"%s\", \"%s\"\n",
+         fileName.GetFullPath(), 
+         Internat::FormatSize( byteCount), 
+         bOriginalExists ? "OK":"Missing" );
+   }
+
+   // copy data onto clipboard
+   if (wxTheClipboard->Open()) {
+      // Clipboard owns the data you give it
+      wxTheClipboard->SetData(safenew wxTextDataObject(Files));
+      wxTheClipboard->Close();
+   }
+}
+
 void DependencyDialog::OnCancel(wxCommandEvent& WXUNUSED(event))
 {
    if (mIsSaving)
    {
-      int ret = wxMessageBox(
+      int ret = AudacityMessageBox(
          _("If you proceed, your project will not be saved to disk. Is this what you want?"),
          _("Cancel Save"), wxICON_QUESTION | wxYES_NO | wxNO_DEFAULT, this);
       if (ret != wxYES)
@@ -568,7 +600,7 @@ _("Your project is currently self-contained; it does not depend on any external 
 \n\nIf you change the project to a state that has external dependencies on imported \
 files, it will no longer be self-contained. If you then Save without copying those files in, \
 you may lose data.");
-         wxMessageBox(msg,
+         AudacityMessageBox(msg,
                       _("Dependency Check"),
                       wxOK | wxICON_INFORMATION,
                       project);
