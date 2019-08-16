@@ -11,16 +11,10 @@
 #ifndef __AUDACITY_ABOUT_DLG__
 #define __AUDACITY_ABOUT_DLG__
 
-#include "MemoryX.h"
 #include <vector>
-#include <wx/sizer.h>
-#include <wx/statbmp.h>
-#include <wx/bitmap.h>
-#include "widgets/wxPanelWrapper.h"
+#include "widgets/wxPanelWrapper.h" // to inherit
 
-extern const wxString VerCheckArgs();
-extern const wxString VerCheckUrl();
-extern const wxString VerCheckHtml();
+class wxStaticBitmap;
 
 class ShuttleGui;
 

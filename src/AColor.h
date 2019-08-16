@@ -14,38 +14,13 @@
 #ifndef __AUDACITY_COLOR__
 #define __AUDACITY_COLOR__
 
-#include "MemoryX.h"
-#include <wx/brush.h>
-#include <wx/pen.h>
+#include <memory>
+#include <wx/brush.h> // member variable
+#include <wx/pen.h> // member variable
 
 class wxDC;
+class wxGraphicsContext;
 class wxRect;
-
-/// Used to restore pen, brush and logical-op in a DC back to what they were.
-struct DCUnchanger {
-public:
-   DCUnchanger() {}
-
-   DCUnchanger(const wxBrush &brush_, const wxPen &pen_, long logicalOperation_)
-   : brush(brush_), pen(pen_), logicalOperation(logicalOperation_)
-   {}
-
-   void operator () (wxDC *pDC) const;
-
-   wxBrush brush {};
-   wxPen pen {};
-   long logicalOperation {};
-};
-
-/// Makes temporary drawing context changes that you back out of, RAII style
-//  It's like wxDCPenChanger, etc., but simple and general
-class ADCChanger : public std::unique_ptr<wxDC, ::DCUnchanger>
-{
-   using Base = std::unique_ptr<wxDC, ::DCUnchanger>;
-public:
-   ADCChanger() : Base{} {}
-   ADCChanger(wxDC *pDC);
-};
 
 class AColor {
  public:
@@ -63,7 +38,14 @@ class AColor {
    static void ReInit();
 
    static void Arrow(wxDC & dc, wxCoord x, wxCoord y, int width, bool down = true);
+
+   // Draw a line, INCLUSIVE of both endpoints
+   // (unlike what wxDC::DrawLine() documentation specifies)
    static void Line(wxDC & dc, wxCoord x1, wxCoord y1, wxCoord x2, wxCoord y2);
+
+   // Draw lines, INCLUSIVE of all endpoints
+   static void Lines(wxDC &dc, size_t nPoints, const wxPoint points[]);
+
    static void DrawFocus(wxDC & dc, wxRect & r);
    static void Bevel(wxDC & dc, bool up, const wxRect & r);
    static void Bevel2
@@ -71,7 +53,8 @@ class AColor {
    static void BevelTrackInfo(wxDC & dc, bool up, const wxRect & r, bool highlight = false);
    static wxColour Blend(const wxColour & c1, const wxColour & c2);
 
-   static void UseThemeColour( wxDC * dc, int iBrush, int iPen=-1 );
+   static void UseThemeColour( wxDC * dc, int iBrush, int iPen=-1, int alpha = 255 );
+   static void UseThemeColour( wxGraphicsContext * gc, int iBrush, int iPen=-1, int alpha = 255 );
    static void TrackPanelBackground(wxDC * dc, bool selected);
 
    static void Light(wxDC * dc, bool selected, bool highlight = false);

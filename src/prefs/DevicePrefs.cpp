@@ -23,22 +23,22 @@ other settings.
 *//********************************************************************/
 
 #include "../Audacity.h"
+#include "DevicePrefs.h"
+
+#include "RecordingPrefs.h"
 
 #include <wx/defs.h>
 
 #include <wx/choice.h>
 #include <wx/intl.h>
 #include <wx/log.h>
+#include <wx/textctrl.h>
 
 #include "portaudio.h"
 
-#include "../AudioIO.h"
-#include "../Internat.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
 #include "../DeviceManager.h"
-
-#include "DevicePrefs.h"
 
 enum {
    HostID = 10000,
@@ -60,6 +60,22 @@ DevicePrefs::DevicePrefs(wxWindow * parent, wxWindowID winid)
 
 DevicePrefs::~DevicePrefs()
 {
+}
+
+
+ComponentInterfaceSymbol DevicePrefs::GetSymbol()
+{
+   return DEVICE_PREFS_PLUGIN_SYMBOL;
+}
+
+wxString DevicePrefs::GetDescription()
+{
+   return _("Preferences for Device");
+}
+
+wxString DevicePrefs::HelpPageName()
+{
+   return "Devices_Preferences";
 }
 
 void DevicePrefs::Populate()
@@ -85,6 +101,7 @@ void DevicePrefs::Populate()
    OnHost(e);
 }
 
+
 /*
  * Get names of device hosts.
  */
@@ -98,9 +115,9 @@ void DevicePrefs::GetNamesAndLabels()
       const PaDeviceInfo *info = Pa_GetDeviceInfo(i);
       if ((info!=NULL)&&(info->maxOutputChannels > 0 || info->maxInputChannels > 0)) {
          wxString name = wxSafeConvertMB2WX(Pa_GetHostApiInfo(info->hostApi)->name);
-         if (mHostNames.Index(name) == wxNOT_FOUND) {
-            mHostNames.Add(name);
-            mHostLabels.Add(name);
+         if ( ! make_iterator_range( mHostNames ).contains( name ) ) {
+            mHostNames.push_back(name);
+            mHostLabels.push_back(name);
          }
       }
    }
@@ -108,8 +125,6 @@ void DevicePrefs::GetNamesAndLabels()
 
 void DevicePrefs::PopulateOrExchange(ShuttleGui & S)
 {
-   wxArrayString empty;
-
    S.SetBorder(2);
    S.StartScroller();
 
@@ -137,8 +152,7 @@ void DevicePrefs::PopulateOrExchange(ShuttleGui & S)
       {
          S.Id(PlayID);
          mPlay = S.AddChoice(_("&Device:"),
-                             wxEmptyString,
-                             &empty);
+                             {} );
       }
       S.EndMultiColumn();
    }
@@ -150,13 +164,11 @@ void DevicePrefs::PopulateOrExchange(ShuttleGui & S)
       {
          S.Id(RecordID);
          mRecord = S.AddChoice(_("De&vice:"),
-                               wxEmptyString,
-                               &empty);
+                               {} );
 
          S.Id(ChannelsID);
          mChannels = S.AddChoice(_("Cha&nnels:"),
-                                 wxEmptyString,
-                                 &empty);
+                                 {} );
       }
       S.EndMultiColumn();
    }
@@ -236,7 +248,7 @@ void DevicePrefs::OnHost(wxCommandEvent & e)
    wxString recDevice;
 
    recDevice = mRecordDevice;
-   if (this->mRecordSource != wxT(""))
+   if (!this->mRecordSource.empty())
       recDevice += wxT(": ") + mRecordSource;
 
    mRecord->Clear();
@@ -267,12 +279,12 @@ void DevicePrefs::OnHost(wxCommandEvent & e)
 
    /* deal with not having any devices at all */
    if (mPlay->GetCount() == 0) {
-      playnames.Add(_("No devices found"));
+      playnames.push_back(_("No devices found"));
       mPlay->Append(playnames[0], (void *) NULL);
       mPlay->SetSelection(0);
    }
    if (mRecord->GetCount() == 0) {
-      recordnames.Add(_("No devices found"));
+      recordnames.push_back(_("No devices found"));
       mRecord->Append(recordnames[0], (void *) NULL);
       mRecord->SetSelection(0);
    }
@@ -339,7 +351,7 @@ void DevicePrefs::OnDevice(wxCommandEvent & WXUNUSED(event))
       cnt = 256;
    }
 
-   wxArrayString channelnames;
+   wxArrayStringEx channelnames;
 
    // Channel counts, mono, stereo etc...
    for (int i = 0; i < cnt; i++) {
@@ -355,7 +367,7 @@ void DevicePrefs::OnDevice(wxCommandEvent & WXUNUSED(event))
          name = wxString::Format(wxT("%d"), i + 1);
       }
 
-      channelnames.Add(name);
+      channelnames.push_back(name);
       int index = mChannels->Append(name);
       if (i == mRecordChannels - 1) {
          mChannels->SetSelection(index);
@@ -408,13 +420,10 @@ bool DevicePrefs::Commit()
    return true;
 }
 
-wxString DevicePrefs::HelpPageName()
-{
-   return "Devices_Preferences";
-}
+PrefsPanel::Factory
+DevicePrefsFactory = [](wxWindow *parent, wxWindowID winid)
 
-PrefsPanel *DevicePrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
    return safenew DevicePrefs(parent, winid);
-}
+};

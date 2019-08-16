@@ -13,26 +13,11 @@
 #define __AUDACITY_MACROS_WINDOW__
 
 #include <wx/defs.h>
-#include <wx/string.h>
-
-
-#ifdef __WXMSW__
-    #include  <wx/ownerdrw.h>
-#endif
-
-//#include  "wx/log.h"
-#include  <wx/sizer.h>
-#include  <wx/menuitem.h>
-#include  <wx/checklst.h>
 
 #include "BatchCommands.h"
 
 class wxWindow;
-class wxCheckBox;
-class wxChoice;
 class wxTextCtrl;
-class wxStaticText;
-class wxRadioButton;
 class wxListCtrl;
 class wxListEvent;
 class wxButton;
@@ -56,9 +41,9 @@ class ApplyMacroDialog : public wxDialogWrapper {
    virtual wxString GetHelpPageName() {return "Apply_Macro";};
 
    void PopulateMacros();
-   static wxString MacroIdOfName( const wxString & MacroName );
+   static CommandID MacroIdOfName( const wxString & MacroName );
    void ApplyMacroToProject( int iMacro, bool bHasGui=true );
-   void ApplyMacroToProject( const wxString & MacroID, bool bHasGui=true );
+   void ApplyMacroToProject( const CommandID & MacroID, bool bHasGui=true );
 
 
    // These will be reused in the derived class...
@@ -73,6 +58,7 @@ class ApplyMacroDialog : public wxDialogWrapper {
    bool mAbort;
    bool mbExpanded;
    wxString mActiveMacro;
+   wxString mMacroBeingRenamed;
 
 protected:
    const MacroCommandsCatalog mCatalog;
@@ -99,7 +85,7 @@ private:
          : "Apply_Macro";};
 
    void PopulateList();
-   void AddItem(const wxString &command, wxString const &params);
+   void AddItem(const CommandID &command, wxString const &params);
    bool ChangeOK();
    void UpdateMenus();
 
@@ -110,6 +96,7 @@ private:
    void OnAdd(wxCommandEvent &event);
    void OnRemove(wxCommandEvent &event);
    void OnRename(wxCommandEvent &event);
+   void OnRestore(wxCommandEvent &event);
    void OnExpand(wxCommandEvent &event);
    void OnShrink(wxCommandEvent &event);
    void OnSize(wxSizeEvent &event);
@@ -121,7 +108,6 @@ private:
    void OnDelete(wxCommandEvent &event);
    void OnUp(wxCommandEvent &event);
    void OnDown(wxCommandEvent &event);
-   void OnDefaults(wxCommandEvent &event);
 
    void OnOK(wxCommandEvent &event);
 
@@ -132,7 +118,7 @@ private:
 
    wxButton *mRemove;
    wxButton *mRename;
-   wxButton *mDefaults;
+   wxButton *mRestore;
 
    int mSelectedCommand;
    bool mChanged;

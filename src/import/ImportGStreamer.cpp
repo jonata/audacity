@@ -23,13 +23,13 @@ Licensed under the GNU General Public License v2 or later
 
 *//*******************************************************************/
 
-#include "../Audacity.h"	// needed before GStreamer.h
-#include <wx/window.h>
-#include <wx/log.h>
+#include "../Audacity.h"	// needed before GStreamer.h // for USE_* macros
 
 #if defined(USE_GSTREAMER)
+#include "ImportGStreamer.h"
 
-#include "../MemoryX.h"
+#include <wx/window.h>
+#include <wx/log.h>
 
 #define DESC _("GStreamer-compatible files")
 
@@ -46,14 +46,8 @@ Licensed under the GNU General Public License v2 or later
 #endif
 
 // all the includes live here by default
-#include "../AudacityException.h"
-#include "../SampleFormat.h"
 #include "../Tags.h"
-#include "../Internat.h"
 #include "../WaveTrack.h"
-#include "Import.h"
-#include "ImportPlugin.h"
-#include "ImportGStreamer.h"
 
 extern "C"
 {
@@ -246,14 +240,16 @@ public:
    ///! Destructor
    virtual ~GStreamerImportPlugin();
 
-   wxString GetPluginFormatDescription();
+   wxString GetPluginFormatDescription() override;
 
-   wxString GetPluginStringID();
+   wxString GetPluginStringID() override;
 
-   wxArrayString GetSupportedExtensions();
+   FileExtensions GetSupportedExtensions() override;
 
    ///! Probes the file and opens it if appropriate
    std::unique_ptr<ImportFileHandle> Open(const wxString &Filename) override;
+
+   unsigned SequenceNumber() const override;
 };
 
 // ============================================================================
@@ -262,10 +258,9 @@ public:
 
 // ----------------------------------------------------------------------------
 // Instantiate GStreamerImportPlugin and add to the list of known importers
-void
-GetGStreamerImportPlugin(ImportPluginList &importPluginList,
-                         UnusableImportPluginList & WXUNUSED(unusableImportPluginList))
-{
+
+static
+Importer::RegisteredImportPlugin{ []() -> std::unique_ptr< ImportPlugin > {
    wxLogMessage(_TS("Audacity is built against GStreamer version %d.%d.%d-%d"),
                 GST_VERSION_MAJOR,
                 GST_VERSION_MINOR,
@@ -287,7 +282,7 @@ GetGStreamerImportPlugin(ImportPluginList &importPluginList,
       wxLogMessage(wxT("Failed to initialize GStreamer. Error %d: %s"),
                    error.get()->code,
                    wxString::FromUTF8(error.get()->message));
-      return;
+      return {};
    }
 
    guint major, minor, micro, nano;
@@ -302,12 +297,12 @@ GetGStreamerImportPlugin(ImportPluginList &importPluginList,
    auto plug = std::make_unique<GStreamerImportPlugin>();
 
    // No supported extensions...no gstreamer plugins installed
-   if (plug->GetSupportedExtensions().GetCount() == 0)
-      return;
+   if (plug->GetSupportedExtensions().size() == 0)
+      return {};
 
    // Add to list of importers
-   importPluginList.push_back( std::move(plug) );
-}
+   return std::move(plug);
+}() } registered;
 
 // ============================================================================
 // GStreamerImportPlugin Class
@@ -316,7 +311,7 @@ GetGStreamerImportPlugin(ImportPluginList &importPluginList,
 // ----------------------------------------------------------------------------
 // Constructor
 GStreamerImportPlugin::GStreamerImportPlugin()
-:  ImportPlugin(wxArrayString())
+:  ImportPlugin( {} )
 {
 }
 
@@ -344,7 +339,7 @@ GStreamerImportPlugin::GetPluginStringID()
 
 // Obtains a list of supported extensions from typefind factories
 // TODO: improve the list. It is obviously incomplete.
-wxArrayString
+FileExtensions
 GStreamerImportPlugin::GetSupportedExtensions()
 {
    // We refresh the extensions each time this is called in case the
@@ -391,7 +386,7 @@ GStreamerImportPlugin::GetSupportedExtensions()
                wxString extension = wxString::FromUTF8(extensions[i]);
                if (mExtensions.Index(extension, false) == wxNOT_FOUND)
                {
-                  mExtensions.Add(extension);
+                  mExtensions.push_back(extension);
                }
             }
          }
@@ -403,7 +398,7 @@ GStreamerImportPlugin::GetSupportedExtensions()
 
    // Log it for debugging
    wxString extensions = wxT("Extensions:");
-   for (size_t i = 0; i < mExtensions.GetCount(); i++)
+   for (size_t i = 0; i < mExtensions.size(); i++)
    {
       extensions = extensions + wxT(" ") + mExtensions[i];
    }
@@ -892,7 +887,7 @@ GStreamerImportFileHandle::~GStreamerImportFileHandle()
 wxInt32
 GStreamerImportFileHandle::GetStreamCount()
 {
-   return mStreamInfo.GetCount();
+   return mStreamInfo.size();
 }
 
 // ----------------------------------------------------------------------------
@@ -991,7 +986,7 @@ GStreamerImportFileHandle::Init()
                      wxString::FromUTF8(c->mType.get()),
                      (int) c->mNumChannels,
                      (int) c->mSampleRate);
-      mStreamInfo.Add(strinfo);
+      mStreamInfo.push_back(strinfo);
    }
 
    return success;
@@ -1149,6 +1144,11 @@ GStreamerImportFileHandle::Import(TrackFactory *trackFactory,
    *tags = mTags;
 
    return updateResult;
+}
+
+unsigned GStreamerImportPlugin::SequenceNumber() const
+{
+   return 80;
 }
 
 // ----------------------------------------------------------------------------

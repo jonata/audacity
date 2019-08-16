@@ -25,12 +25,16 @@
 *//**********************************************************************/
 
 #include "../Audacity.h"
+#include "ToolManager.h"
+
+#include "../Experimental.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
 
 #ifndef WX_PRECOMP
 #include <wx/app.h>
+#include <wx/dcclient.h>
 #include <wx/defs.h>
 #include <wx/event.h>
 #include <wx/frame.h>
@@ -38,6 +42,7 @@
 #include <wx/intl.h>
 #include <wx/region.h>
 #include <wx/settings.h>
+#include <wx/sizer.h>
 #include <wx/sysopt.h>
 #include <wx/timer.h>
 #include <wx/utils.h>
@@ -47,33 +52,15 @@
 #include <wx/minifram.h>
 #include <wx/popupwin.h>
 
-#include "../AudacityApp.h"
-
-#include "ToolManager.h"
-#include "ControlToolBar.h"
-#include "DeviceToolBar.h"
-#include "EditToolBar.h"
-#include "MeterToolBar.h"
-#include "MixerToolBar.h"
-#include "ScrubbingToolBar.h"
-#include "SelectionBar.h"
-#include "SpectralSelectionBar.h"
-#include "ToolsToolBar.h"
-#include "TranscriptionToolBar.h"
-
 #include "../AColor.h"
 #include "../AllThemeResources.h"
-#include "../AudioIO.h"
 #include "../ImageManipulation.h"
 #include "../Prefs.h"
 #include "../Project.h"
-#include "../Theme.h"
 #include "../widgets/AButton.h"
 #include "../widgets/ASlider.h"
-#include "../widgets/Meter.h"
+#include "../widgets/MeterPanelBase.h"
 #include "../widgets/Grabber.h"
-
-#include "../Experimental.h"
 
 ////////////////////////////////////////////////////////////
 /// Methods for ToolFrame
@@ -85,7 +72,7 @@
 //
 ToolFrame::ToolFrame
    ( AudacityProject *parent, ToolManager *manager, ToolBar *bar, wxPoint pos )
-   : wxFrame( parent,
+   : wxFrame( FindProjectFrame( parent ),
           bar->GetId(),
           wxEmptyString,
           pos,
@@ -324,12 +311,48 @@ BEGIN_EVENT_TABLE( ToolManager, wxEvtHandler )
    EVT_TIMER( wxID_ANY, ToolManager::OnTimer )
 END_EVENT_TABLE()
 
+static ToolManager::GetTopPanelHook &getTopPanelHook()
+{
+   static ToolManager::GetTopPanelHook theHook;
+   return theHook;
+}
+
+auto ToolManager::SetGetTopPanelHook( const GetTopPanelHook &hook )
+   -> GetTopPanelHook
+{
+   auto &theHook = getTopPanelHook();
+   auto result = theHook;
+   theHook = hook;
+   return result;
+}
+
+static const AudacityProject::AttachedObjects::RegisteredFactory key{
+  []( AudacityProject &parent ){
+     auto &window = GetProjectFrame( parent );
+     return std::make_shared< ToolManager >(
+        &parent, getTopPanelHook()( window ) ); }
+};
+
+ToolManager &ToolManager::Get( AudacityProject &project )
+{
+   return project.AttachedObjects::Get< ToolManager >( key );
+}
+
+const ToolManager &ToolManager::Get( const AudacityProject &project )
+{
+   return Get( const_cast< AudacityProject & >( project ) );
+}
+
 //
 // Constructor
 //
 ToolManager::ToolManager( AudacityProject *parent, wxWindow *topDockParent )
 : wxEvtHandler()
 {
+   if ( !topDockParent )
+      THROW_INCONSISTENCY_EXCEPTION;
+
+   auto &window = GetProjectFrame( *parent );
    wxPoint pt[ 3 ];
 
 #if defined(__WXMAC__)
@@ -396,37 +419,33 @@ ToolManager::ToolManager( AudacityProject *parent, wxWindow *topDockParent )
 
    // Hook the parents mouse events...using the parent helps greatly
    // under GTK
-   mParent->Bind( wxEVT_LEFT_UP,
+   window.Bind( wxEVT_LEFT_UP,
                      &ToolManager::OnMouse,
                      this );
-   mParent->Bind( wxEVT_MOTION,
+   window.Bind( wxEVT_MOTION,
                      &ToolManager::OnMouse,
                      this );
-   mParent->Bind( wxEVT_MOUSE_CAPTURE_LOST,
+   window.Bind( wxEVT_MOUSE_CAPTURE_LOST,
                      &ToolManager::OnCaptureLost,
                      this );
 
    // Create the top and bottom docks
    mTopDock = safenew ToolDock( this, topDockParent, TopDockID );
-   mBotDock = safenew ToolDock( this, mParent, BotDockID );
+   mBotDock = safenew ToolDock( this, &window, BotDockID );
 
    // Create all of the toolbars
    // All have the project as parent window
    wxASSERT(parent);
-   mBars[ ToolsBarID ]         =  ToolBar::Holder{ safenew ToolsToolBar() };
-   mBars[ TransportBarID ]     =  ToolBar::Holder{ safenew ControlToolBar() };
-   mBars[ RecordMeterBarID ]   =  ToolBar::Holder{ safenew MeterToolBar( parent, RecordMeterBarID ) };
-   mBars[ PlayMeterBarID ]     =  ToolBar::Holder{ safenew MeterToolBar( parent, PlayMeterBarID ) };
-   mBars[ MeterBarID ]         =  ToolBar::Holder{ safenew MeterToolBar( parent, MeterBarID ) };
-   mBars[ EditBarID ]          =  ToolBar::Holder{ safenew EditToolBar() };
-   mBars[ MixerBarID ]         =  ToolBar::Holder{ safenew MixerToolBar() };
-   mBars[ TranscriptionBarID ] =  ToolBar::Holder{ safenew TranscriptionToolBar() };
-   mBars[ SelectionBarID ]     =  ToolBar::Holder{ safenew SelectionBar() };
-   mBars[ DeviceBarID ]        =  ToolBar::Holder{ safenew DeviceToolBar() };
-#ifdef EXPERIMENTAL_SPECTRAL_EDITING
-   mBars[SpectralSelectionBarID] =  ToolBar::Holder{ safenew SpectralSelectionBar() };
-#endif
-   mBars[ ScrubbingBarID ]     =  ToolBar::Holder{ safenew ScrubbingToolBar() };
+
+   size_t ii = 0;
+   for (const auto &factory : RegisteredToolbarFactory::GetFactories()) {
+      if (factory) {
+         mBars[ii] = factory( *parent );
+      }
+      else
+         wxASSERT( false );
+      ++ii;
+   }
 
    // We own the timer
    mTimer.SetOwner( this );
@@ -438,21 +457,36 @@ ToolManager::ToolManager( AudacityProject *parent, wxWindow *topDockParent )
 }
 
 //
-// Destructer
+// Destructor
 //
+
+void ToolManager::Destroy()
+{
+   if ( mTopDock || mBotDock ) { // destroy at most once
+      wxEvtHandler::RemoveFilter(this);
+
+      // Save the toolbar states
+      WriteConfig();
+
+      // This function causes the toolbars to be destroyed, so
+      // clear the configuration of the ToolDocks which refer to
+      // these toolbars. This change was needed to stop Audacity
+      // crashing when running with Jaws on Windows 10 1703.
+      mTopDock->GetConfiguration().Clear();
+      mBotDock->GetConfiguration().Clear();
+
+      mTopDock = mBotDock = nullptr; // indicate that it has been destroyed
+
+      for ( size_t ii = 0; ii < ToolBarCount; ++ii )
+         mBars[ii].reset();
+
+      mIndicator.reset();
+   }
+}
+
 ToolManager::~ToolManager()
 {
-   wxEvtHandler::RemoveFilter(this);
-
-   // Save the toolbar states
-   WriteConfig();
-
-   // This function causes the toolbars to be destroyed, so
-   // clear the configuration of the ToolDocks which refer to
-   // these toolbars. This change was needed to stop Audacity
-   // crashing when running with Jaws on Windows 10 1703.
-   mTopDock->GetConfiguration().Clear();
-   mBotDock->GetConfiguration().Clear();
+   Destroy();
 }
 
 // This table describes the default configuration of the toolbars as
@@ -637,7 +671,7 @@ int ToolManager::FilterEvent(wxEvent &event)
       if ( window &&
            !dynamic_cast<Grabber*>( window ) &&
            !dynamic_cast<ToolFrame*>( window ) &&
-           top == mParent )
+           top == FindProjectFrame( mParent ) )
          // Note this is a dangle-proof wxWindowRef:
          mLastFocus = window;
    }
@@ -671,7 +705,7 @@ void ToolManager::ReadConfig()
    ToolBarConfiguration::Legacy topLegacy, botLegacy;
 
    int vMajor, vMinor, vMicro;
-   wxGetApp().GetVersionKeysInit(vMajor, vMinor, vMicro);
+   gPrefs->GetVersionKeysInit(vMajor, vMinor, vMicro);
    bool useLegacyDock = false;
    // note that vMajor, vMinor, and vMicro will all be zero if either it's a new audacity.cfg file
    // or the version is less than 1.3.13 (when there were no version keys according to the comments in
@@ -1006,10 +1040,20 @@ ToolDock *ToolManager::GetTopDock()
    return mTopDock;
 }
 
+const ToolDock *ToolManager::GetTopDock() const
+{
+   return mTopDock;
+}
+
 //
 // Return a pointer to the bottom dock
 //
 ToolDock *ToolManager::GetBotDock()
+{
+   return mBotDock;
+}
+
+const ToolDock *ToolManager::GetBotDock() const
 {
    return mBotDock;
 }
@@ -1022,7 +1066,7 @@ void ToolManager::Updated()
 {
    // Queue an update event
    wxCommandEvent e( EVT_TOOLBAR_UPDATED );
-   mParent->GetEventHandler()->AddPendingEvent( e );
+   GetProjectFrame( *mParent ).GetEventHandler()->AddPendingEvent( e );
 }
 
 //
@@ -1040,7 +1084,7 @@ bool ToolManager::IsVisible( int type )
 {
    ToolBar *t = mBars[ type ].get();
 
-   return t->IsVisible();
+   return t && t->IsVisible();
 
 #if 0
    // If toolbar is floating
@@ -1090,21 +1134,6 @@ void ToolManager::LayoutToolBars()
    // Update the layout
    mTopDock->LayoutToolBars();
    mBotDock->LayoutToolBars();
-}
-
-//
-// Tell the toolbars that preferences have been updated
-//
-void ToolManager::UpdatePrefs()
-{
-   for( int ndx = 0; ndx < ToolBarCount; ndx++ )
-   {
-      ToolBar *bar = mBars[ ndx ].get();
-      if( bar )
-      {
-         bar->UpdatePrefs();
-      }
-   }
 }
 
 //
@@ -1169,7 +1198,7 @@ void ToolManager::OnMouse( wxMouseEvent & event )
          // Must set the bar afloat if it's currently docked
          mDidDrag = true;
          wxPoint mp = event.GetPosition();
-         mp = mParent->ClientToScreen(mp);
+         mp = GetProjectFrame( *mParent ).ClientToScreen(mp);
          if (!mDragWindow) {
             // We no longer have control
             if (mPrevDock)
@@ -1444,8 +1473,9 @@ void ToolManager::OnGrabber( GrabberEvent & event )
    }
 
    // We want all mouse events from this point on
-   if( !mParent->HasCapture() )
-      mParent->CaptureMouse();
+   auto &window = GetProjectFrame( *mParent );
+   if( !window.HasCapture() )
+      window.CaptureMouse();
 
    // Start monitoring shift key changes
    mLastState = wxGetKeyState( WXK_SHIFT );
@@ -1486,9 +1516,10 @@ void ToolManager::DoneDragging()
 {
    // Done dragging
    // Release capture
-   if( mParent->HasCapture() )
+   auto &window = GetProjectFrame( *mParent );
+   if( window.HasCapture() )
    {
-      mParent->ReleaseMouse();
+      window.ReleaseMouse();
    }
 
    // Hide the indicator
@@ -1514,7 +1545,7 @@ bool ToolManager::RestoreFocus()
    if (mLastFocus) {
       auto temp1 = AButton::TemporarilyAllowFocus();
       auto temp2 = ASlider::TemporarilyAllowFocus();
-      auto temp3 = MeterPanel::TemporarilyAllowFocus();
+      auto temp3 = MeterPanelBase::TemporarilyAllowFocus();
       mLastFocus->SetFocus();
       return true;
    }

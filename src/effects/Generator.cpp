@@ -18,12 +18,12 @@
 
 #include "../Project.h"
 #include "../Prefs.h"
+#include "../ViewInfo.h"
 #include "../WaveTrack.h"
 
 #include "TimeWarper.h"
 
-#include "../MemoryX.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 
 bool Generator::Process()
 {
@@ -79,8 +79,10 @@ bool Generator::Process()
                tmp->Flush();
                StepTimeWarper warper{
                   mT0+GetDuration(), GetDuration()-(mT1-mT0) };
+               const auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
                track->ClearAndPaste(
-                  p->GetSel0(), p->GetSel1(), &*tmp, true, false, &warper);
+                  selectedRegion.t0(), selectedRegion.t1(),
+                  &*tmp, true, false, &warper);
             }
 
             if (!bGoodResult) {

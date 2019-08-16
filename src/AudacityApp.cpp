@@ -15,23 +15,25 @@ It handles initialization and termination by subclassing wxApp.
 
 *//*******************************************************************/
 
+#include "Audacity.h" // This should always be included first; for USE_* macros and __UNIX__
+#include "AudacityApp.h"
+
+#include "Experimental.h"
+
 #if 0
 // This may be used to debug memory leaks.
 // See: Visual Leak Dectector @ http://vld.codeplex.com/
 #include <vld.h>
 #endif
 
-#include "Audacity.h" // This should always be included first
-#include "AudacityApp.h"
-#include "TranslatableStringArray.h"
-
+#include <wx/setup.h> // for wxUSE_* macros
+#include <wx/wxcrtvararg.h>
 #include <wx/defs.h>
 #include <wx/app.h>
 #include <wx/bitmap.h>
 #include <wx/docview.h>
 #include <wx/event.h>
 #include <wx/ipc.h>
-#include <wx/log.h>
 #include <wx/window.h>
 #include <wx/intl.h>
 #include <wx/menu.h>
@@ -59,25 +61,35 @@ It handles initialization and termination by subclassing wxApp.
 #include <sys/stat.h>
 #endif
 
-#include "AudacityException.h"
+#if defined(__WXMSW__)
+#include <wx/msw/registry.h> // for wxRegKey
+#endif
+
 #include "AudacityLogger.h"
 #include "AboutDialog.h"
 #include "AColor.h"
 #include "AudioIO.h"
 #include "Benchmark.h"
+#include "Clipboard.h"
+#include "CrashReport.h"
 #include "DirManager.h"
 #include "commands/CommandHandler.h"
 #include "commands/AppCommandEvent.h"
-#include "commands/CommandContext.h"
-#include "effects/Contrast.h"
 #include "widgets/ASlider.h"
 #include "FFmpeg.h"
-#include "Internat.h"
-#include "LangChoice.h"
+//#include "LangChoice.h"
 #include "Languages.h"
+#include "Menus.h"
+#include "MissingAliasFileDialog.h"
 #include "PluginManager.h"
-#include "Prefs.h"
 #include "Project.h"
+#include "ProjectAudioIO.h"
+#include "ProjectAudioManager.h"
+#include "ProjectFileManager.h"
+#include "ProjectHistory.h"
+#include "ProjectManager.h"
+#include "ProjectSettings.h"
+#include "ProjectWindow.h"
 #include "Screenshot.h"
 #include "Sequence.h"
 #include "WaveTrack.h"
@@ -86,23 +98,27 @@ It handles initialization and termination by subclassing wxApp.
 #include "PlatformCompatibility.h"
 #include "FileNames.h"
 #include "AutoRecovery.h"
+#include "AutoRecoveryDialog.h"
 #include "SplashDialog.h"
 #include "FFT.h"
 #include "BlockFile.h"
 #include "ondemand/ODManager.h"
-#include "commands/Keyboard.h"
-#include "widgets/ErrorDialog.h"
+#include "widgets/AudacityMessageBox.h"
 #include "prefs/DirectoriesPrefs.h"
+#include "prefs/GUIPrefs.h"
 #include "tracks/ui/Scrubbing.h"
+#include "widgets/FileHistory.h"
 
-//temporarilly commented out till it is added to all projects
+#ifdef EXPERIMENTAL_EASY_CHANGE_KEY_BINDINGS
+#include "prefs/KeyConfigPrefs.h"
+#endif
+
+//temporarily commented out till it is added to all projects
 //#include "Profiler.h"
 
 #include "ModuleManager.h"
 
 #include "import/Import.h"
-
-#include "Experimental.h"
 
 #if defined(EXPERIMENTAL_CRASH_REPORT)
 #include <wx/debugrpt.h>
@@ -240,9 +256,6 @@ It handles initialization and termination by subclassing wxApp.
 /// Custom events
 ////////////////////////////////////////////////////////////
 
-DEFINE_EVENT_TYPE(EVT_OPEN_AUDIO_FILE);
-wxDEFINE_EVENT(EVT_LANGUAGE_CHANGE, wxCommandEvent);
-
 #if 0
 #ifdef __WXGTK__
 static void wxOnAssert(const wxChar *fileName, int lineNumber, const wxChar *msg)
@@ -262,11 +275,197 @@ static void wxOnAssert(const wxChar *fileName, int lineNumber, const wxChar *msg
 #endif
 #endif
 
-static bool gInited = false;
-bool gIsQuitting = false;
+namespace {
 
-void QuitAudacity(bool bForce)
+void PopulatePreferences()
 {
+   bool resetPrefs = false;
+   wxString langCode = gPrefs->Read(wxT("/Locale/Language"), wxEmptyString);
+   bool writeLang = false;
+
+   const wxFileName fn(
+      FileNames::ResourcesDir(), 
+      wxT("FirstTime.ini"));
+   if (fn.FileExists())   // it will exist if the (win) installer put it there
+   {
+      const wxString fullPath{fn.GetFullPath()};
+
+      wxFileConfig ini(wxEmptyString,
+                       wxEmptyString,
+                       fullPath,
+                       wxEmptyString,
+                       wxCONFIG_USE_LOCAL_FILE);
+
+      wxString lang;
+      if (ini.Read(wxT("/FromInno/Language"), &lang))
+      {
+         // Only change "langCode" if the language was actually specified in the ini file.
+         langCode = lang;
+         writeLang = true;
+
+         // Inno Setup doesn't allow special characters in the Name values, so "0" is used
+         // to represent the "@" character.
+         langCode.Replace(wxT("0"), wxT("@"));
+      }
+
+      ini.Read(wxT("/FromInno/ResetPrefs"), &resetPrefs, false);
+
+      bool gone = wxRemoveFile(fullPath);  // remove FirstTime.ini
+      if (!gone)
+      {
+         AudacityMessageBox(wxString::Format(_("Failed to remove %s"), fullPath), _("Failed!"));
+      }
+   }
+
+   langCode = GUIPrefs::InitLang( langCode );
+
+   // User requested that the preferences be completely reset
+   if (resetPrefs)
+   {
+      // pop up a dialogue
+      wxString prompt = _("Reset Preferences?\n\nThis is a one-time question, after an 'install' where you asked to have the Preferences reset.");
+      int action = AudacityMessageBox(prompt, _("Reset Audacity Preferences"),
+                                wxYES_NO, NULL);
+      if (action == wxYES)   // reset
+      {
+         gPrefs->DeleteAll();
+         writeLang = true;
+      }
+   }
+
+   // Save the specified language
+   if (writeLang)
+   {
+      gPrefs->Write(wxT("/Locale/Language"), langCode);
+   }
+
+   // In AUdacity 2.1.0 support for the legacy 1.2.x preferences (depreciated since Audacity
+   // 1.3.1) is dropped. As a result we can drop the import flag
+   // first time this version of Audacity is run we try to migrate
+   // old preferences.
+   bool newPrefsInitialized = false;
+   gPrefs->Read(wxT("/NewPrefsInitialized"), &newPrefsInitialized, false);
+   if (newPrefsInitialized) {
+      gPrefs->DeleteEntry(wxT("/NewPrefsInitialized"), true);  // take group as well if empty
+   }
+
+   // record the Prefs version for future checking (this has not been used for a very
+   // long time).
+   gPrefs->Write(wxT("/PrefsVersion"), wxString(wxT(AUDACITY_PREFS_VERSION_STRING)));
+
+   // Check if some prefs updates need to happen based on audacity version.
+   // Unfortunately we can't use the PrefsVersion prefs key because that resets things.
+   // In the future we may want to integrate that better.
+   // these are done on a case-by-case basis for now so they must be backwards compatible
+   // (meaning the changes won't mess audacity up if the user goes back to an earlier version)
+   int vMajor = gPrefs->Read(wxT("/Version/Major"), (long) 0);
+   int vMinor = gPrefs->Read(wxT("/Version/Minor"), (long) 0);
+   int vMicro = gPrefs->Read(wxT("/Version/Micro"), (long) 0);
+
+   gPrefs->SetVersionKeysInit(vMajor, vMinor, vMicro);   // make a note of these initial values
+                                                            // for use by ToolManager::ReadConfig()
+
+   // These integer version keys were introduced april 4 2011 for 1.3.13
+   // The device toolbar needs to be enabled due to removal of source selection features in
+   // the mixer toolbar.
+   if ((vMajor < 1) ||
+       (vMajor == 1 && vMinor < 3) ||
+       (vMajor == 1 && vMinor == 3 && vMicro < 13)) {
+
+
+      // Do a full reset of the Device Toolbar to get it on the screen.
+      if (gPrefs->Exists(wxT("/GUI/ToolBars/Device")))
+         gPrefs->DeleteGroup(wxT("/GUI/ToolBars/Device"));
+
+      // We keep the mixer toolbar prefs (shown/not shown)
+      // the width of the mixer toolbar may have shrunk, the prefs will keep the larger value
+      // if the user had a device that had more than one source.
+      if (gPrefs->Exists(wxT("/GUI/ToolBars/Mixer"))) {
+         // Use the default width
+         gPrefs->Write(wxT("/GUI/ToolBars/Mixer/W"), -1);
+      }
+   }
+
+   // In 2.1.0, the Meter toolbar was split and lengthened, but strange arrangements happen
+   // if upgrading due to the extra length.  So, if a user is upgrading, use the pre-2.1.0
+   // lengths, but still use the NEW split versions.
+   if (gPrefs->Exists(wxT("/GUI/ToolBars/Meter")) &&
+      !gPrefs->Exists(wxT("/GUI/ToolBars/CombinedMeter"))) {
+
+      // Read in all of the existing values
+      long dock, order, show, x, y, w, h;
+      gPrefs->Read(wxT("/GUI/ToolBars/Meter/Dock"), &dock, -1);
+      gPrefs->Read(wxT("/GUI/ToolBars/Meter/Order"), &order, -1);
+      gPrefs->Read(wxT("/GUI/ToolBars/Meter/Show"), &show, -1);
+      gPrefs->Read(wxT("/GUI/ToolBars/Meter/X"), &x, -1);
+      gPrefs->Read(wxT("/GUI/ToolBars/Meter/Y"), &y, -1);
+      gPrefs->Read(wxT("/GUI/ToolBars/Meter/W"), &w, -1);
+      gPrefs->Read(wxT("/GUI/ToolBars/Meter/H"), &h, -1);
+
+      // "Order" must be adjusted since we're inserting two NEW toolbars
+      if (dock > 0) {
+         wxString oldPath = gPrefs->GetPath();
+         gPrefs->SetPath(wxT("/GUI/ToolBars"));
+
+         wxString bar;
+         long ndx = 0;
+         bool cont = gPrefs->GetFirstGroup(bar, ndx);
+         while (cont) {
+            long o;
+            if (gPrefs->Read(bar + wxT("/Order"), &o) && o >= order) {
+               gPrefs->Write(bar + wxT("/Order"), o + 2);
+            }
+            cont = gPrefs->GetNextGroup(bar, ndx);
+         }
+         gPrefs->SetPath(oldPath);
+
+         // And override the height
+         h = 27;
+      }
+
+      // Write the split meter bar values
+      gPrefs->Write(wxT("/GUI/ToolBars/RecordMeter/Dock"), dock);
+      gPrefs->Write(wxT("/GUI/ToolBars/RecordMeter/Order"), order);
+      gPrefs->Write(wxT("/GUI/ToolBars/RecordMeter/Show"), show);
+      gPrefs->Write(wxT("/GUI/ToolBars/RecordMeter/X"), -1);
+      gPrefs->Write(wxT("/GUI/ToolBars/RecordMeter/Y"), -1);
+      gPrefs->Write(wxT("/GUI/ToolBars/RecordMeter/W"), w);
+      gPrefs->Write(wxT("/GUI/ToolBars/RecordMeter/H"), h);
+      gPrefs->Write(wxT("/GUI/ToolBars/PlayMeter/Dock"), dock);
+      gPrefs->Write(wxT("/GUI/ToolBars/PlayMeter/Order"), order + 1);
+      gPrefs->Write(wxT("/GUI/ToolBars/PlayMeter/Show"), show);
+      gPrefs->Write(wxT("/GUI/ToolBars/PlayMeter/X"), -1);
+      gPrefs->Write(wxT("/GUI/ToolBars/PlayMeter/Y"), -1);
+      gPrefs->Write(wxT("/GUI/ToolBars/PlayMeter/W"), w);
+      gPrefs->Write(wxT("/GUI/ToolBars/PlayMeter/H"), h);
+
+      // And hide the old combined meter bar
+      gPrefs->Write(wxT("/GUI/ToolBars/Meter/Dock"), -1);
+   }
+
+   // Upgrading pre 2.2.0 configs we assume extended set of defaults.
+   if ((0<vMajor && vMajor < 2) ||
+       (vMajor == 2 && vMinor < 2))
+   {
+      gPrefs->Write(wxT("/GUI/Shortcuts/FullDefaults"),1);
+   }
+
+   // write out the version numbers to the prefs file for future checking
+   gPrefs->Write(wxT("/Version/Major"), AUDACITY_VERSION);
+   gPrefs->Write(wxT("/Version/Minor"), AUDACITY_RELEASE);
+   gPrefs->Write(wxT("/Version/Micro"), AUDACITY_REVISION);
+
+   gPrefs->Flush();
+}
+
+}
+
+static bool gInited = false;
+static bool gIsQuitting = false;
+
+static void QuitAudacity(bool bForce)
+{
+   // guard against recursion
    if (gIsQuitting)
       return;
 
@@ -279,34 +478,26 @@ void QuitAudacity(bool bForce)
    // BG: unless force is true
 
    // BG: Are there any projects open?
-   //-   if (!gAudacityProjects.IsEmpty())
+   //-   if (!AllProjects{}.empty())
 /*start+*/
-   if (gAudacityProjects.empty())
+   if (AllProjects{}.empty())
    {
 #ifdef __WXMAC__
-      AudacityProject::DeleteClipboard();
+      Clipboard::Get().Clear();
 #endif
    }
    else
 /*end+*/
    {
-      SaveWindowSize();
-      while (gAudacityProjects.size())
+      if (AllProjects{}.size())
+         // PRL:  Always did at least once before close might be vetoed
+         // though I don't know why that is important
+         ProjectManager::SaveWindowSize();
+      bool closedAll = AllProjects::Close( bForce );
+      if ( !closedAll )
       {
-         // Closing the project has global side-effect
-         // of deletion from gAudacityProjects
-         if (bForce)
-         {
-            gAudacityProjects[0]->Close(true);
-         }
-         else
-         {
-            if (!gAudacityProjects[0]->Close())
-            {
-               gIsQuitting = false;
-               return;
-            }
-         }
+         gIsQuitting = false;
+         return;
       }
    }
 
@@ -321,7 +512,7 @@ void QuitAudacity(bool bForce)
    ODManager::Quit();
 
    //print out profile if we have one by deleting it
-   //temporarilly commented out till it is added to all projects
+   //temporarily commented out till it is added to all projects
    //DELETE Profiler::Instance();
 
    //remove our logger
@@ -333,87 +524,9 @@ void QuitAudacity(bool bForce)
    }
 }
 
-void QuitAudacity()
+static void QuitAudacity()
 {
    QuitAudacity(false);
-}
-
-void SaveWindowSize()
-{
-   if (wxGetApp().GetWindowRectAlreadySaved())
-   {
-      return;
-   }
-   bool validWindowForSaveWindowSize = FALSE;
-   AudacityProject * validProject = NULL;
-   bool foundIconizedProject = FALSE;
-   size_t numProjects = gAudacityProjects.size();
-   for (size_t i = 0; i < numProjects; i++)
-   {
-      if (!gAudacityProjects[i]->IsIconized()) {
-         validWindowForSaveWindowSize = TRUE;
-         validProject = gAudacityProjects[i].get();
-         i = numProjects;
-      }
-      else
-         foundIconizedProject =  TRUE;
-
-   }
-   if (validWindowForSaveWindowSize)
-   {
-      wxRect windowRect = validProject->GetRect();
-      wxRect normalRect = validProject->GetNormalizedWindowState();
-      bool wndMaximized = validProject->IsMaximized();
-      gPrefs->Write(wxT("/Window/X"), windowRect.GetX());
-      gPrefs->Write(wxT("/Window/Y"), windowRect.GetY());
-      gPrefs->Write(wxT("/Window/Width"), windowRect.GetWidth());
-      gPrefs->Write(wxT("/Window/Height"), windowRect.GetHeight());
-      gPrefs->Write(wxT("/Window/Maximized"), wndMaximized);
-      gPrefs->Write(wxT("/Window/Normal_X"), normalRect.GetX());
-      gPrefs->Write(wxT("/Window/Normal_Y"), normalRect.GetY());
-      gPrefs->Write(wxT("/Window/Normal_Width"), normalRect.GetWidth());
-      gPrefs->Write(wxT("/Window/Normal_Height"), normalRect.GetHeight());
-      gPrefs->Write(wxT("/Window/Iconized"), FALSE);
-   }
-   else
-   {
-      if (foundIconizedProject) {
-         validProject = gAudacityProjects[0].get();
-         bool wndMaximized = validProject->IsMaximized();
-         wxRect normalRect = validProject->GetNormalizedWindowState();
-         // store only the normal rectangle because the itemized rectangle
-         // makes no sense for an opening project window
-         gPrefs->Write(wxT("/Window/X"), normalRect.GetX());
-         gPrefs->Write(wxT("/Window/Y"), normalRect.GetY());
-         gPrefs->Write(wxT("/Window/Width"), normalRect.GetWidth());
-         gPrefs->Write(wxT("/Window/Height"), normalRect.GetHeight());
-         gPrefs->Write(wxT("/Window/Maximized"), wndMaximized);
-         gPrefs->Write(wxT("/Window/Normal_X"), normalRect.GetX());
-         gPrefs->Write(wxT("/Window/Normal_Y"), normalRect.GetY());
-         gPrefs->Write(wxT("/Window/Normal_Width"), normalRect.GetWidth());
-         gPrefs->Write(wxT("/Window/Normal_Height"), normalRect.GetHeight());
-         gPrefs->Write(wxT("/Window/Iconized"), TRUE);
-      }
-      else {
-         // this would be a very strange case that might possibly occur on the Mac
-         // Audacity would have to be running with no projects open
-         // in this case we are going to write only the default values
-         wxRect defWndRect;
-         GetDefaultWindowRect(&defWndRect);
-         gPrefs->Write(wxT("/Window/X"), defWndRect.GetX());
-         gPrefs->Write(wxT("/Window/Y"), defWndRect.GetY());
-         gPrefs->Write(wxT("/Window/Width"), defWndRect.GetWidth());
-         gPrefs->Write(wxT("/Window/Height"), defWndRect.GetHeight());
-         gPrefs->Write(wxT("/Window/Maximized"), FALSE);
-         gPrefs->Write(wxT("/Window/Normal_X"), defWndRect.GetX());
-         gPrefs->Write(wxT("/Window/Normal_Y"), defWndRect.GetY());
-         gPrefs->Write(wxT("/Window/Normal_Width"), defWndRect.GetWidth());
-         gPrefs->Write(wxT("/Window/Normal_Height"), defWndRect.GetHeight());
-         gPrefs->Write(wxT("/Window/Iconized"), FALSE);
-      }
-   }
-   gPrefs->Flush();
-   wxGetApp().SetWindowRectAlreadySaved(TRUE);
 }
 
 #if defined(__WXGTK__) && defined(HAVE_GTK)
@@ -510,7 +623,7 @@ static gboolean save_yourself_cb(GnomeClient *client,
       return TRUE;
    }
 
-   if (gAudacityProjects.empty()) {
+   if (AllProjects{}.empty()) {
       return TRUE;
    }
 
@@ -619,8 +732,8 @@ public:
    {
       // Add the filename to the queue.  It will be opened by
       // the OnTimer() event when it is safe to do so.
-      ofqueue.Add(data);
-     
+      ofqueue.push_back(data);
+
       return true;
    }
 };
@@ -693,13 +806,13 @@ IMPLEMENT_APP(AudacityApp)
 // in response of an open-document apple event
 void AudacityApp::MacOpenFile(const wxString &fileName)
 {
-   ofqueue.Add(fileName);
+   ofqueue.push_back(fileName);
 }
 
 // in response of a print-document apple event
 void AudacityApp::MacPrintFile(const wxString &fileName)
 {
-   ofqueue.Add(fileName);
+   ofqueue.push_back(fileName);
 }
 
 // in response of a open-application apple event
@@ -711,16 +824,11 @@ void AudacityApp::MacNewFile()
    // This method should only be used on the Mac platform
    // when no project windows are open.
 
-   if (gAudacityProjects.size() == 0) {
-      CreateNewAudacityProject();
-   }
+   if (AllProjects{}.empty())
+      (void) ProjectManager::New();
 }
 
 #endif //__WXMAC__
-
-#define ID_RECENT_CLEAR 6100
-#define ID_RECENT_FIRST 6101
-#define ID_RECENT_LAST  6112
 
 // IPC communication
 #define ID_IPC_SERVER   6200
@@ -739,8 +847,13 @@ BEGIN_EVENT_TABLE(AudacityApp, wxApp)
    EVT_MENU(wxID_OPEN, AudacityApp::OnMenuOpen)
    EVT_MENU(wxID_ABOUT, AudacityApp::OnMenuAbout)
    EVT_MENU(wxID_PREFERENCES, AudacityApp::OnMenuPreferences)
-   EVT_MENU(wxID_EXIT, AudacityApp::OnMenuExit)
 #endif
+
+   // Associate the handler with the menu id on all operating systems, even
+   // if they don't have an application menu bar like in macOS, so that
+   // other parts of the program can send the application a shut-down
+   // event
+   EVT_MENU(wxID_EXIT, AudacityApp::OnMenuExit)
 
 #ifndef __WXMSW__
    EVT_SOCKET(ID_IPC_SERVER, AudacityApp::OnServerEvent)
@@ -748,8 +861,9 @@ BEGIN_EVENT_TABLE(AudacityApp, wxApp)
 #endif
 
    // Recent file event handlers.
-   EVT_MENU(ID_RECENT_CLEAR, AudacityApp::OnMRUClear)
-   EVT_MENU_RANGE(ID_RECENT_FIRST, ID_RECENT_LAST, AudacityApp::OnMRUFile)
+   EVT_MENU(FileHistory::ID_RECENT_CLEAR, AudacityApp::OnMRUClear)
+   EVT_MENU_RANGE(FileHistory::ID_RECENT_FIRST, FileHistory::ID_RECENT_LAST,
+      AudacityApp::OnMRUFile)
 
    // Handle AppCommandEvents (usually from a script)
    EVT_APP_COMMAND(wxID_ANY, AudacityApp::OnReceiveCommand)
@@ -762,13 +876,13 @@ END_EVENT_TABLE()
 // TODO: Would be nice to make this handle not opening a file with more panache.
 //  - Inform the user if DefaultOpenPath not set.
 //  - Switch focus to correct instance of project window, if already open.
-bool AudacityApp::MRUOpen(const wxString &fullPathStr) {
-   // Most of the checks below are copied from AudacityProject::OpenFiles.
+bool AudacityApp::MRUOpen(const FilePath &fullPathStr) {
+   // Most of the checks below are copied from ProjectManager::OpenFiles.
    // - some rationalisation might be possible.
 
    AudacityProject *proj = GetActiveProject();
 
-   if (!fullPathStr.IsEmpty())
+   if (!fullPathStr.empty())
    {
       // verify that the file exists
       if (wxFile::Exists(fullPathStr))
@@ -779,7 +893,7 @@ bool AudacityApp::MRUOpen(const wxString &fullPathStr) {
          // Test here even though AudacityProject::OpenFile() also now checks, because
          // that method does not return the bad result.
          // That itself may be a FIXME.
-         if (AudacityProject::IsAlreadyOpen(fullPathStr))
+         if (ProjectFileManager::IsAlreadyOpen(fullPathStr))
             return false;
 
          // DMM: If the project is dirty, that means it's been touched at
@@ -792,12 +906,15 @@ bool AudacityApp::MRUOpen(const wxString &fullPathStr) {
          // there are no tracks, but there's an Undo history, etc, then
          // bad things can happen, including data files moving to the NEW
          // project directory, etc.
-         if (proj && (proj->GetDirty() || !proj->GetIsEmpty()))
+         if (proj && (
+            ProjectHistory::Get( *proj ).GetDirty() ||
+            !TrackList::Get( *proj ).empty()
+         ) )
             proj = nullptr;
          // This project is clean; it's never been touched.  Therefore
          // all relevant member variables are in their initial state,
          // and it's okay to open a NEW project inside this window.
-         AudacityProject::OpenProject( proj, fullPathStr );
+         ( void ) ProjectManager::OpenProject( proj, fullPathStr );
       }
       else {
          // File doesn't exist - remove file from history
@@ -816,15 +933,16 @@ bool AudacityApp::SafeMRUOpen(const wxString &fullPathStr)
 
 void AudacityApp::OnMRUClear(wxCommandEvent& WXUNUSED(event))
 {
-   mRecentFiles->Clear();
+   FileHistory::Global().Clear();
 }
 
 //vvv Basically, anything from Recent Files is treated as a .aup, until proven otherwise,
 // then it tries to Import(). Very questionable handling, imo.
 // Better, for example, to check the file type early on.
 void AudacityApp::OnMRUFile(wxCommandEvent& event) {
-   int n = event.GetId() - ID_RECENT_FIRST;
-   const wxString &fullPathStr = mRecentFiles->GetHistoryFile(n);
+   int n = event.GetId() - FileHistory::ID_RECENT_FIRST;
+   auto &history = FileHistory::Global();
+   const auto &fullPathStr = history.GetHistoryFile(n);
 
    // Try to open only if not already open.
    // Test IsAlreadyOpen() here even though AudacityProject::MRUOpen() also now checks,
@@ -834,8 +952,8 @@ void AudacityApp::OnMRUFile(wxCommandEvent& event) {
    // PRL: Don't call SafeMRUOpen
    // -- if open fails for some exceptional reason of resource exhaustion that
    // the user can correct, leave the file in history.
-   if (!AudacityProject::IsAlreadyOpen(fullPathStr) && !MRUOpen(fullPathStr))
-      mRecentFiles->RemoveFileFromHistory(n);
+   if (!ProjectFileManager::IsAlreadyOpen(fullPathStr) && !MRUOpen(fullPathStr))
+      history.RemoveFileFromHistory(n);
 }
 
 void AudacityApp::OnTimer(wxTimerEvent& WXUNUSED(event))
@@ -844,21 +962,22 @@ void AudacityApp::OnTimer(wxTimerEvent& WXUNUSED(event))
    // AppleEvent messages (via wxWidgets).  So, open any that are
    // in the queue and clean the queue.
    if (gInited) {
-      if (ofqueue.GetCount()) {
+      if (ofqueue.size()) {
          // Load each file on the queue
-         while (ofqueue.GetCount()) {
+         while (ofqueue.size()) {
             wxString name;
             name.swap(ofqueue[0]);
-            ofqueue.RemoveAt(0);
+            ofqueue.erase( ofqueue.begin() );
 
             // Get the user's attention if no file name was specified
-            if (name.IsEmpty()) {
+            if (name.empty()) {
                // Get the users attention
                AudacityProject *project = GetActiveProject();
                if (project) {
-                  project->Maximize();
-                  project->Raise();
-                  project->RequestUserAttention();
+                  auto &window = GetProjectFrame( *project );
+                  window.Maximize();
+                  window.Raise();
+                  window.RequestUserAttention();
                }
                continue;
             }
@@ -879,23 +998,19 @@ void AudacityApp::OnTimer(wxTimerEvent& WXUNUSED(event))
    }
 
    // Check if a warning for missing aliased files should be displayed
-   if (ShouldShowMissingAliasedFileWarning()) {
+   if (MissingAliasFilesDialog::ShouldShow()) {
       // find which project owns the blockfile
       // note: there may be more than 1, but just go with the first one.
-      //size_t numProjects = gAudacityProjects.size();
-      AProjectHolder offendingProject;
-      wxString missingFileName;
-
-      {
-         ODLocker locker { &m_LastMissingBlockFileLock };
-         offendingProject = m_LastMissingBlockFileProject.lock();
-         missingFileName = m_LastMissingBlockFilePath;
-      }
+      //size_t numProjects = AllProjects{}.size();
+      auto marked = MissingAliasFilesDialog::Marked();
+      auto offendingProject = marked.second;
+      wxString missingFileName = marked.first;
 
       // if there are no projects open, don't show the warning (user has closed it)
       if (offendingProject) {
-         offendingProject->Iconize(false);
-         offendingProject->Raise();
+         auto &window = GetProjectFrame( *offendingProject );
+         window.Iconize(false);
+         window.Raise();
 
          wxString errorMessage = wxString::Format(_(
 "One or more external audio files could not be found.\n\
@@ -909,65 +1024,16 @@ Choose Help > Diagnostics > Check Dependencies to view a list of \
 locations of the missing files."), missingFileName);
 
          // if an old dialog exists, raise it if it is
-         if (offendingProject->GetMissingAliasFileDialog()) {
-            offendingProject->GetMissingAliasFileDialog()->Raise();
-         } else {
-            ShowAliasMissingDialog(offendingProject.get(), _("Files Missing"),
+         if ( auto dialog = MissingAliasFilesDialog::Find( *offendingProject ) )
+            dialog->Raise();
+         else {
+            MissingAliasFilesDialog::Show(offendingProject.get(), _("Files Missing"),
                                    errorMessage, wxT(""), true);
          }
       }
       // Only show this warning once per event (playback/menu item/etc).
-      SetMissingAliasedFileWarningShouldShow(false);
+      MissingAliasFilesDialog::SetShouldShow(false);
    }
-}
-
-void AudacityApp::MarkAliasedFilesMissingWarning(const AliasBlockFile *b)
-{
-   ODLocker locker { &m_LastMissingBlockFileLock };
-   if (b) {
-   size_t numProjects = gAudacityProjects.size();
-      for (size_t ii = 0; ii < numProjects; ++ii) {
-         // search each project for the blockfile
-         if (gAudacityProjects[ii]->GetDirManager()->ContainsBlockFile(b)) {
-            m_LastMissingBlockFileProject = gAudacityProjects[ii];
-            break;
-         }
-      }
-   }
-   else
-      m_LastMissingBlockFileProject = {};
-
-   if (b)
-      m_LastMissingBlockFilePath = b->GetAliasedFileName().GetFullPath();
-   else
-      m_LastMissingBlockFilePath = wxString{};
-}
-
-void AudacityApp::SetMissingAliasedFileWarningShouldShow(bool b)
-{
-   // Note that this is can be called by both the main thread and other threads.
-   // I don't believe we need a mutex because we are checking zero vs non-zero,
-   // and the setting from other threads will always be non-zero (true), and the
-   // setting from the main thread is always false.
-   m_aliasMissingWarningShouldShow = b;
-   // reset the warnings as they were probably marked by a previous run
-   if (m_aliasMissingWarningShouldShow) {
-      MarkAliasedFilesMissingWarning( nullptr );
-   }
-}
-
-bool AudacityApp::ShouldShowMissingAliasedFileWarning()
-{
-   ODLocker locker { &m_LastMissingBlockFileLock };
-   auto ptr = m_LastMissingBlockFileProject.lock();
-   return ptr && m_aliasMissingWarningShouldShow;
-}
-
-AudacityLogger *AudacityApp::GetLogger()
-{
-   // Use dynamic_cast so that we get a NULL ptr if we haven't yet
-   // setup our logger.
-   return dynamic_cast<AudacityLogger *>(wxLog::GetActiveTarget());
 }
 
 #if defined(__WXMSW__)
@@ -986,78 +1052,10 @@ wxLanguageInfo userLangs[] =
 };
 #endif
 
-wxString AudacityApp::InitLang( const wxString & lang )
-{
-   wxString result = lang;
-
-   mLocale.reset();
-
-#if defined(__WXMAC__)
-   // This should be reviewed again during the wx3 conversion.
-
-   // On OSX, if the LANG environment variable isn't set when
-   // using a language like Japanese, an assertion will trigger
-   // because conversion to Japanese from "?" doesn't return a
-   // valid length, so make OSX happy by defining/overriding
-   // the LANG environment variable with U.S. English for now.
-   wxSetEnv(wxT("LANG"), wxT("en_US.UTF-8"));
-#endif
-
-   const wxLanguageInfo *info = NULL;
-   if (!lang.empty()) {
-      info = wxLocale::FindLanguageInfo(lang);
-      if (!info)
-         ::AudacityMessageBox(wxString::Format(_("Language \"%s\" is unknown"), lang));
-   }
-   if (!info)
-   {
-      result = GetSystemLanguageCode();
-      info = wxLocale::FindLanguageInfo(result);
-      if (!info)
-         return result;
-   }
-   mLocale = std::make_unique<wxLocale>(info->Language);
-
-   for(unsigned int i=0; i<audacityPathList.GetCount(); i++)
-      mLocale->AddCatalogLookupPathPrefix(audacityPathList[i]);
-
-   // LL:  Must add the wxWidgets catalog manually since the search
-   //      paths were not set up when mLocale was created.  The
-   //      catalogs are search in LIFO order, so add wxstd first.
-   mLocale->AddCatalog(wxT("wxstd"));
-
-// AUDACITY_NAME is legitimately used on some *nix configurations.
-#ifdef AUDACITY_NAME
-   mLocale->AddCatalog(wxT(AUDACITY_NAME));
-#else
-   mLocale->AddCatalog(IPC_APPL);
-#endif
-
-   // Initialize internationalisation (number formats etc.)
-   //
-   // This must go _after_ creating the wxLocale instance because
-   // creating the wxLocale instance sets the application-wide locale.
-
-   Internat::Init();
-
-   // Notify listeners of language changes
-   {
-      wxCommandEvent evt(EVT_LANGUAGE_CHANGE);
-      ProcessEvent(evt);
-   }
-
-   // PRL: Moved this, do it only after language intialized
-   // Unused strings that we want to be translated, even though
-   // we're not using them yet...
-   wxString future1 = _("Master Gain Control");
-
-   return result;
-}
-
 void AudacityApp::OnFatalException()
 {
 #if defined(EXPERIMENTAL_CRASH_REPORT)
-   GenerateCrashReport(wxDebugReport::Context_Exception);
+   CrashReport::Generate(wxDebugReport::Context_Exception);
 #endif
 
    exit(-1);
@@ -1090,12 +1088,14 @@ bool AudacityApp::OnExceptionInMainLoop()
 
          // Restore the state of the project to what it was before the
          // failed operation
-         pProject->RollbackState();
+         if (pProject) {
+            ProjectHistory::Get( *pProject ).RollbackState();
 
-         // Forget pending changes in the TrackList
-         pProject->GetTracks()->ClearPendingTracks();
+            // Forget pending changes in the TrackList
+            TrackList::Get( *pProject ).ClearPendingTracks();
 
-         pProject->RedrawProject();
+            ProjectWindow::Get( *pProject ).RedrawProject();
+         }
 
          // Give the user an alert
          try { std::rethrow_exception( pException ); }
@@ -1118,55 +1118,6 @@ bool AudacityApp::OnExceptionInMainLoop()
 #ifdef _MSC_VER
 #pragma warning( pop )
 #endif //_MSC_VER
-
-#if defined(EXPERIMENTAL_CRASH_REPORT)
-void AudacityApp::GenerateCrashReport(wxDebugReport::Context ctx)
-{
-   wxDebugReportCompress rpt;
-   rpt.AddAll(ctx);
-
-   wxFileName fn(FileNames::DataDir(), wxT("audacity.cfg"));
-   rpt.AddFile(fn.GetFullPath(), _TS("Audacity Configuration"));
-   rpt.AddFile(FileNames::PluginRegistry(), wxT("Plugin Registry"));
-   rpt.AddFile(FileNames::PluginSettings(), wxT("Plugin Settings"));
-
-   if (ctx == wxDebugReport::Context_Current)
-   {
-      rpt.AddText(wxT("audiodev.txt"), gAudioIO->GetDeviceInfo(), wxT("Audio Device Info"));
-#ifdef EXPERIMENTAL_MIDI_OUT
-      rpt.AddText(wxT("mididev.txt"), gAudioIO->GetMidiDeviceInfo(), wxT("MIDI Device Info"));
-#endif
-   }
-
-   AudacityLogger *logger = GetLogger();
-   if (logger)
-   {
-      rpt.AddText(wxT("log.txt"), logger->GetLog(), _TS("Audacity Log"));
-   }
-
-   bool ok = wxDebugReportPreviewStd().Show(rpt);
-
-#if defined(__WXMSW__)
-   wxEventLoop::SetCriticalWindow(NULL);
-#endif
-
-   if (ok && rpt.Process())
-   {
-      AudacityTextEntryDialog dlg(NULL,
-                              _("Report generated to:"),
-                              _("Audacity Support Data"),
-                              rpt.GetCompressedFileName(),
-                              wxOK | wxCENTER);
-      dlg.SetName(dlg.GetTitle());
-      dlg.ShowModal();
-
-      wxLogMessage(wxT("Report generated to: %s"),
-                     rpt.GetCompressedFileName());
-
-      rpt.Reset();
-   }
-}
-#endif
 
 int AudacityApp::FilterEvent(wxEvent & event)
 {
@@ -1245,15 +1196,8 @@ bool AudacityApp::OnInit()
    // Ensure we have an event loop during initialization
    wxEventLoopGuarantor eventLoop;
 
-   // wxWidgets will clean up the logger for the main thread, so we can say
-   // safenew.  See:
-   // http://docs.wxwidgets.org/3.0/classwx_log.html#a2525bf54fa3f31dc50e6e3cd8651e71d
-   std::unique_ptr < wxLog >
-      { wxLog::SetActiveTarget(safenew AudacityLogger) }; // DELETE old
-
-   mLocale = NULL;
-
-   m_aliasMissingWarningShouldShow = true;
+   // cause initialization of wxWidgets' global logger target
+   (void) AudacityLogger::Get();
 
 #if defined(__WXMAC__)
    // Disable window animation
@@ -1283,6 +1227,7 @@ bool AudacityApp::OnInit()
    //
    // Paths: set search path and temp dir path
    //
+   FilePaths audacityPathList;
 
 #ifdef __WXGTK__
    /* Search path (for plug-ins, translations etc) is (in this order):
@@ -1293,13 +1238,15 @@ bool AudacityApp::OnInit()
    wxString home = wxGetHomeDir();
 
    wxString envTempDir = wxGetenv(wxT("TMPDIR"));
-   if (envTempDir != wxT("")) {
+   if (!envTempDir.empty()) {
       /* On Unix systems, the environment variable TMPDIR may point to
          an unusual path when /tmp and /var/tmp are not desirable. */
-      defaultTempDir.Printf(wxT("%s/audacity-%s"), envTempDir, wxGetUserId());
+      FileNames::SetDefaultTempDir( wxString::Format(
+         wxT("%s/audacity-%s"), envTempDir, wxGetUserId() ) );
    } else {
       /* On Unix systems, the default temp dir is in /var/tmp. */
-      defaultTempDir.Printf(wxT("/var/tmp/audacity-%s"), wxGetUserId());
+      FileNames::SetDefaultTempDir( wxString::Format(
+         wxT("/var/tmp/audacity-%s"), wxGetUserId() ) );
    }
 
 // DA: Path env variable.
@@ -1308,37 +1255,37 @@ bool AudacityApp::OnInit()
 #else
    wxString pathVar = wxGetenv(wxT("DARKAUDACITY_PATH"));
 #endif
-   if (pathVar != wxT(""))
-      AddMultiPathsToPathList(pathVar, audacityPathList);
-   AddUniquePathToPathList(::wxGetCwd(), audacityPathList);
+   if (!pathVar.empty())
+      FileNames::AddMultiPathsToPathList(pathVar, audacityPathList);
+   FileNames::AddUniquePathToPathList(::wxGetCwd(), audacityPathList);
 
 #ifdef AUDACITY_NAME
-   AddUniquePathToPathList(wxString::Format(wxT("%s/.%s-files"),
+   FileNames::AddUniquePathToPathList(wxString::Format(wxT("%s/.%s-files"),
       home, wxT(AUDACITY_NAME)),
       audacityPathList);
-   AddUniquePathToPathList(wxString::Format(wxT("%s/share/%s"),
+   FileNames::AddUniquePathToPathList(wxString::Format(wxT("%s/share/%s"),
       wxT(INSTALL_PREFIX), wxT(AUDACITY_NAME)),
       audacityPathList);
-   AddUniquePathToPathList(wxString::Format(wxT("%s/share/doc/%s"),
+   FileNames::AddUniquePathToPathList(wxString::Format(wxT("%s/share/doc/%s"),
       wxT(INSTALL_PREFIX), wxT(AUDACITY_NAME)),
       audacityPathList);
 #else //AUDACITY_NAME
-   AddUniquePathToPathList(wxString::Format(wxT("%s/.audacity-files"),
+   FileNames::AddUniquePathToPathList(wxString::Format(wxT("%s/.audacity-files"),
       home),
       audacityPathList);
-   AddUniquePathToPathList(wxString::Format(wxT("%s/share/audacity"),
+   FileNames::AddUniquePathToPathList(wxString::Format(wxT("%s/share/audacity"),
       wxT(INSTALL_PREFIX)),
       audacityPathList);
-   AddUniquePathToPathList(wxString::Format(wxT("%s/share/doc/audacity"),
+   FileNames::AddUniquePathToPathList(wxString::Format(wxT("%s/share/doc/audacity"),
       wxT(INSTALL_PREFIX)),
       audacityPathList);
 #endif //AUDACITY_NAME
 
-   AddUniquePathToPathList(wxString::Format(wxT("%s/share/locale"),
+   FileNames::AddUniquePathToPathList(wxString::Format(wxT("%s/share/locale"),
       wxT(INSTALL_PREFIX)),
       audacityPathList);
 
-   AddUniquePathToPathList(wxString::Format(wxT("./locale")),
+   FileNames::AddUniquePathToPathList(wxString::Format(wxT("./locale")),
       audacityPathList);
 
 #endif //__WXGTK__
@@ -1361,37 +1308,42 @@ bool AudacityApp::OnInit()
 #ifdef __WXMSW__
    // On Windows, the path to the Audacity program is in argv[0]
    wxString progPath = wxPathOnly(argv[0]);
-   AddUniquePathToPathList(progPath, audacityPathList);
-   AddUniquePathToPathList(progPath + wxT("\\Languages"), audacityPathList);
+   FileNames::AddUniquePathToPathList(progPath, audacityPathList);
+   FileNames::AddUniquePathToPathList(progPath + wxT("\\Languages"), audacityPathList);
 
    // See bug #1271 for explanation of location
    tmpDirLoc = FileNames::MkDir(wxStandardPaths::Get().GetUserLocalDataDir());
-   defaultTempDir.Printf(wxT("%s\\SessionData"),
-      tmpDirLoc);
+   FileNames::SetDefaultTempDir( wxString::Format(
+      wxT("%s\\SessionData"), tmpDirLoc ) );
 #endif //__WXWSW__
 
 #ifdef __WXMAC__
    // On Mac OS X, the path to the Audacity program is in argv[0]
    wxString progPath = wxPathOnly(argv[0]);
 
-   AddUniquePathToPathList(progPath, audacityPathList);
+   FileNames::AddUniquePathToPathList(progPath, audacityPathList);
    // If Audacity is a "bundle" package, then the root directory is
    // the great-great-grandparent of the directory containing the executable.
-   //AddUniquePathToPathList(progPath + wxT("/../../../"), audacityPathList);
+   //FileNames::AddUniquePathToPathList(progPath + wxT("/../../../"), audacityPathList);
 
    // These allow for searching the "bundle"
-   AddUniquePathToPathList(progPath + wxT("/../"), audacityPathList);
-   AddUniquePathToPathList(progPath + wxT("/../Resources"), audacityPathList);
+   FileNames::AddUniquePathToPathList(
+      progPath + wxT("/../"), audacityPathList);
+   FileNames::AddUniquePathToPathList(
+      progPath + wxT("/../Resources"), audacityPathList);
 
    // JKC Bug 1220: Using an actual temp directory for session data on Mac was
    // wrong because it would get cleared out on a reboot.
-   defaultTempDir.Printf(wxT("%s/Library/Application Support/audacity/SessionData"),
-      tmpDirLoc);
+   FileNames::SetDefaultTempDir( wxString::Format(
+      wxT("%s/Library/Application Support/audacity/SessionData"), tmpDirLoc) );
 
-   //defaultTempDir.Printf(wxT("%s/audacity-%s"),
+   //FileNames::SetDefaultTempDir( wxString::Format(
+   //   wxT("%s/audacity-%s"),
    //   tmpDirLoc,
-   //   wxGetUserId());
+   //   wxGetUserId() ) );
 #endif //__WXMAC__
+
+   FileNames::SetAudacityPathList( std::move( audacityPathList ) );
 
    // Define languanges for which we have translations, but that are not yet
    // supported by wxWidgets.
@@ -1406,15 +1358,21 @@ bool AudacityApp::OnInit()
 #endif
 
    // Initialize preferences and language
-   InitPreferences();
+   wxFileName configFileName(FileNames::DataDir(), wxT("audacity.cfg"));
+   InitPreferences( configFileName );
+   PopulatePreferences();
+   // This test must follow PopulatePreferences, because if an error message
+   // must be shown, we need internationalization to have been initialized
+   // first, which was done in PopulatePreferences
+   if ( !CheckWritablePreferences() ) {
+      ::AudacityMessageBox(
+         UnwritablePreferencesErrorMessage( configFileName ) );
+      return false;
+   }
 
 #if defined(__WXMSW__) && !defined(__WXUNIVERSAL__) && !defined(__CYGWIN__)
    this->AssociateFileTypes();
 #endif
-
-   // TODO - read the number of files to store in history from preferences
-   mRecentFiles = std::make_unique<FileHistory>(ID_RECENT_LAST - ID_RECENT_FIRST + 1, ID_RECENT_CLEAR);
-   mRecentFiles->Load(*gPrefs, wxT("RecentFiles"));
 
    theTheme.EnsureInitialised();
 
@@ -1454,7 +1412,7 @@ bool AudacityApp::OnInit()
 
    if (parser->Found(wxT("v")))
    {
-      wxFprintf(stderr, wxT("Audacity v%s\n"), AUDACITY_VERSION_STRING);
+      wxPrintf("Audacity v%s\n", AUDACITY_VERSION_STRING);
       exit(0);
    }
 
@@ -1480,7 +1438,7 @@ bool AudacityApp::OnInit()
       }
       else
       {
-         wxPrintf(_("Decoding failed\n"));
+         wxPrintf( AutoSaveFile::FailureMessage( fileName ) );
       }
       exit(1);
    }
@@ -1510,7 +1468,7 @@ bool AudacityApp::OnInit()
          wndRect.GetTopLeft(),
          wxDefaultSize,
          wxSTAY_ON_TOP);
-      
+
       // Unfortunately with the Windows 10 Creators update, the splash screen 
       // now appears before setting its position.
       // On a dual monitor screen it will appear on one screen and then 
@@ -1534,7 +1492,7 @@ bool AudacityApp::OnInit()
       // More initialization
 
       InitDitherers();
-      InitAudioIO();
+      AudioIO::Init();
 
 #ifdef __WXMAC__
 
@@ -1559,8 +1517,9 @@ bool AudacityApp::OnInit()
          wxMenuBar::MacSetCommonMenuBar(menuBar.release());
       }
 
-      mRecentFiles->UseMenu(recentMenu);
-      mRecentFiles->AddFilesToMenu(recentMenu);
+      auto &recentFiles = FileHistory::Global();
+      recentFiles.UseMenu(recentMenu);
+      recentFiles.AddFilesToMenu(recentMenu);
 
       SetExitOnFrameDelete(false);
 
@@ -1577,32 +1536,26 @@ bool AudacityApp::OnInit()
    // Root cause is problem with wxSplashScreen and other dialogs co-existing, that
    // seemed to arrive with wx3.
    {
-      project = CreateNewAudacityProject();
+      project = ProjectManager::New();
       mCmdHandler->SetProject(project);
       wxWindow * pWnd = MakeHijackPanel();
       if (pWnd)
       {
-         project->Show(false);
-         pWnd->SetParent(project);
+         auto &window = GetProjectFrame( *project );
+         window.Show(false);
+         pWnd->SetParent( &window );
          SetTopWindow(pWnd);
          pWnd->Show(true);
       }
    }
 
-   if( project->mShowSplashScreen ){
+   if( ProjectSettings::Get( *project ).GetShowSplashScreen() ){
       // This may do a check-for-updates at every start up.
       // Mainly this is to tell users of ALPHAS who don't know that they have an ALPHA.
       // Disabled for now, after discussion.
       // project->MayCheckForUpdates();
-      GetMenuCommandHandler(*project).OnHelpWelcome(*project);
+      SplashDialog::DoHelpWelcome(*project);
    }
-
-   // JKC 10-Sep-2007: Enable monitoring from the start.
-   // (recommended by lprod.org).
-   // Monitoring stops again after any
-   // PLAY or RECORD completes.
-   // So we also call StartMonitoring when STOP is called.
-   project->MayStartMonitoring();
 
    #ifdef USE_FFMPEG
    FFmpegStartup();
@@ -1635,7 +1588,7 @@ bool AudacityApp::OnInit()
          }
 
          // As of wx3, there's no need to process the filename arguments as they
-         // will be sent view the MacOpenFile() method.
+         // will be sent via the MacOpenFile() method.
 #if !defined(__WXMAC__)
          for (size_t i = 0, cnt = parser->GetParamCount(); i < cnt; i++)
          {
@@ -1651,10 +1604,25 @@ bool AudacityApp::OnInit()
 
    ModuleManager::Get().Dispatch(AppInitialized);
 
-   mWindowRectAlreadySaved = FALSE;
-
    mTimer.SetOwner(this, kAudacityAppTimerID);
    mTimer.Start(200);
+
+#ifdef EXPERIMENTAL_EASY_CHANGE_KEY_BINDINGS
+   CommandManager::SetMenuHook( [](const CommandID &id){
+      if (::wxGetMouseState().ShiftDown()) {
+         // Only want one page of the preferences
+         PrefsDialog::Factories factories;
+         factories.push_back(KeyConfigPrefsFactory( id ));
+         auto pWindow = FindProjectFrame( GetActiveProject() );
+         GlobalPrefsDialog dialog( pWindow, factories );
+         dialog.ShowModal();
+         MenuCreator::RebuildAllMenuBars();
+         return true;
+      }
+      else
+         return false;
+   } );
+#endif
 
    return TRUE;
 }
@@ -1677,17 +1645,18 @@ void AudacityApp::OnKeyDown(wxKeyEvent &event)
    if(event.GetKeyCode() == WXK_ESCAPE) {
       // Stop play, including scrub, but not record
       auto project = ::GetActiveProject();
-      auto token = project->GetAudioIOToken();
-      auto &scrubber = project->GetScrubber();
+      auto token = ProjectAudioIO::Get( *project ).GetAudioIOToken();
+      auto &scrubber = Scrubber::Get( *project );
       auto scrubbing = scrubber.HasMark();
       if (scrubbing)
          scrubber.Cancel();
+      auto gAudioIO = AudioIO::Get();
       if((token > 0 &&
                gAudioIO->IsAudioTokenActive(token) &&
                gAudioIO->GetNumCaptureChannels() == 0) ||
          scrubbing)
          // ESC out of other play (but not record)
-         GetMenuCommandHandler(*project).OnStop(*project);
+         ProjectAudioManager::Get( *project ).Stop();
       else
          event.Skip();
    }
@@ -1695,41 +1664,11 @@ void AudacityApp::OnKeyDown(wxKeyEvent &event)
       event.Skip();
 }
 
-// We now disallow temp directory name that puts it where cleaner apps will
-// try to clean out the files.  
-bool AudacityApp::IsTempDirectoryNameOK( const wxString & Name ){
-   if( Name.IsEmpty() )
-      return false;
-
-   wxFileName tmpFile;
-   tmpFile.AssignTempFileName(wxT("nn"));
-   // use Long Path to expand out any abbreviated long substrings.
-   wxString BadPath = tmpFile.GetLongPath();
-   ::wxRemoveFile(tmpFile.GetFullPath());
-
-#ifdef __WXMAC__
-   // This test is to fix bug 1220 on a 1.x to 2.x to 2.1.3 upgrade.
-   // It is less permissive than we could be as it stops a path
-   // with this string ANYWHERE within it rather than excluding just
-   // the paths that the earlier Audacities used to create.
-   if( Name.Contains( "/tmp/") )
-      return false;
-   BadPath = BadPath.BeforeLast( '/' ) + "/";
-   wxFileName cmpFile( Name );
-   wxString NameCanonical = cmpFile.GetLongPath( ) + "/";
-#else
-   BadPath = BadPath.BeforeLast( '\\' ) + "\\";
-   wxFileName cmpFile( Name );
-   wxString NameCanonical = cmpFile.GetLongPath( ) + "\\";
-#endif
-   return !(NameCanonical.StartsWith( BadPath ));
-}
-
 // Ensures directory is created and puts the name into result.
 // result is unchanged if unsuccessful.
 void SetToExtantDirectory( wxString & result, const wxString & dir ){
    // don't allow path of "".
-   if( dir.IsEmpty() )
+   if( dir.empty() )
       return;
    if( wxDirExists( dir ) ){
       result = dir;
@@ -1746,12 +1685,12 @@ bool AudacityApp::InitTempDir()
    // We need to find a temp directory location.
 
    wxString tempFromPrefs = gPrefs->Read(wxT("/Directories/TempDir"), wxT(""));
-   wxString tempDefaultLoc = wxGetApp().defaultTempDir;
+   auto tempDefaultLoc = FileNames::DefaultTempDir();
 
-   wxString temp = wxT("");
+   wxString temp;
 
    #ifdef __WXGTK__
-   if (tempFromPrefs.Length() > 0 && tempFromPrefs[0] != wxT('/'))
+   if (tempFromPrefs.length() > 0 && tempFromPrefs[0] != wxT('/'))
       tempFromPrefs = wxT("");
    #endif
 
@@ -1760,12 +1699,12 @@ bool AudacityApp::InitTempDir()
    wxLogNull logNo;
 
    // Try temp dir that was stored in prefs first
-   if( IsTempDirectoryNameOK( tempFromPrefs ) )
+   if( FileNames::IsTempDirectoryNameOK( tempFromPrefs ) )
       SetToExtantDirectory( temp, tempFromPrefs );
 
    // If that didn't work, try the default location
 
-   if (temp==wxT(""))
+   if (temp.empty())
       SetToExtantDirectory( temp, tempDefaultLoc );
 
    // Check temp directory ownership on *nix systems only
@@ -1781,18 +1720,17 @@ bool AudacityApp::InitTempDir()
    }
    #endif
 
-   if (temp == wxT("")) {
+   if (temp.empty()) {
       // Failed
-      if( !IsTempDirectoryNameOK( tempFromPrefs ) ) {
+      if( !FileNames::IsTempDirectoryNameOK( tempFromPrefs ) ) {
          AudacityMessageBox(_("Audacity could not find a safe place to store temporary files.\nAudacity needs a place where automatic cleanup programs won't delete the temporary files.\nPlease enter an appropriate directory in the preferences dialog."));
       } else {
          AudacityMessageBox(_("Audacity could not find a place to store temporary files.\nPlease enter an appropriate directory in the preferences dialog."));
       }
 
       // Only want one page of the preferences
-      DirectoriesPrefsFactory directoriesPrefsFactory;
       PrefsDialog::Factories factories;
-      factories.push_back(&directoriesPrefsFactory);
+      factories.push_back(DirectoriesPrefsFactory());
       GlobalPrefsDialog dialog(NULL, factories);
       dialog.ShowModal();
 
@@ -1850,12 +1788,28 @@ bool AudacityApp::CreateSingleInstanceChecker(const wxString &dir)
    }
    else if ( checker->IsAnotherRunning() ) {
       // Parse the command line to ensure correct syntax, but
-      // ignore options and only use the filenames, if any.
+      // ignore options other than -v, and only use the filenames, if any.
       auto parser = ParseCommandLine();
       if (!parser)
       {
          // Complaints have already been made
          return false;
+      }
+
+      if (parser->Found(wxT("v")))
+      {
+         wxPrintf("Audacity v%s\n", AUDACITY_VERSION_STRING);
+         return false;
+      }
+
+      // Windows and Linux require absolute file names as command may
+      // not come from current working directory.
+      FilePaths filenames;
+      for (size_t i = 0, cnt = parser->GetParamCount(); i < cnt; i++)
+      {
+         wxFileName filename(parser->GetParam(i));
+         if (filename.MakeAbsolute())
+            filenames.push_back(filename.GetLongPath());
       }
 
 #if defined(__WXMSW__)
@@ -1873,14 +1827,13 @@ bool AudacityApp::CreateSingleInstanceChecker(const wxString &dir)
          if (conn)
          {
             bool ok = false;
-            if (parser->GetParamCount() > 0)
+            if (filenames.size() > 0)
             {
-               // Send each parameter to existing Audacity
-               for (size_t j = 0, cnt = parser->GetParamCount(); j < cnt; j++)
+               for (size_t i = 0, cnt = filenames.size(); i < cnt; i++)
                {
-                  ok = conn->Execute(parser->GetParam(j));
+                  ok = conn->Execute(filenames[i]);
                }
-             }
+            }
             else
             {
                // Send an empty string to force existing Audacity to front
@@ -1915,13 +1868,12 @@ bool AudacityApp::CreateSingleInstanceChecker(const wxString &dir)
             sock->Connect(addr, true);
             if (sock->IsConnected())
             {
-               if (parser->GetParamCount() > 0)
+               if (filenames.size() > 0)
                {
-                  for (size_t i = 0, cnt = parser->GetParamCount(); i < cnt; i++)
+                  for (size_t i = 0, cnt = filenames.size(); i < cnt; i++)
                   {
-                     // Send the filename
-                     wxString param = parser->GetParam(i);
-                     sock->WriteMsg((const wxChar *) param, (param.Len() + 1) * sizeof(wxChar));
+                     const wxString param = filenames[i];
+                     sock->WriteMsg((const wxChar *) param, (param.length() + 1) * sizeof(wxChar));
                   }
                }
                else
@@ -2009,7 +1961,7 @@ void AudacityApp::OnSocketEvent(wxSocketEvent & evt)
    {
       // Add the filename to the queue.  It will be opened by
       // the OnTimer() event when it is safe to do so.
-      ofqueue.Add(name);
+      ofqueue.push_back(name);
    }
 }
 
@@ -2055,54 +2007,6 @@ std::unique_ptr<wxCmdLineParser> AudacityApp::ParseCommandLine()
    return{};
 }
 
-// static
-void AudacityApp::AddUniquePathToPathList(const wxString &pathArg,
-                                          wxArrayString &pathList)
-{
-   wxFileName pathNorm = pathArg;
-   pathNorm.Normalize();
-   const wxString newpath{ pathNorm.GetFullPath() };
-
-   for(unsigned int i=0; i<pathList.GetCount(); i++) {
-      if (wxFileName(newpath) == wxFileName(pathList[i]))
-         return;
-   }
-
-   pathList.Add(newpath);
-}
-
-// static
-void AudacityApp::AddMultiPathsToPathList(const wxString &multiPathStringArg,
-                                          wxArrayString &pathList)
-{
-   wxString multiPathString(multiPathStringArg);
-   while (multiPathString != wxT("")) {
-      wxString onePath = multiPathString.BeforeFirst(wxPATH_SEP[0]);
-      multiPathString = multiPathString.AfterFirst(wxPATH_SEP[0]);
-      AddUniquePathToPathList(onePath, pathList);
-   }
-}
-
-// static
-void AudacityApp::FindFilesInPathList(const wxString & pattern,
-                                      const wxArrayString & pathList,
-                                      wxArrayString & results,
-                                      int flags)
-{
-   wxLogNull nolog;
-
-   if (pattern == wxT("")) {
-      return;
-   }
-
-   wxFileName ff;
-
-   for(size_t i = 0; i < pathList.GetCount(); i++) {
-      ff = pathList[i] + wxFILE_SEP_PATH + pattern;
-      wxDir::GetAllFiles(ff.GetPath(), &results, ff.GetFullName(), flags);
-   }
-}
-
 void AudacityApp::OnQueryEndSession(wxCloseEvent & event)
 {
    bool mustVeto = false;
@@ -2123,25 +2027,17 @@ void AudacityApp::OnEndSession(wxCloseEvent & event)
 
    // Try to close each open window.  If the user hits Cancel
    // in a Save Changes dialog, don't continue.
-   if (!gAudacityProjects.empty()) {
-      while (gAudacityProjects.size()) {
-         // Closing the project has side-effect of
-         // deletion from gAudacityProjects
-         if (force) {
-            gAudacityProjects[0]->Close(true);
-         }
-         else if (!gAudacityProjects[0]->Close()) {
-            gIsQuitting = false;
-            event.Veto();
-            break;
-         }
-      }
+   gIsQuitting = true;
+   if (AllProjects{}.size())
+      // PRL:  Always did at least once before close might be vetoed
+      // though I don't know why that is important
+      ProjectManager::SaveWindowSize();
+   bool closedAll = AllProjects::Close( force );
+   if ( !closedAll )
+   {
+      gIsQuitting = false;
+      event.Veto();
    }
-}
-
-void AudacityApp::AddFileToHistory(const wxString & name)
-{
-   mRecentFiles->AddFileToHistory(name);
 }
 
 int AudacityApp::OnExit()
@@ -2166,7 +2062,7 @@ int AudacityApp::OnExit()
       }
    }
 
-   mRecentFiles->Save(*gPrefs, wxT("RecentFiles"));
+   FileHistory::Global().Save(*gPrefs, wxT("RecentFiles"));
 
    FinishPreferences();
 
@@ -2176,7 +2072,7 @@ int AudacityApp::OnExit()
 
    DeinitFFT();
 
-   DeinitAudioIO();
+   AudioIO::Deinit();
 
    // Terminate the PluginManager (must be done before deleting the locale)
    PluginManager::Get().Terminate();
@@ -2231,8 +2127,8 @@ void AudacityApp::OnMenuNew(wxCommandEvent & event)
    // this happens, and enable the same code to be present on
    // all platforms.
 
-   if(gAudacityProjects.size() == 0)
-      CreateNewAudacityProject();
+   if(AllProjects{}.empty())
+      (void) ProjectManager::New();
    else
       event.Skip();
 }
@@ -2247,8 +2143,8 @@ void AudacityApp::OnMenuOpen(wxCommandEvent & event)
    // all platforms.
 
 
-   if(gAudacityProjects.size() == 0)
-      AudacityProject::OpenFiles(NULL);
+   if(AllProjects{}.empty())
+      ProjectManager::OpenFiles(NULL);
    else
       event.Skip();
 
@@ -2263,7 +2159,7 @@ void AudacityApp::OnMenuPreferences(wxCommandEvent & event)
    // this happens, and enable the same code to be present on
    // all platforms.
 
-   if(gAudacityProjects.size() == 0) {
+   if(AllProjects{}.empty()) {
       GlobalPrefsDialog dialog(NULL /* parent */ );
       dialog.ShowModal();
    }
@@ -2281,12 +2177,12 @@ void AudacityApp::OnMenuExit(wxCommandEvent & event)
    // all platforms.
 
    // LL:  Removed "if" to allow closing based on final project count.
-   // if(gAudacityProjects.size() == 0)
+   // if(AllProjects{}.empty())
       QuitAudacity();
 
    // LL:  Veto quit if projects are still open.  This can happen
    //      if the user selected Cancel in a Save dialog.
-   event.Skip(gAudacityProjects.size() == 0);
+   event.Skip(AllProjects{}.empty());
 
 }
 
@@ -2339,7 +2235,7 @@ void AudacityApp::AssociateFileTypes()
                   root_key.Empty();
                }
             }
-            if (root_key.IsEmpty()) {
+            if (root_key.empty()) {
                //v Warn that we can't set keys. Ask whether to set pref for no retry?
             } else {
                associateFileTypes = wxT("Audacity.Project"); // Finally set value for .AUP key

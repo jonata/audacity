@@ -16,13 +16,14 @@
 #include "../Audacity.h" // for USE_SBSMS
 
 #if USE_SBSMS
-
 #include "TimeScale.h"
 
 #include <math.h>
 
 #include <wx/intl.h>
+#include <wx/slider.h>
 
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "../widgets/valnum.h"
 
@@ -82,9 +83,9 @@ EffectTimeScale::~EffectTimeScale()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectTimeScale::GetSymbol()
+ComponentInterfaceSymbol EffectTimeScale::GetSymbol()
 {
    return TIMESCALE_PLUGIN_SYMBOL;
 }

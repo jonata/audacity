@@ -19,34 +19,33 @@ small calculations of rectangles.
 
 #include "../Audacity.h"
 #include "ScreenshotCommand.h"
-#include "CommandTargets.h"
+
+#include <mutex>
+
 #include "../Project.h"
 #include <wx/toplevel.h>
 #include <wx/dcscreen.h>
 #include <wx/dcmemory.h>
+#include <wx/menu.h>
 #include <wx/settings.h>
 #include <wx/bitmap.h>
 #include <wx/valgen.h>
 
-#include "../Track.h"
+#include "../AdornedRulerPanel.h"
+#include "../BatchCommands.h"
 #include "../TrackPanel.h"
+#include "../effects/Effect.h"
 #include "../toolbars/ToolManager.h"
-#include "../toolbars/ToolBar.h"
-#include "../toolbars/ControlToolBar.h"
-#include "../toolbars/DeviceToolBar.h"
-#include "../toolbars/EditToolBar.h"
-#include "../toolbars/MeterToolBar.h"
-#include "../toolbars/MixerToolBar.h"
-#include "../toolbars/SelectionBar.h"
-#include "../toolbars/ToolsToolBar.h"
-#include "../toolbars/TranscriptionToolBar.h"
-#include "../widgets/Ruler.h"
 #include "../Prefs.h"
+#include "../ProjectWindow.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
+#include "../Track.h"
 #include "CommandContext.h"
+#include "CommandManager.h"
 
 
-static const IdentInterfaceSymbol
+static const EnumValueSymbol
 kCaptureWhatStrings[ ScreenshotCommand::nCaptureWhats ] =
 {
    { XO("Window") },
@@ -84,7 +83,7 @@ kCaptureWhatStrings[ ScreenshotCommand::nCaptureWhats ] =
 };
 
 
-static const IdentInterfaceSymbol
+static const EnumValueSymbol
 kBackgroundStrings[ ScreenshotCommand::nBackgrounds ] =
 {
    // These are acceptable dual purpose internal/visible names
@@ -94,25 +93,37 @@ kBackgroundStrings[ ScreenshotCommand::nBackgrounds ] =
 };
 
 
-bool ScreenshotCommand::DefineParams( ShuttleParams & S ){ 
+ScreenshotCommand::ScreenshotCommand()
+{
+   mbBringToTop=true;
+   mIgnore=NULL;
+   
+   static std::once_flag flag;
+   std::call_once( flag, []{
+      AudacityCommand::SetVetoDialogHook( MayCapture );
+      Effect::SetVetoDialogHook( MayCapture );
+   });
+}
+
+bool ScreenshotCommand::DefineParams( ShuttleParams & S ){
    S.Define(                               mPath,        wxT("Path"),         wxT(""));
    S.DefineEnum(                           mWhat,        wxT("CaptureWhat"),  kwindow,kCaptureWhatStrings, nCaptureWhats );
-   S.OptionalN(bHasBackground).DefineEnum( mBack,        wxT("Background"),   kNone, kBackgroundStrings, nBackgrounds );
-   S.OptionalN(bHasBringToTop).Define(     mbBringToTop, wxT("ToTop"), true );
+   S.DefineEnum(                           mBack,        wxT("Background"),   kNone, kBackgroundStrings, nBackgrounds );
+   S.Define(                               mbBringToTop, wxT("ToTop"), true );
    return true;
 };
 
 void ScreenshotCommand::PopulateOrExchange(ShuttleGui & S)
 {
-   auto whats = LocalizedStrings(kCaptureWhatStrings, nCaptureWhats);
-   auto backs = LocalizedStrings(kBackgroundStrings, nBackgrounds);
    S.AddSpace(0, 5);
 
    S.StartMultiColumn(2, wxALIGN_CENTER);
    {
       S.TieTextBox(  _("Path:"), mPath);
-      S.TieChoice(   _("Capture What:"), mWhat, &whats);
-      S.TieChoice(   _("Background:"), mBack, &backs);
+      S.TieChoice(   _("Capture What:"),
+         mWhat, LocalizedStrings(kCaptureWhatStrings, nCaptureWhats));
+      S.TieChoice(   _("Background:"),
+         mBack, LocalizedStrings(kBackgroundStrings, nBackgrounds));
       S.TieCheckBox( _("Bring To Top:"), mbBringToTop);
    }
    S.EndMultiColumn();
@@ -128,6 +139,7 @@ ScreenshotCommand * ScreenshotCommand::mpShooter=NULL;
 // fully created.  Usually the dialog will have been created by invoking
 // an effects gui.
 void IdleHandler(wxIdleEvent& event){
+   event.Skip();
    wxWindow * pWin = dynamic_cast<wxWindow*>(event.GetEventObject());
    wxASSERT( pWin );
    pWin->Unbind(wxEVT_IDLE, IdleHandler);
@@ -141,7 +153,7 @@ void IdleHandler(wxIdleEvent& event){
 wxTopLevelWindow *ScreenshotCommand::GetFrontWindow(AudacityProject *project)
 {
    wxWindow *front = NULL;
-   wxWindow *proj = wxGetTopLevelParent(project);
+   wxWindow *proj = wxGetTopLevelParent( ProjectWindow::Find( project ) );
 
 
    // JKC: The code below is no longer such a good idea.
@@ -347,7 +359,7 @@ void ExploreMenu(
       return;
 
    wxMenuItemList list = pMenu->GetMenuItems();
-   size_t lcnt = list.GetCount();
+   size_t lcnt = list.size();
    wxMenuItem * item;
    wxString Label;
    wxString Accel;
@@ -424,7 +436,7 @@ void ScreenshotCommand::CapturePreferences(
    AudacityProject * pProject, const wxString &FileName ){
    (void)&FileName;//compiler food.
    (void)&context;
-   CommandManager * pMan = pProject->GetCommandManager();
+   CommandManager &commandManager = CommandManager::Get( *pProject );
 
    // Yucky static variables.  Is there a better way?  The problem is that we need the
    // idle callback to know more about what to do.
@@ -441,11 +453,13 @@ void ScreenshotCommand::CapturePreferences(
       SetIdleHandler( IdleHandler );
       gPrefs->Write(wxT("/Prefs/PrefsCategory"), (long)i);
       gPrefs->Flush();
-      wxString Command = "Preferences";
+      CommandID Command{ wxT("Preferences") };
       const CommandContext projectContext( *pProject );
-      if( !pMan->HandleTextualCommand( Command, projectContext, AlwaysEnabledFlag, AlwaysEnabledFlag ) )
+      if( !MacroCommands::HandleTextualCommand( commandManager,
+         Command, projectContext, AlwaysEnabledFlag, true ) )
       {
-         wxLogDebug("Command %s not found", Command );
+         // using GET in a log message for devs' eyes only
+         wxLogDebug("Command %s not found", Command.GET() );
       }
       // This sleep is not needed, but gives user a chance to see the
       // dialogs as they whizz by.
@@ -464,7 +478,7 @@ void ScreenshotCommand::CaptureEffects(
 #define CAPTURE_NYQUIST_TOO
    // Commented out the effects that don't have dialogs.
    // Also any problematic ones, 
-   const wxString EffectNames[] = {
+   CaptureCommands( context, {
 #ifdef TRICKY_CAPTURE
       //"Contrast...", // renamed
       "ContrastAnalyser",
@@ -541,9 +555,7 @@ void ScreenshotCommand::CaptureEffects(
       "Silence Finder...",
       "Sound Finder...",
 #endif
-   };
-   wxArrayString Commands( sizeof(EffectNames)/sizeof(EffectNames[0]), EffectNames );
-   CaptureCommands( context, Commands );
+   } );
 }
 
 void ScreenshotCommand::CaptureScriptables( 
@@ -554,7 +566,7 @@ void ScreenshotCommand::CaptureScriptables(
    (void)&FileName;//compiler food.
    (void)&context;
 
-   const wxString ScriptablesNames[] = {
+   CaptureCommands( context, {
       "SelectTime",
       "SelectFrequencies",
       "SelectTracks",
@@ -580,18 +592,15 @@ void ScreenshotCommand::CaptureScriptables(
       "Drag",
       "CompareAudio",
       "Screenshot",
-   };
-   
-   wxArrayString Commands( sizeof(ScriptablesNames)/sizeof(ScriptablesNames[0]), ScriptablesNames );
-   CaptureCommands( context, Commands );
+   } );
 
 }
 
 
 void ScreenshotCommand::CaptureCommands( 
-   const CommandContext & context, wxArrayString & Commands ){
-   AudacityProject * pProject = context.GetProject();
-   CommandManager * pMan = pProject->GetCommandManager();
+   const CommandContext & context, const wxArrayStringEx & Commands ){
+   AudacityProject * pProject = &context.project;
+   CommandManager &manager = CommandManager::Get( *pProject );
    wxString Str;
    // Yucky static variables.  Is there a better way?  The problem is that we need the
    // idle callback to know more about what to do.
@@ -602,12 +611,12 @@ void ScreenshotCommand::CaptureCommands(
 #endif
    mpShooter = this;
 
-   for( size_t i=0;i<Commands.GetCount();i++){
+   for( size_t i=0;i<Commands.size();i++){
       // The handler is cleared each time it is used.
       SetIdleHandler( IdleHandler );
       Str = Commands[i];
       const CommandContext projectContext( *pProject );
-      if( !pMan->HandleTextualCommand( Str, projectContext, AlwaysEnabledFlag, AlwaysEnabledFlag ) )
+      if( !manager.HandleTextualCommand( Str, projectContext, AlwaysEnabledFlag, true ) )
       {
          wxLogDebug("Command %s not found", Str);
       }
@@ -711,7 +720,7 @@ wxRect ScreenshotCommand::GetScreenRect(){
 wxRect ScreenshotCommand::GetPanelRect(TrackPanel * panel){
    //AdornedRulerPanel *ruler = panel->mRuler;
 
-   int h = panel->mRuler->GetRulerHeight();
+   int h = panel->GetRuler()->GetRulerHeight();
    int x = 0, y = -h;
    int width, height;
 
@@ -749,7 +758,7 @@ wxRect ScreenshotCommand::GetTrackRect( AudacityProject * pProj, TrackPanel * pa
       // This rectangle omits the focus ring about the track, and
       // also within that, a narrow black border with a "shadow" below and
       // to the right
-      wxRect rect = panel.FindTrackRect( &t, false );
+      wxRect rect = panel.FindTrackRect( &t );
 
       // Enlarge horizontally.
       // PRL:  perhaps it's one pixel too much each side, including some gray
@@ -761,8 +770,8 @@ wxRect ScreenshotCommand::GetTrackRect( AudacityProject * pProj, TrackPanel * pa
       // Omit the outermost ring of gray pixels
 
       // (Note that TrackPanel paints its focus over the "top margin" of the
-      // rectangle allotted to the track, according to Track::GetY() and
-      // Track::GetHeight(), but also over the margin of the next track.)
+      // rectangle allotted to the track, according to TrackView::GetY() and
+      // TrackView::GetHeight(), but also over the margin of the next track.)
 
       rect.height += kBottomMargin;
       int dy = kTopMargin - 1;
@@ -778,7 +787,7 @@ wxRect ScreenshotCommand::GetTrackRect( AudacityProject * pProj, TrackPanel * pa
    };
 
    int count = 0;
-   for (auto t : pProj->GetTracks()->Leaders()) {
+   for (auto t : TrackList::Get( *pProj ).Leaders()) {
       count +=  1;
       if( count > n )
       {
@@ -790,7 +799,7 @@ wxRect ScreenshotCommand::GetTrackRect( AudacityProject * pProj, TrackPanel * pa
 }
 
 wxString ScreenshotCommand::WindowFileName(AudacityProject * proj, wxTopLevelWindow *w){
-   if (w != proj && w->GetTitle() != wxT("")) {
+   if (w != ProjectWindow::Find( proj ) && !w->GetTitle().empty()) {
       mFileName = MakeFileName(mFilePath,
          kCaptureWhatStrings[ mCaptureMode ].Translation() +
             (wxT("-") + w->GetTitle() + wxT("-")));
@@ -803,16 +812,16 @@ bool ScreenshotCommand::Apply(const CommandContext & context)
    GetDerivedParams();
    //Don't reset the toolbars to a known state.
    //We will be capturing variations of them.
-   //context.GetProject()->GetToolManager()->Reset();
+   //ToolManager::Get( context.project ).Reset();
 
-   wxTopLevelWindow *w = GetFrontWindow(context.GetProject());
+   wxTopLevelWindow *w = GetFrontWindow(&context.project);
    if (!w)
       return false;
 
-   TrackPanel *panel = context.GetProject()->GetTrackPanel();
-   AdornedRulerPanel *ruler = panel->mRuler;
+   TrackPanel *panel = &TrackPanel::Get( context.project );
+   AdornedRulerPanel *ruler = panel->GetRuler();
 
-   int nTracks = context.GetProject()->GetTracks()->size();
+   int nTracks = TrackList::Get( context.project ).size();
 
    int x1,y1,x2,y2;
    w->ClientToScreen(&x1, &y1);
@@ -820,49 +829,51 @@ bool ScreenshotCommand::Apply(const CommandContext & context)
 
    wxPoint p( x2-x1, y2-y1);
 
+   auto &toolManager = ToolManager::Get( context.project );
+
    switch (mCaptureMode) {
    case kwindow:
-      return Capture(context,  WindowFileName( context.GetProject(), w ) , w, GetWindowRect(w));
+      return Capture(context,  WindowFileName( &context.project, w ) , w, GetWindowRect(w));
    case kfullwindow:
    case kwindowplus:
-      return Capture(context,  WindowFileName( context.GetProject(), w ) , w, GetFullWindowRect(w));
+      return Capture(context,  WindowFileName( &context.project, w ) , w, GetFullWindowRect(w));
    case kfullscreen:
       return Capture(context, mFileName, w,GetScreenRect());
    case ktoolbars:
-      return CaptureDock(context, context.GetProject()->GetToolManager()->GetTopDock(), mFileName);
+      return CaptureDock(context, toolManager.GetTopDock(), mFileName);
    case kscriptables:
-      CaptureScriptables(context, context.GetProject(), mFileName);
+      CaptureScriptables(context, &context.project, mFileName);
       break;
    case keffects:
-      CaptureEffects(context, context.GetProject(), mFileName);
+      CaptureEffects(context, &context.project, mFileName);
       break;
    case kpreferences:
-      CapturePreferences(context, context.GetProject(), mFileName);
+      CapturePreferences(context, &context.project, mFileName);
       break;
    case kselectionbar:
-      return CaptureToolbar(context, context.GetProject()->GetToolManager(), SelectionBarID, mFileName);
+      return CaptureToolbar(context, &toolManager, SelectionBarID, mFileName);
    case kspectralselection:
-      return CaptureToolbar(context, context.GetProject()->GetToolManager(), SpectralSelectionBarID, mFileName);
+      return CaptureToolbar(context, &toolManager, SpectralSelectionBarID, mFileName);
    case ktools:
-      return CaptureToolbar(context, context.GetProject()->GetToolManager(), ToolsBarID, mFileName);
+      return CaptureToolbar(context, &toolManager, ToolsBarID, mFileName);
    case ktransport:
-      return CaptureToolbar(context, context.GetProject()->GetToolManager(), TransportBarID, mFileName);
+      return CaptureToolbar(context, &toolManager, TransportBarID, mFileName);
    case kmixer:
-      return CaptureToolbar(context, context.GetProject()->GetToolManager(), MixerBarID, mFileName);
+      return CaptureToolbar(context, &toolManager, MixerBarID, mFileName);
    case kmeter:
-      return CaptureToolbar(context, context.GetProject()->GetToolManager(), MeterBarID, mFileName);
+      return CaptureToolbar(context, &toolManager, MeterBarID, mFileName);
    case krecordmeter:
-      return CaptureToolbar(context, context.GetProject()->GetToolManager(), RecordMeterBarID, mFileName);
+      return CaptureToolbar(context, &toolManager, RecordMeterBarID, mFileName);
    case kplaymeter:
-      return CaptureToolbar(context, context.GetProject()->GetToolManager(), PlayMeterBarID, mFileName);
+      return CaptureToolbar(context, &toolManager, PlayMeterBarID, mFileName);
    case kedit:
-      return CaptureToolbar(context, context.GetProject()->GetToolManager(), EditBarID, mFileName);
+      return CaptureToolbar(context, &toolManager, EditBarID, mFileName);
    case kdevice:
-      return CaptureToolbar(context, context.GetProject()->GetToolManager(), DeviceBarID, mFileName);
+      return CaptureToolbar(context, &toolManager, DeviceBarID, mFileName);
    case ktranscription:
-      return CaptureToolbar(context, context.GetProject()->GetToolManager(), TranscriptionBarID, mFileName);
+      return CaptureToolbar(context, &toolManager, TranscriptionBarID, mFileName);
    case kscrub:
-      return CaptureToolbar(context, context.GetProject()->GetToolManager(), ScrubbingBarID, mFileName);
+      return CaptureToolbar(context, &toolManager, ScrubbingBarID, mFileName);
    case ktrackpanel:
       return Capture(context, mFileName, panel, GetPanelRect(panel));
    case kruler:
@@ -870,9 +881,9 @@ bool ScreenshotCommand::Apply(const CommandContext & context)
    case ktracks:
       return Capture(context, mFileName, panel, GetTracksRect(panel));
    case kfirsttrack:
-      return Capture(context, mFileName, panel, GetTrackRect( context.GetProject(), panel, 0 ) );
+      return Capture(context, mFileName, panel, GetTrackRect( &context.project, panel, 0 ) );
    case ksecondtrack:
-      return Capture(context, mFileName, panel, GetTrackRect( context.GetProject(), panel, 1 ) );
+      return Capture(context, mFileName, panel, GetTrackRect( &context.project, panel, 1 ) );
    case ktracksplus:
    {  wxRect r = GetTracksRect(panel);
       r.SetTop( r.GetTop() - ruler->GetRulerHeight() );
@@ -880,36 +891,36 @@ bool ScreenshotCommand::Apply(const CommandContext & context)
       return Capture(context, mFileName, panel, r);
    }
    case kfirsttrackplus:
-   {  wxRect r = GetTrackRect(context.GetProject(), panel, 0 );
+   {  wxRect r = GetTrackRect(&context.project, panel, 0 );
       r.SetTop( r.GetTop() - ruler->GetRulerHeight() );
       r.SetHeight( r.GetHeight() + ruler->GetRulerHeight() );
       return Capture(context, mFileName, panel, r );
    }
    case kfirsttwotracks:
-   {  wxRect r = GetTrackRect( context.GetProject(), panel, 0 );
-      r = r.Union( GetTrackRect( context.GetProject(), panel, 1 ));
+   {  wxRect r = GetTrackRect( &context.project, panel, 0 );
+      r = r.Union( GetTrackRect( &context.project, panel, 1 ));
       return Capture(context, mFileName, panel, r );
    }
    case kfirstthreetracks:
-   {  wxRect r = GetTrackRect( context.GetProject(), panel, 0 );
-      r = r.Union( GetTrackRect( context.GetProject(), panel, 2 ));
+   {  wxRect r = GetTrackRect( &context.project, panel, 0 );
+      r = r.Union( GetTrackRect( &context.project, panel, 2 ));
       return Capture(context, mFileName, panel, r );
    }
    case kfirstfourtracks:
-   {  wxRect r = GetTrackRect( context.GetProject(), panel, 0 );
-      r = r.Union( GetTrackRect( context.GetProject(), panel, 3 ));
+   {  wxRect r = GetTrackRect( &context.project, panel, 0 );
+      r = r.Union( GetTrackRect( &context.project, panel, 3 ));
       return Capture(context, mFileName, panel, r );
    }
    case kalltracks:
-   {  wxRect r = GetTrackRect( context.GetProject(), panel, 0 );
-      r = r.Union( GetTrackRect( context.GetProject(), panel, nTracks-1 ));
+   {  wxRect r = GetTrackRect( &context.project, panel, 0 );
+      r = r.Union( GetTrackRect( &context.project, panel, nTracks-1 ));
       return Capture(context, mFileName, panel, r );
    }
    case kalltracksplus:
-   {  wxRect r = GetTrackRect( context.GetProject(), panel, 0 );
+   {  wxRect r = GetTrackRect( &context.project, panel, 0 );
       r.SetTop( r.GetTop() - ruler->GetRulerHeight() );
       r.SetHeight( r.GetHeight() + ruler->GetRulerHeight() );
-      r = r.Union( GetTrackRect( context.GetProject(), panel, nTracks-1 ));
+      r = r.Union( GetTrackRect( &context.project, panel, nTracks-1 ));
       return Capture(context, mFileName, panel, r );
    }
    default:

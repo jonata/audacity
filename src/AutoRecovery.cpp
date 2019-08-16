@@ -18,12 +18,11 @@ text or binary format to a file.
 
 *//********************************************************************/
 
-#include "AutoRecovery.h"
 #include "Audacity.h"
-#include "FileNames.h"
+#include "AutoRecovery.h"
+#include "DirManager.h"
 #include "blockfile/SimpleBlockFile.h"
 #include "Sequence.h"
-#include "ShuttleGui.h"
 
 #include <wx/wxprec.h>
 #include <wx/filefn.h>
@@ -31,245 +30,8 @@ text or binary format to a file.
 #include <wx/dialog.h>
 #include <wx/app.h>
 
+#include "WaveClip.h"
 #include "WaveTrack.h"
-#include "widgets/ErrorDialog.h"
-
-enum {
-   ID_RECOVER_ALL = 10000,
-   ID_RECOVER_NONE,
-   ID_QUIT_AUDACITY,
-   ID_FILE_LIST
-};
-
-class AutoRecoveryDialog final : public wxDialogWrapper
-{
-public:
-   AutoRecoveryDialog(wxWindow *parent);
-
-private:
-   void PopulateList();
-   void PopulateOrExchange(ShuttleGui & S);
-
-   void OnQuitAudacity(wxCommandEvent &evt);
-   void OnRecoverNone(wxCommandEvent &evt);
-   void OnRecoverAll(wxCommandEvent &evt);
-
-   wxListCtrl *mFileList;
-
-public:
-   DECLARE_EVENT_TABLE()
-};
-
-AutoRecoveryDialog::AutoRecoveryDialog(wxWindow *parent) :
-   wxDialogWrapper(parent, -1, _("Automatic Crash Recovery"),
-            wxDefaultPosition, wxDefaultSize,
-            wxDEFAULT_DIALOG_STYLE & (~wxCLOSE_BOX)) // no close box
-{
-   SetName(GetTitle());
-   ShuttleGui S(this, eIsCreating);
-   PopulateOrExchange(S);
-}
-
-BEGIN_EVENT_TABLE(AutoRecoveryDialog, wxDialogWrapper)
-   EVT_BUTTON(ID_RECOVER_ALL, AutoRecoveryDialog::OnRecoverAll)
-   EVT_BUTTON(ID_RECOVER_NONE, AutoRecoveryDialog::OnRecoverNone)
-   EVT_BUTTON(ID_QUIT_AUDACITY, AutoRecoveryDialog::OnQuitAudacity)
-END_EVENT_TABLE()
-
-void AutoRecoveryDialog::PopulateOrExchange(ShuttleGui& S)
-{
-   S.SetBorder(5);
-   S.StartVerticalLay();
-   {
-      S.AddVariableText(_("Some projects were not saved properly the last time Audacity was run.\nFortunately, the following projects can be automatically recovered:"), false);
-
-      S.StartStatic(_("Recoverable projects"));
-      {
-         mFileList = S.Id(ID_FILE_LIST).AddListControlReportMode();
-         /*i18n-hint: (noun).  It's the name of the project to recover.*/
-         mFileList->InsertColumn(0, _("Name"));
-         mFileList->SetColumnWidth(0, wxLIST_AUTOSIZE);
-         PopulateList();
-      }
-      S.EndStatic();
-
-      S.AddVariableText(_("After recovery, save the project to save the changes to disk."), false);
-
-      S.StartHorizontalLay();
-      {
-         S.Id(ID_QUIT_AUDACITY).AddButton(_("Quit Audacity"));
-         S.Id(ID_RECOVER_NONE).AddButton(_("Discard Projects"));
-         S.Id(ID_RECOVER_ALL).AddButton(_("Recover Projects"));
-      }
-      S.EndHorizontalLay();
-   }
-   S.EndVerticalLay();
-
-   Layout();
-   Fit();
-   SetMinSize(GetSize());
-
-   // Sometimes it centers on wxGTK and sometimes it doesn't.
-   // Yielding before centering seems to be a good workaround,
-   // but will leave to implement on a rainy day.
-   Center();
-}
-
-void AutoRecoveryDialog::PopulateList()
-{
-   mFileList->DeleteAllItems();
-
-   wxDir dir(FileNames::AutoSaveDir());
-   if (!dir.IsOpened())
-      return;
-
-   wxString filename;
-   int i = 0;
-   for (bool c = dir.GetFirst(&filename, wxT("*.autosave"), wxDIR_FILES);
-        c; c = dir.GetNext(&filename))
-        mFileList->InsertItem(i++, wxFileName{ filename }.GetName());
-
-   mFileList->SetColumnWidth(0, wxLIST_AUTOSIZE);
-}
-
-void AutoRecoveryDialog::OnQuitAudacity(wxCommandEvent & WXUNUSED(event))
-{
-   EndModal(ID_QUIT_AUDACITY);
-}
-
-void AutoRecoveryDialog::OnRecoverNone(wxCommandEvent & WXUNUSED(event))
-{
-   int ret = AudacityMessageBox(
-      _("Are you sure you want to discard all recoverable projects?\n\nChoosing \"Yes\" discards all recoverable projects immediately."),
-      _("Confirm Discard Projects"), wxICON_QUESTION | wxYES_NO | wxNO_DEFAULT, this);
-
-   if (ret == wxYES)
-      EndModal(ID_RECOVER_NONE);
-}
-
-void AutoRecoveryDialog::OnRecoverAll(wxCommandEvent & WXUNUSED(event))
-{
-   EndModal(ID_RECOVER_ALL);
-}
-
-////////////////////////////////////////////////////////////////////////////
-
-static bool HaveFilesToRecover()
-{
-   wxDir dir(FileNames::AutoSaveDir());
-   if (!dir.IsOpened())
-   {
-      AudacityMessageBox(_("Could not enumerate files in auto save directory."),
-                   _("Error"), wxICON_STOP);
-      return false;
-   }
-
-   wxString filename;
-   bool c = dir.GetFirst(&filename, wxT("*.autosave"), wxDIR_FILES);
-
-   return c;
-}
-
-static bool RemoveAllAutoSaveFiles()
-{
-   wxArrayString files;
-   wxDir::GetAllFiles(FileNames::AutoSaveDir(), &files,
-                      wxT("*.autosave"), wxDIR_FILES);
-
-   for (unsigned int i = 0; i < files.GetCount(); i++)
-   {
-      if (!wxRemoveFile(files[i]))
-      {
-         // I don't think this error message is actually useful.
-         // -dmazzoni
-         //AudacityMessageBox(wxT("Could not remove auto save file: " + files[i]),
-         //             _("Error"), wxICON_STOP);
-         return false;
-      }
-   }
-
-   return true;
-}
-
-static bool RecoverAllProjects(AudacityProject** pproj)
-{
-   wxDir dir(FileNames::AutoSaveDir());
-   if (!dir.IsOpened())
-   {
-      AudacityMessageBox(_("Could not enumerate files in auto save directory."),
-                   _("Error"), wxICON_STOP);
-      return false;
-   }
-
-   // Open a project window for each auto save file
-   wxString filename;
-
-   wxArrayString files;
-   wxDir::GetAllFiles(FileNames::AutoSaveDir(), &files,
-                      wxT("*.autosave"), wxDIR_FILES);
-
-   for (unsigned int i = 0; i < files.GetCount(); i++)
-   {
-      AudacityProject* proj{};
-      if (*pproj)
-      {
-         // Reuse existing project window
-         proj = *pproj;
-         *pproj = NULL;
-      }
-
-      // Open project. When an auto-save file has been opened successfully,
-      // the opened auto-save file is automatically deleted and a NEW one
-      // is created.
-      AudacityProject::OpenProject( proj, files[i], false );
-   }
-
-   return true;
-}
-
-bool ShowAutoRecoveryDialogIfNeeded(AudacityProject** pproj,
-                                    bool *didRecoverAnything)
-{
-   if (didRecoverAnything)
-      *didRecoverAnything = false;
-   if (HaveFilesToRecover())
-   {
-      // Under wxGTK3, the auto recovery dialog will not get
-      // the focus since the project window hasn't been allowed
-      // to completely initialize.
-      //
-      // Yielding seems to allow the initialization to complete.
-      //
-      // Additionally, it also corrects a sizing issue in the dialog
-      // related to wxWidgets bug:
-      //
-      //    http://trac.wxwidgets.org/ticket/16440
-      //
-      // This must be done before "dlg" is declared.
-      wxEventLoopBase::GetActive()->YieldFor(wxEVT_CATEGORY_UI);
-
-      int ret = AutoRecoveryDialog{nullptr}.ShowModal();
-
-      switch (ret)
-      {
-      case ID_RECOVER_NONE:
-         return RemoveAllAutoSaveFiles();
-
-      case ID_RECOVER_ALL:
-         if (didRecoverAnything)
-            *didRecoverAnything = true;
-         return RecoverAllProjects(pproj);
-
-      default:
-         // This includes ID_QUIT_AUDACITY
-         return false;
-      }
-   } else
-   {
-      // Nothing to recover, move along
-      return true;
-   }
-}
 
 ////////////////////////////////////////////////////////////////////////////
 /// Recording recovery handler
@@ -283,13 +45,14 @@ RecordingRecoveryHandler::RecordingRecoveryHandler(AudacityProject* proj)
 
 int RecordingRecoveryHandler::FindTrack() const
 {
-   WaveTrackArray tracks = mProject->GetTracks()->GetWaveTrackArray(false);
-   int index;
+   auto tracks = TrackList::Get( *mProject ).Any< const WaveTrack >();
+   int index = 0;
    if (mAutoSaveIdent)
    {
-      for (index = 0; index < (int)tracks.size(); index++)
+      auto iter = tracks.begin(), end = tracks.end();
+      for (; iter != end; ++iter, ++index)
       {
-         if (tracks[index]->GetAutoSaveIdent() == mAutoSaveIdent)
+         if ((*iter)->GetAutoSaveIdent() == mAutoSaveIdent)
          {
             break;
          }
@@ -316,7 +79,7 @@ bool RecordingRecoveryHandler::HandleXMLTag(const wxChar *tag,
          return false;
       }
 
-      WaveTrackArray tracks = mProject->GetTracks()->GetWaveTrackArray(false);
+      auto tracks = TrackList::Get( *mProject ).Any< WaveTrack >();
       int index = FindTrack();
       // We need to find the track and sequence where the blockfile belongs
 
@@ -327,20 +90,21 @@ bool RecordingRecoveryHandler::HandleXMLTag(const wxChar *tag,
          return false;
       }
 
-      WaveTrack* track = tracks[index].get();
+      auto iter = tracks.begin();
+      std::advance( iter, index );
+      WaveTrack* track = *iter;
       WaveClip*  clip = track->NewestOrNewClip();
       Sequence* seq = clip->GetSequence();
 
       // Load the blockfile from the XML
-      const auto &dirManager = mProject->GetDirManager();
-      dirManager->SetLoadingFormat(seq->GetSampleFormat());
+      auto &dirManager = DirManager::Get( *mProject );
+      dirManager.SetLoadingFormat(seq->GetSampleFormat());
 
-      BlockArray array;
-      array.resize(1);
-      dirManager->SetLoadingTarget(&array, 0);
-      auto &blockFile = array[0].f;
+      BlockFilePtr blockFile;
+      dirManager.SetLoadingTarget(
+         [&]() -> BlockFilePtr& { return blockFile; } );
 
-      if (!dirManager->HandleXMLTag(tag, attrs) || !blockFile)
+      if (!dirManager.HandleXMLTag(tag, attrs) || !blockFile)
       {
          // This should only happen if there is a bug
          wxASSERT(false);
@@ -400,10 +164,10 @@ bool RecordingRecoveryHandler::HandleXMLTag(const wxChar *tag,
 void RecordingRecoveryHandler::HandleXMLEndTag(const wxChar *tag)
 {
    if (wxStrcmp(tag, wxT("simpleblockfile")) == 0)
-      // Still in inner looop
+      // Still in inner loop
       return;
 
-   WaveTrackArray tracks = mProject->GetTracks()->GetWaveTrackArray(false);
+   auto tracks = TrackList::Get( *mProject ).Any< WaveTrack >();
    int index = FindTrack();
    // We need to find the track and sequence where the blockfile belongs
 
@@ -412,7 +176,9 @@ void RecordingRecoveryHandler::HandleXMLEndTag(const wxChar *tag)
       wxASSERT(false);
    }
    else {
-      WaveTrack* track = tracks[index].get();
+      auto iter = tracks.begin();
+      std::advance( iter, index );
+      WaveTrack* track = *iter;
       WaveClip*  clip = track->NewestOrNewClip();
       Sequence* seq = clip->GetSequence();
 
@@ -463,22 +229,29 @@ XMLTagHandler* RecordingRecoveryHandler::HandleXMLChild(const wxChar *tag)
 
 enum FieldTypes
 {
-   FT_StartTag,      // type, ID, name
-   FT_EndTag,        // type, ID, name
-   FT_String,        // type, ID, name, string length, string
+   FT_StartTag,      // type, ID
+   FT_EndTag,        // type, ID
+   FT_String,        // type, ID, string length, string
    FT_Int,           // type, ID, value
    FT_Bool,          // type, ID, value
    FT_Long,          // type, ID, value
    FT_LongLong,      // type, ID, value
    FT_SizeT,         // type, ID, value
-   FT_Float,         // type, ID, value
-   FT_Double,        // type, ID, value
+   FT_Float,         // type, ID, value, digits
+   FT_Double,        // type, ID, value, digits
    FT_Data,          // type, string length, string
    FT_Raw,           // type, string length, string
    FT_Push,          // type only
    FT_Pop,           // type only
-   FT_Name           // type, name length, name
+   FT_Name           // type, ID, name length, name
 };
+
+wxString AutoSaveFile::FailureMessage( const FilePath &/*filePath*/ )
+{
+   return 
+_("This recovery file was saved by Audacity 2.3.0 or before.\n"
+   "You need to run that version of Audacity to recover the project." );
+}
 
 AutoSaveFile::AutoSaveFile(size_t allocSize)
 {
@@ -511,7 +284,7 @@ void AutoSaveFile::WriteAttr(const wxString & name, const wxString & value)
    mBuffer.PutC(FT_String);
    WriteName(name);
 
-   int len = value.Length() * sizeof(wxChar);
+   int len = value.length() * sizeof(wxChar);
 
    mBuffer.Write(&len, sizeof(len));
    mBuffer.Write(value.wx_str(), len);
@@ -579,7 +352,7 @@ void AutoSaveFile::WriteData(const wxString & value)
 {
    mBuffer.PutC(FT_Data);
 
-   int len = value.Length() * sizeof(wxChar);
+   int len = value.length() * sizeof(wxChar);
 
    mBuffer.Write(&len, sizeof(len));
    mBuffer.Write(value.wx_str(), len);
@@ -589,7 +362,7 @@ void AutoSaveFile::Write(const wxString & value)
 {
    mBuffer.PutC(FT_Raw);
 
-   int len = value.Length() * sizeof(wxChar);
+   int len = value.length() * sizeof(wxChar);
 
    mBuffer.Write(&len, sizeof(len));
    mBuffer.Write(value.wx_str(), len);
@@ -648,8 +421,8 @@ void AutoSaveFile::CheckSpace(wxMemoryOutputStream & os)
 
 void AutoSaveFile::WriteName(const wxString & name)
 {
-   wxASSERT(name.Length() * sizeof(wxChar) <= SHRT_MAX);
-   short len = name.Length() * sizeof(wxChar);
+   wxASSERT(name.length() * sizeof(wxChar) <= SHRT_MAX);
+   short len = name.length() * sizeof(wxChar);
    short id;
 
    if (mNames.count(name))
@@ -677,7 +450,7 @@ bool AutoSaveFile::IsEmpty() const
    return mBuffer.GetLength() == 0;
 }
 
-bool AutoSaveFile::Decode(const wxString & fileName)
+bool AutoSaveFile::Decode(const FilePath & fileName)
 {
    char ident[sizeof(AutoSaveIdent)];
    size_t len = strlen(AutoSaveIdent);
@@ -762,9 +535,16 @@ bool AutoSaveFile::Decode(const wxString & fileName)
       std::vector<IdMap> mIdStack;
 
       mIds.clear();
+   
+      struct Error{};
+      auto Lookup = [&mIds]( short id ) -> const wxString & {
+         auto iter = mIds.find( id );
+         if ( iter == mIds.end() )
+            throw Error{};
+         return iter->second;
+      };
 
-      while ( !in.Eof() )
-      {
+      try { while ( !in.Eof() ) {
          short id;
 
          switch (in.GetC())
@@ -800,7 +580,7 @@ bool AutoSaveFile::Decode(const wxString & fileName)
             {
                in.Read(&id, sizeof(id));
 
-               out.StartTag(mIds[id]);
+               out.StartTag(Lookup(id));
             }
             break;
 
@@ -808,7 +588,7 @@ bool AutoSaveFile::Decode(const wxString & fileName)
             {
                in.Read(&id, sizeof(id));
 
-               out.EndTag(mIds[id]);
+               out.EndTag(Lookup(id));
             }
             break;
 
@@ -821,7 +601,7 @@ bool AutoSaveFile::Decode(const wxString & fileName)
                WxChars val{ len / sizeof(wxChar) };
                in.Read(val.get(), len);
 
-               out.WriteAttr(mIds[id], wxString(val.get(), len / sizeof(wxChar)));
+               out.WriteAttr(Lookup(id), wxString(val.get(), len / sizeof(wxChar)));
             }
             break;
 
@@ -834,7 +614,7 @@ bool AutoSaveFile::Decode(const wxString & fileName)
                in.Read(&val, sizeof(val));
                in.Read(&dig, sizeof(dig));
 
-               out.WriteAttr(mIds[id], val, dig);
+               out.WriteAttr(Lookup(id), val, dig);
             }
             break;
 
@@ -847,7 +627,7 @@ bool AutoSaveFile::Decode(const wxString & fileName)
                in.Read(&val, sizeof(val));
                in.Read(&dig, sizeof(dig));
 
-               out.WriteAttr(mIds[id], val, dig);
+               out.WriteAttr(Lookup(id), val, dig);
             }
             break;
 
@@ -858,7 +638,7 @@ bool AutoSaveFile::Decode(const wxString & fileName)
                in.Read(&id, sizeof(id));
                in.Read(&val, sizeof(val));
 
-               out.WriteAttr(mIds[id], val);
+               out.WriteAttr(Lookup(id), val);
             }
             break;
 
@@ -869,7 +649,7 @@ bool AutoSaveFile::Decode(const wxString & fileName)
                in.Read(&id, sizeof(id));
                in.Read(&val, sizeof(val));
 
-               out.WriteAttr(mIds[id], val);
+               out.WriteAttr(Lookup(id), val);
             }
             break;
 
@@ -880,7 +660,7 @@ bool AutoSaveFile::Decode(const wxString & fileName)
                in.Read(&id, sizeof(id));
                in.Read(&val, sizeof(val));
 
-               out.WriteAttr(mIds[id], val);
+               out.WriteAttr(Lookup(id), val);
             }
             break;
 
@@ -891,7 +671,7 @@ bool AutoSaveFile::Decode(const wxString & fileName)
                in.Read(&id, sizeof(id));
                in.Read(&val, sizeof(val));
 
-               out.WriteAttr(mIds[id], val);
+               out.WriteAttr(Lookup(id), val);
             }
             break;
 
@@ -902,7 +682,7 @@ bool AutoSaveFile::Decode(const wxString & fileName)
                in.Read(&id, sizeof(id));
                in.Read(&val, sizeof(val));
 
-               out.WriteAttr(mIds[id], val);
+               out.WriteAttr(Lookup(id), val);
             }
             break;
 
@@ -934,6 +714,11 @@ bool AutoSaveFile::Decode(const wxString & fileName)
                wxASSERT(true);
             break;
          }
+      } }
+      catch( const Error & )
+      {
+         // return before committing, so we do not overwrite the recovery file!
+         return false;
       }
 
       out.Commit();

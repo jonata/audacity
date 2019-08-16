@@ -12,16 +12,15 @@
 #define _WIDGETS_VALNUM_H_
 
 #include "../MemoryX.h"
+#include <wx/setup.h> // for wxUSE_* macros
 #include <wx/defs.h>
 
 #if wxUSE_VALIDATORS
 
-#include <wx/textctrl.h>
-#include <wx/validate.h>
+#include <wx/textctrl.h> // complete type needed in template function
+#include <wx/validate.h> // to inherit
 
 #include <limits>
-
-#define wxTextEntry wxTextCtrl
 
 // Bit masks used for numeric validator styles.
 enum class NumValidatorStyle : int
@@ -212,7 +211,7 @@ public:
                 return false;
 
             // If window is disabled, simply return
-            if ( !control->IsEnabled() )
+            if ( !this->m_validatorWindow->IsEnabled() )
                 return true;
 
             const wxString s(control->GetValue());

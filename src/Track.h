@@ -11,18 +11,16 @@
 #ifndef __AUDACITY_TRACK__
 #define __AUDACITY_TRACK__
 
-#include "Audacity.h"
+#include "Audacity.h" // for USE_* macros
 
-#include "MemoryX.h"
+#include "Experimental.h"
+
 #include <vector>
 #include <list>
 #include <functional>
-#include <wx/event.h>
-#include <wx/gdicmn.h>
 #include <wx/longlong.h>
-#include <wx/string.h>
 
-#include "Experimental.h"
+#include "ClientData.h"
 #include "SampleFormat.h"
 #include "tracks/ui/CommonTrackPanelCell.h"
 #include "xml/XMLTagHandler.h"
@@ -39,15 +37,11 @@ class PlayableTrack;
 class LabelTrack;
 class TimeTrack;
 class TrackControls;
-class TrackVRulerControls;
-class TrackPanelResizerCell;
+class TrackView;
 class WaveTrack;
 class NoteTrack;
 class AudacityProject;
 class ZoomInfo;
-
-class SelectHandle;
-class TimeShiftHandle;
 
 using TrackArray = std::vector< Track* >;
 using WaveTrackArray = std::vector < std::shared_ptr< WaveTrack > > ;
@@ -86,9 +80,9 @@ enum class TrackKind
    All
 };
 
-// Compile-time function on enum values.
-// It knows all inheritance relations among Track subclasses
-// even where the track types are only forward declared.
+/// Compile-time function on enum values.
+/// It knows all inheritance relations among Track subclasses
+/// even where the track types are only forward declared.
 constexpr bool CompatibleTrackKinds( TrackKind desired, TrackKind actual )
 {
    return
@@ -110,8 +104,8 @@ constexpr bool CompatibleTrackKinds( TrackKind desired, TrackKind actual )
    ;
 }
 
-// This bit of metaprogramming lets track_cast work even when the track
-// subclasses are visible only as incomplete types
+/// \brief Metaprogramming in TrackTyper lets track_cast work even when the track
+/// subclasses are visible only as incomplete types
 namespace TrackTyper {
    template<typename, TrackKind> struct Pair;
    using List = std::tuple<
@@ -160,12 +154,13 @@ template<typename T>
 
 class ViewInfo;
 
-// This is an in-session identifier of track objects across undo states
-// It does not persist between sessions
-// Default constructed value is not equal to the id of any track that has ever
-// been added to a TrackList, or (directly or transitively) copied from such
-// (A pending additional track that is not yet applied is not considered added)
-// TrackIds are assigned uniquely across projects
+/// This is an in-session identifier of track objects across undo states
+///
+/// It does not persist between sessions
+/// Default constructed value is not equal to the id of any track that has ever
+/// been added to a TrackList, or (directly or transitively) copied from such
+/// (A pending additional track that is not yet applied is not considered added)
+/// TrackIds are assigned uniquely across projects
 class TrackId
 {
 public:
@@ -187,8 +182,14 @@ private:
    long mValue;
 };
 
+using AttachedTrackObjects = ClientData::Site<
+   Track, ClientData::Base, ClientData::SkipCopying, std::shared_ptr
+>;
+
 class AUDACITY_DLL_API Track /* not final */
-   : public CommonTrackPanelCell, public XMLTagHandler
+   : public XMLTagHandler
+   , public AttachedTrackObjects
+   , public std::enable_shared_from_this<Track> // see SharedPointer()
 {
    friend class TrackList;
 
@@ -200,127 +201,95 @@ class AUDACITY_DLL_API Track /* not final */
    std::weak_ptr<TrackList> mList;
    TrackNodePointer mNode{};
    int            mIndex;
-   int            mY;
-   int            mHeight;
    wxString       mName;
    wxString       mDefaultName;
 
+ private:
    bool           mSelected;
 
+ protected:
    bool           mLinked;
-   bool           mMinimized;
 
  public:
 
-   enum ChannelType
-   {
-      LeftChannel = 0,
-      RightChannel = 1,
-      MonoChannel = 2
-   };
+   using AttachedObjects = ::AttachedTrackObjects;
+   using ChannelType = XMLValueChecker::ChannelType;
+
+   static const auto LeftChannel = XMLValueChecker::LeftChannel;
+   static const auto RightChannel = XMLValueChecker::RightChannel;
+   static const auto MonoChannel = XMLValueChecker::MonoChannel;
    
    TrackId GetId() const { return mId; }
  private:
    void SetId( TrackId id ) { mId = id; }
  public:
 
-   // Given a bare pointer, find a shared_ptr.  But this is not possible for
-   // a track not owned by any project, so the result can be null.
+   // Given a bare pointer, find a shared_ptr.  Undefined results if the track
+   // is not yet managed by a shared_ptr.  Undefined results if the track is
+   // not really of the subclass.  (That is, trusts the caller and uses static
+   // not dynamic casting.)
    template<typename Subclass = Track>
-   inline static std::shared_ptr<Subclass> Pointer( Track *t )
+   inline std::shared_ptr<Subclass> SharedPointer()
    {
-      if (t) {
-         auto pList = t->mList.lock();
-         if (pList)
-            return std::static_pointer_cast<Subclass>(*t->mNode.first);
-      }
-      return {};
+      // shared_from_this is injected into class scope by base class
+      // std::enable_shared_from_this<Track>
+      return std::static_pointer_cast<Subclass>( shared_from_this() );
    }
 
    template<typename Subclass = const Track>
-   inline static std::shared_ptr<Subclass> Pointer( const Track *t )
+   inline auto SharedPointer() const -> typename
+      std::enable_if<
+         std::is_const<Subclass>::value, std::shared_ptr<Subclass>
+      >::type
    {
-      if (t) {
-         auto pList = t->mList.lock();
-         if (pList) {
-            std::shared_ptr<const Track> p{ *t->mNode.first };
-            // Let you change the type, but not cast away the const
-            return std::static_pointer_cast<Subclass>(p);
-         }
-      }
-      return {};
+      // shared_from_this is injected into class scope by base class
+      // std::enable_shared_from_this<Track>
+      return std::static_pointer_cast<Subclass>( shared_from_this() );
    }
+
+   // Static overloads of SharedPointer for when the pointer may be null
+   template<typename Subclass = Track>
+   static inline std::shared_ptr<Subclass> SharedPointer( Track *pTrack )
+   { return pTrack ? pTrack->SharedPointer<Subclass>() : nullptr; }
+
+   template<typename Subclass = const Track>
+   static inline std::shared_ptr<Subclass> SharedPointer( const Track *pTrack )
+   { return pTrack ? pTrack->SharedPointer<Subclass>() : nullptr; }
 
    // Find anything registered with TrackList::RegisterPendingChangedTrack and
    // not yet cleared or applied; if no such exists, return this track
+   std::shared_ptr<Track> SubstitutePendingChangedTrack();
    std::shared_ptr<const Track> SubstitutePendingChangedTrack() const;
 
-   // Cause certain overriding tool modes (Zoom; future ones?) to behave
-   // uniformly in all tracks, disregarding track contents.
-   // Do not further override this...
-   std::vector<UIHandlePtr> HitTest
-      (const TrackPanelMouseState &, const AudacityProject *pProject)
-      final override;
-
-   // Delegates the handling to the related TCP cell
-   std::shared_ptr<TrackPanelCell> ContextMenuDelegate() override
-      { return GetTrackControl(); }
+   // If this track is a pending changed track, return the corresponding
+   // original; else return this track
+   std::shared_ptr<const Track> SubstituteOriginalTrack() const;
 
  public:
-
-   // Rather override this for subclasses:
-   virtual std::vector<UIHandlePtr> DetailedHitTest
-      (const TrackPanelMouseState &,
-       const AudacityProject *pProject, int currentTool, bool bMultiTool)
-      = 0;
-
    mutable wxSize vrulerSize;
 
-   // Return another, associated TrackPanelCell object that implements the
-   // drop-down, close and minimize buttons, etc.
-   std::shared_ptr<TrackPanelCell> GetTrackControl();
+   // These are exposed only for the purposes of the TrackView class, to
+   // initialize the pointer on demand
+   const std::shared_ptr<CommonTrackCell> &GetTrackView();
+   void SetTrackView( const std::shared_ptr<CommonTrackCell> &pView );
+
+   // These are exposed only for the purposes of the TrackControls class, to
+   // initialize the pointer on demand
+   const std::shared_ptr<CommonTrackCell> &GetTrackControls();
+   void SetTrackControls( const std::shared_ptr<CommonTrackCell> &pControls );
 
    // Return another, associated TrackPanelCell object that implements the
-   // mouse actions for the vertical ruler
-   std::shared_ptr<TrackPanelCell> GetVRulerControl();
-
-   // Return another, associated TrackPanelCell object that implements the
-   // click and drag to resize
-   std::shared_ptr<TrackPanelCell> GetResizer();
-
-   // This just returns a constant and can be overriden by subclasses
-   // to specify a different height for the case that the track is minimized.
-   virtual int GetMinimizedHeight() const;
-   int GetActualHeight() const { return mHeight; }
 
    int GetIndex() const;
    void SetIndex(int index);
-
-   int GetY() const;
-private:
-   // Always maintain a strictly contiguous layout of tracks.
-   // So client code is not permitted to modify this attribute directly.
-   void SetY(int y);
-   // No need yet to make this virtual
-   void DoSetY(int y);
-public:
-
-   int GetHeight() const;
-   void SetHeight(int h);
-protected:
-   virtual void DoSetHeight(int h);
-public:
-
-   bool GetMinimized() const;
-   void SetMinimized(bool isMinimized);
-protected:
-   virtual void DoSetMinimized(bool isMinimized);
 
 public:
    static void FinishCopy (const Track *n, Track *dest);
 
    // For use when loading a file.  Return true if ok, else make repair
    bool LinkConsistencyCheck();
+
+   bool HasOwner() const { return static_cast<bool>(GetOwner());}
 
 private:
    std::shared_ptr<TrackList> GetOwner() const { return mList.lock(); }
@@ -350,8 +319,6 @@ private:
 
  public:
 
-   enum : unsigned { DefaultHeight = 150 };
-
    Track(const std::shared_ptr<DirManager> &projDirManager);
    Track(const Track &orig);
 
@@ -359,21 +326,26 @@ private:
 
    void Init(const Track &orig);
 
-   using Holder = std::unique_ptr<Track>;
-   virtual Holder Duplicate() const = 0;
+   using Holder = std::shared_ptr<Track>;
+   // public nonvirtual duplication function that invokes Clone():
+   virtual Holder Duplicate() const;
 
    // Called when this track is merged to stereo with another, and should
    // take on some paramaters of its partner.
    virtual void Merge(const Track &orig);
 
    wxString GetName() const { return mName; }
-   void SetName( const wxString &n ) { mName = n; }
+   void SetName( const wxString &n );
    wxString GetDefaultName() const { return mDefaultName; }
    void SetDefaultName( const wxString &n ) { mDefaultName = n; }
 
    bool GetSelected() const { return mSelected; }
 
    virtual void SetSelected(bool s);
+
+   // The argument tells whether the last undo history state should be
+   // updated for the appearance change
+   void EnsureVisible( bool modifyState = false );
 
 public:
 
@@ -421,6 +393,10 @@ public:
    virtual void InsertSilence(double WXUNUSED(t), double WXUNUSED(len)) = 0;
 
 private:
+   // Subclass responsibility implements only a part of Duplicate(), copying
+   // the track data proper (not associated data such as for groups and views):
+   virtual Holder Clone() const = 0;
+
    virtual TrackKind GetKind() const { return TrackKind::None; }
 
    template<typename T>
@@ -714,6 +690,11 @@ public:
    // Checks if sync-lock is on and any track in its sync-lock group is selected.
    bool IsSyncLockSelected() const;
 
+   // Send an event to listeners when state of the track changes
+   // To do: define values for the argument to distinguish different parts
+   // of the state, perhaps with wxNewId
+   void Notify( int code = -1 );
+
    // An always-true predicate useful for defining iterators
    bool Any() const;
 
@@ -723,20 +704,19 @@ public:
    bool IsLeader() const;
    bool IsSelectedLeader() const;
 
+   // Cause this track and following ones in its TrackList to adjust
+   void AdjustPositions();
+
+   // Serialize, not with tags of its own, but as attributes within a tag.
+   void WriteCommonXMLAttributes(
+      XMLWriter &xmlFile, bool includeNameAndSelected = true) const;
+
+   // Return true iff the attribute is recognized.
+   bool HandleCommonXMLAttribute(const wxChar *attr, const wxChar *value);
+
 protected:
-   std::shared_ptr<Track> FindTrack() override;
-
-   // These are called to create controls on demand:
-   virtual std::shared_ptr<TrackControls> GetControls() = 0;
-   virtual std::shared_ptr<TrackVRulerControls> GetVRulerControls() = 0;
-
-   // These hold the controls:
-   std::shared_ptr<TrackControls> mpControls;
-   std::shared_ptr<TrackVRulerControls> mpVRulerContols;
-   std::shared_ptr<TrackPanelResizerCell> mpResizer;
-
-   std::weak_ptr<SelectHandle> mSelectHandle;
-   std::weak_ptr<TimeShiftHandle> mTimeShiftHandle;
+   std::shared_ptr<CommonTrackCell> mpView;
+   std::shared_ptr<CommonTrackCell> mpControls;
 };
 
 class AUDACITY_DLL_API AudioTrack /* not final */ : public Track
@@ -763,8 +743,8 @@ public:
 
    bool GetMute    () const { return mMute;     }
    bool GetSolo    () const { return mSolo;     }
-   void SetMute    (bool m) { mMute     = m; }
-   void SetSolo    (bool s) { mSolo     = s; }
+   void SetMute    (bool m);
+   void SetSolo    (bool s);
 
    void Init( const PlayableTrack &init );
    void Merge( const Track &init ) override;
@@ -813,20 +793,13 @@ template<typename T>
       return nullptr;
 }
 
+template < typename TrackType > struct TrackIterRange;
+
 // new track iterators can eliminate the need to cast the result
 template <
    typename TrackType // Track or a subclass, maybe const-qualified
 > class TrackIter
-   : public std::iterator<
-      std::bidirectional_iterator_tag,
-      TrackType *const,
-      ptrdiff_t,
-      // pointer is void to disable operator -> in the reverse_iterator...
-      void,
-      // ... because what operator * returns is really a value type,
-      // so you can't take its address
-      TrackType *const
-   >
+   : public ValueIterator< TrackType *, std::bidirectional_iterator_tag >
 {
 public:
    // Type of predicate taking pointer to const TrackType
@@ -967,6 +940,10 @@ private:
       return !this->mPred || this->mPred( pTrack );
    }
 
+   // This friendship is needed in TrackIterRange::StartingWith and
+   // TrackIterRange::EndingAfter()
+   friend TrackIterRange< TrackType >;
+
    // The class invariant is that mIter == mEnd, or else, mIter != mEnd and
    // **mIter is of the appropriate subclass and mPred(&**mIter) is true.
    TrackNodePointer mBegin, mIter, mEnd;
@@ -1004,6 +981,7 @@ template <
    }
 
    // Specify the added conjunct as a pointer to member function
+   // Read + as "and"
    template< typename R, typename C >
       TrackIterRange operator + ( R ( C ::* pmf ) () const ) const
    {
@@ -1022,6 +1000,7 @@ template <
    }
 
    // Specify the negated conjunct as a pointer to member function
+   // Read - as "and not"
    template< typename R, typename C >
       TrackIterRange operator - ( R ( C ::* pmf ) () const ) const
    {
@@ -1039,17 +1018,29 @@ template <
 
    TrackIterRange StartingWith( const Track *pTrack ) const
    {
+      auto newBegin = this->find( pTrack );
+      // More careful construction is needed so that the independent
+      // increment and decrement of each iterator in the NEW pair
+      // has the expected behavior at boundaries of the range
       return {
-         this->find( pTrack ),
-         this->second
+         { newBegin.mIter, newBegin.mIter,    this->second.mEnd,
+           this->first.GetPredicate() },
+         { newBegin.mIter, this->second.mEnd, this->second.mEnd,
+           this->second.GetPredicate() }
       };
    }
 
    TrackIterRange EndingAfter( const Track *pTrack ) const
    {
+      const auto newEnd = this->reversal().find( pTrack ).base();
+      // More careful construction is needed so that the independent
+      // increment and decrement of each iterator in the NEW pair
+      // has the expected behavior at boundaries of the range
       return {
-         this->first,
-         this->reversal().find( pTrack ).base()
+         { this->first.mBegin, this->first.mIter, newEnd.mIter,
+           this->first.GetPredicate() },
+         { this->first.mBegin, newEnd.mIter,      newEnd.mIter,
+           this->second.GetPredicate() }
       };
    }
 
@@ -1082,43 +1073,73 @@ template <
 };
 
 
-/** \brief TrackList is a flat linked list of tracks supporting Add,  Remove,
- * Clear, and Contains, plus serialization of the list of tracks.
- */
-
 struct TrackListEvent : public wxCommandEvent
 {
-   TrackListEvent(wxEventType commandType = wxEVT_NULL, int winid = 0)
-   : wxCommandEvent{ commandType, winid } {}
+   explicit
+   TrackListEvent(
+      wxEventType commandType,
+      const std::weak_ptr<Track> &pTrack = {}, int code = -1)
+   : wxCommandEvent{ commandType }
+   , mpTrack{ pTrack }
+   , mCode{ code }
+   {}
 
    TrackListEvent( const TrackListEvent& ) = default;
 
-   wxEvent *Clone() const override { return new TrackListEvent(*this); }
+   wxEvent *Clone() const override {
+      // wxWidgets will own the event object
+      return safenew TrackListEvent(*this); }
 
    std::weak_ptr<Track> mpTrack;
+   int mCode;
 };
 
+// Posted when the set of selected tracks changes.
+wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API,
+                         EVT_TRACKLIST_SELECTION_CHANGE, TrackListEvent);
+
+// Posted when certain fields of a track change.
+wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API,
+                         EVT_TRACKLIST_TRACK_DATA_CHANGE, TrackListEvent);
+
+// Posted when a track needs to be scrolled into view.
+wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API,
+                         EVT_TRACKLIST_TRACK_REQUEST_VISIBLE, TrackListEvent);
+
 // Posted when tracks are reordered but otherwise unchanged.
+// mpTrack points to the moved track that is earliest in the New ordering.
 wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API,
-                         EVT_TRACKLIST_PERMUTED, wxCommandEvent);
+                         EVT_TRACKLIST_PERMUTED, TrackListEvent);
 
-// Posted when some track was added or changed its height.
-// Cast to TrackListEvent and examine mpTrack to retrieve it.
+// Posted when some track changed its height.
 wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API,
-                         EVT_TRACKLIST_RESIZING, wxCommandEvent);
+                         EVT_TRACKLIST_RESIZING, TrackListEvent);
 
-// Posted when a track has been deleted from a tracklist.
+// Posted when a track has been added to a tracklist.
 // Also posted when one track replaces another
 wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API,
-                         EVT_TRACKLIST_DELETION, wxCommandEvent);
+                         EVT_TRACKLIST_ADDITION, TrackListEvent);
 
-class TrackList final : public wxEvtHandler, public ListOfTracks
+// Posted when a track has been deleted from a tracklist.
+// Also posted when one track replaces another.
+// mpTrack points to the first track after the deletion, if there is one.
+wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API,
+                         EVT_TRACKLIST_DELETION, TrackListEvent);
+
+/** \brief TrackList is a flat linked list of tracks supporting Add,  Remove,
+ * Clear, and Contains, plus serialization of the list of tracks.
+ */
+class TrackList final
+   : public wxEvtHandler
+   , public ListOfTracks
+   , public std::enable_shared_from_this<TrackList>
+   , public ClientData::Base
 {
+   // privatize this, make you use Add instead:
+   using ListOfTracks::push_back;
+
    // privatize this, make you use Swap instead:
    using ListOfTracks::swap;
-
-   // Create an empty TrackList
-   TrackList();
 
    // Disallow copy
    TrackList(const TrackList &that) = delete;
@@ -1131,6 +1152,13 @@ class TrackList final : public wxEvtHandler, public ListOfTracks
    void clear() = delete;
 
  public:
+   static TrackList &Get( AudacityProject &project );
+   static const TrackList &Get( const AudacityProject &project );
+ 
+   // Create an empty TrackList
+   // Don't call directly -- use Create() instead
+   TrackList();
+
    // Create an empty TrackList
    static std::shared_ptr<TrackList> Create();
 
@@ -1278,6 +1306,9 @@ class TrackList final : public wxEvtHandler, public ListOfTracks
    }
 
 private:
+   Track *DoAddToHead(const std::shared_ptr<Track> &t);
+   Track *DoAdd(const std::shared_ptr<Track> &t);
+
    template< typename TrackType, typename InTrackType >
       static TrackIterRange< TrackType >
          Channels_( TrackIter< InTrackType > iter1 )
@@ -1317,15 +1348,12 @@ public:
 
    /// Add a Track, giving it a fresh id
    template<typename TrackKind>
-   Track *Add(std::unique_ptr<TrackKind> &&t);
+      TrackKind *AddToHead( const std::shared_ptr< TrackKind > &t )
+         { return static_cast< TrackKind* >( DoAddToHead( t ) ); }
 
-   /// Add a Track, giving it a fresh id
    template<typename TrackKind>
-   Track *AddToHead(std::unique_ptr<TrackKind> &&t);
-
-   /// Add a Track, giving it a fresh id
-   template<typename TrackKind>
-   Track *Add(std::shared_ptr<TrackKind> &&t);
+      TrackKind *Add( const std::shared_ptr< TrackKind > &t )
+         { return static_cast< TrackKind* >( DoAdd( t ) ); }
 
    /** \brief Define a group of channels starting at the given track
    *
@@ -1339,7 +1367,8 @@ public:
 
    /// Replace first track with second track, give back a holder
    /// Give the replacement the same id as the replaced
-   ListOfTracks::value_type Replace(Track * t, ListOfTracks::value_type &&with);
+   ListOfTracks::value_type Replace(
+      Track * t, const ListOfTracks::value_type &with);
 
    /// Remove this Track or all children of this TrackList.
    /// Return an iterator to what followed the removed track.
@@ -1348,32 +1377,12 @@ public:
    /// Make the list empty
    void Clear(bool sendEvent = true);
 
-   int GetGroupHeight(const Track * t) const;
-
    bool CanMoveUp(Track * t) const;
    bool CanMoveDown(Track * t) const;
 
    bool MoveUp(Track * t);
    bool MoveDown(Track * t);
    bool Move(Track * t, bool up) { return up ? MoveUp(t) : MoveDown(t); }
-
-   TimeTrack *GetTimeTrack();
-   const TimeTrack *GetTimeTrack() const;
-
-   /** \brief Find out how many channels this track list mixes to
-   *
-   * This is used in exports of the tracks to work out whether to export in
-   * Mono, Stereo etc. @param selectionOnly Whether to consider the entire track
-   * list or only the selected members of it
-   */
-   unsigned GetNumExportChannels(bool selectionOnly) const;
-
-   WaveTrackArray GetWaveTrackArray(bool selectionOnly, bool includeMuted = true);
-   WaveTrackConstArray GetWaveTrackConstArray(bool selectionOnly, bool includeMuted = true) const;
-
-#if defined(USE_MIDI)
-   NoteTrackConstArray GetNoteTrackConstArray(bool selectionOnly) const;
-#endif
 
    /// Mainly a test function. Uses a linear search, so could be slow.
    bool Contains(const Track * t) const;
@@ -1399,7 +1408,6 @@ public:
    double GetEndTime() const;
 
    double GetMinOffset() const;
-   int GetHeight() const;
 
 #if LEGACY_PROJECT_FILE_SUPPORT
    // File I/O
@@ -1495,13 +1503,16 @@ private:
    }
 
    void RecalcPositions(TrackNodePointer node);
-   void PermutationEvent();
-   void DeletionEvent();
+   void SelectionEvent( const std::shared_ptr<Track> &pTrack );
+   void PermutationEvent(TrackNodePointer node);
+   void DataEvent( const std::shared_ptr<Track> &pTrack, int code );
+   void EnsureVisibleEvent(
+      const std::shared_ptr<Track> &pTrack, bool modifyState );
+   void DeletionEvent(TrackNodePointer node = {});
+   void AdditionEvent(TrackNodePointer node);
    void ResizingEvent(TrackNodePointer node);
 
    void SwapNodes(TrackNodePointer s1, TrackNodePointer s2);
-
-   std::weak_ptr<TrackList> mSelf;
 
    // Nondecreasing during the session.
    // Nonpersistent.
@@ -1560,15 +1571,24 @@ private:
    std::vector< Updater > mUpdaters;
 };
 
-class AUDACITY_DLL_API TrackFactory
+class AUDACITY_DLL_API TrackFactory final
+   : public ClientData::Base
 {
- private:
+ public:
+   static TrackFactory &Get( AudacityProject &project );
+   static const TrackFactory &Get( const AudacityProject &project );
+   static TrackFactory &Reset( AudacityProject &project );
+   static void Destroy( AudacityProject &project );
+
    TrackFactory(const std::shared_ptr<DirManager> &dirManager, const ZoomInfo *zoomInfo):
       mDirManager(dirManager)
       , mZoomInfo(zoomInfo)
    {
    }
+   TrackFactory( const TrackFactory & ) PROHIBITED;
+   TrackFactory &operator=( const TrackFactory & ) PROHIBITED;
 
+ private:
    const std::shared_ptr<DirManager> mDirManager;
    const ZoomInfo *const mZoomInfo;
    friend class AudacityProject;
@@ -1577,18 +1597,14 @@ class AUDACITY_DLL_API TrackFactory
  public:
    // These methods are defined in WaveTrack.cpp, NoteTrack.cpp,
    // LabelTrack.cpp, and TimeTrack.cpp respectively
-   std::unique_ptr<WaveTrack> DuplicateWaveTrack(const WaveTrack &orig);
-   std::unique_ptr<WaveTrack> NewWaveTrack(sampleFormat format = (sampleFormat)0,
+   std::shared_ptr<WaveTrack> DuplicateWaveTrack(const WaveTrack &orig);
+   std::shared_ptr<WaveTrack> NewWaveTrack(sampleFormat format = (sampleFormat)0,
                            double rate = 0);
-   std::unique_ptr<LabelTrack> NewLabelTrack();
-   std::unique_ptr<TimeTrack> NewTimeTrack();
+   std::shared_ptr<LabelTrack> NewLabelTrack();
+   std::shared_ptr<TimeTrack> NewTimeTrack();
 #if defined(USE_MIDI)
-   std::unique_ptr<NoteTrack> NewNoteTrack();
+   std::shared_ptr<NoteTrack> NewNoteTrack();
 #endif
 };
-
-// global functions
-struct TransportTracks;
-TransportTracks GetAllPlaybackTracks(TrackList &trackList, bool selectedOnly, bool useMidi = false);
 
 #endif

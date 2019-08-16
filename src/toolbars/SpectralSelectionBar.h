@@ -15,15 +15,13 @@ Paul Licameli
 
 #include "ToolBar.h"
 
-class wxBitmap;
-class wxCheckBox;
 class wxChoice;
 class wxComboBox;
 class wxCommandEvent;
 class wxDC;
-class wxRadioButton;
 class wxSizeEvent;
 
+class AudacityProject;
 class SpectralSelectionBarListener;
 class NumericTextCtrl;
 
@@ -31,8 +29,11 @@ class SpectralSelectionBar final : public ToolBar {
 
 public:
 
-   SpectralSelectionBar();
+   SpectralSelectionBar( AudacityProject &project );
    virtual ~SpectralSelectionBar();
+
+   static SpectralSelectionBar &Get( AudacityProject &project );
+   static const SpectralSelectionBar &Get( const AudacityProject &project );
 
    void Create(wxWindow *parent) override;
 
@@ -42,8 +43,8 @@ public:
    void UpdatePrefs() override;
 
    void SetFrequencies(double bottom, double top);
-   void SetFrequencySelectionFormatName(const NumericFormatId & formatName);
-   void SetBandwidthSelectionFormatName(const NumericFormatId & formatName);
+   void SetFrequencySelectionFormatName(const NumericFormatSymbol & formatName);
+   void SetBandwidthSelectionFormatName(const NumericFormatSymbol & formatName);
    void SetListener(SpectralSelectionBarListener *l);
 
    void RegenerateTooltips() override {};
@@ -55,6 +56,7 @@ private:
    void OnUpdate(wxCommandEvent &evt);
    void OnCtrl(wxCommandEvent &evt);
    void OnChoice(wxCommandEvent &evt);
+   void OnIdle( wxIdleEvent &evt );
 
    void OnSize(wxSizeEvent &evt);
 

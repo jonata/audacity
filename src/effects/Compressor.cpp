@@ -30,18 +30,21 @@
 #include <math.h>
 
 #include <wx/brush.h>
+#include <wx/checkbox.h>
 #include <wx/dcclient.h>
 #include <wx/dcmemory.h>
 #include <wx/intl.h>
+#include <wx/slider.h>
+#include <wx/stattext.h>
 
 #include "../AColor.h"
 #include "../Prefs.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "../float_cast.h"
 #include "../widgets/Ruler.h"
 
 #include "../WaveTrack.h"
-#include "../Theme.h"
 #include "../AllThemeResources.h"
 
 enum
@@ -94,9 +97,9 @@ EffectCompressor::~EffectCompressor()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectCompressor::GetSymbol()
+ComponentInterfaceSymbol EffectCompressor::GetSymbol()
 {
    return COMPRESSOR_PLUGIN_SYMBOL;
 }
@@ -288,9 +291,9 @@ void EffectCompressor::PopulateOrExchange(ShuttleGui & S)
    {
       /* i18n-hint: Make-up, i.e. correct for any reduction, rather than fabricate it.*/
       mGainCheckBox = S.AddCheckBox(_("Make-up gain for 0 dB after compressing"),
-                                    DEF_Normalize ? wxT("true") : wxT("false"));
+                                    DEF_Normalize);
       mPeakCheckBox = S.AddCheckBox(_("Compress based on Peaks"),
-                                    DEF_UsePeak ? wxT("true") : wxT("false"));
+                                    DEF_UsePeak);
    }
    S.EndHorizontalLay();
 }

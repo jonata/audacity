@@ -24,7 +24,7 @@ got to show.
 
 #include <wx/atomic.h>
 
-#include "widgets/ErrorDialog.h"
+#include "widgets/AudacityMessageBox.h"
 
 AudacityException::~AudacityException()
 {
@@ -97,7 +97,7 @@ void MessageBoxException::DelayedHandlerAction()
       if ( wxAtomicDec( sOutstandingMessages ) == 0 )
          ::AudacityMessageBox(
             ErrorMessage(),
-            caption.IsEmpty() ? AudacityMessageBoxCaptionStr() : caption,
+            caption.empty() ? AudacityMessageBoxCaptionStr() : caption,
             wxICON_ERROR
          );
       moved = true;

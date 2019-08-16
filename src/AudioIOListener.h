@@ -13,7 +13,7 @@
 #ifndef __AUDACITY_AUDIO_IO_LISTENER__
 #define __AUDACITY_AUDIO_IO_LISTENER__
 
-#include <wx/string.h>
+#include "Audacity.h"
 
 class AutoSaveFile;
 
@@ -28,6 +28,14 @@ public:
    virtual void OnAudioIOStartRecording() = 0;
    virtual void OnAudioIOStopRecording() = 0;
    virtual void OnAudioIONewBlockFiles(const AutoSaveFile & blockFileLog) = 0;
+
+   // Commit the addition of temporary recording tracks into the project
+   virtual void OnCommitRecording() = 0;
+
+   // During recording, the threshold for sound activation has been crossed
+   // in either direction
+   virtual void OnSoundActivationThreshold() = 0;
+
 };
 
 #endif

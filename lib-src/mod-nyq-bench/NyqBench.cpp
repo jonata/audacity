@@ -14,6 +14,7 @@
 #include <wx/filedlg.h>
 #include <wx/font.h>
 #include <wx/fontdlg.h>
+#include <wx/menu.h>
 #include <wx/msgdlg.h>
 #include <wx/settings.h>
 #include <wx/sizer.h>
@@ -22,7 +23,8 @@
 #include <wx/textctrl.h>
 #include <wx/toolbar.h>
 
-#include "AudioIO.h"
+#include "AudioIOBase.h"
+#include "CommonCommandFlags.h"
 #include "LabelTrack.h"
 #include "ModuleManager.h"
 #include "Prefs.h"
@@ -32,7 +34,7 @@
 #include "effects/nyquist/Nyquist.h"
 #include "../images/AudacityLogo.xpm"
 #include "../../src/commands/CommandContext.h"
-#include "widgets/ErrorDialog.h"
+#include "widgets/AudacityMessageBox.h"
 
 #include "NyqBench.h"
 
@@ -182,22 +184,22 @@ extern "C"
          case MenusRebuilt:  {
             AudacityProject *p = GetActiveProject();
             wxASSERT(p != NULL);
-            CommandManager *c = p->GetCommandManager();
+            CommandManager *c = &CommandManager::Get( *p );
             wxASSERT(c != NULL);
 
-            wxMenuBar * pBar = p->GetMenuBar();
+            wxMenuBar * pBar = GetProjectFrame( *p ).GetMenuBar();
             wxASSERT(pBar != NULL );
             wxMenu * pMenu = pBar->GetMenu( 9 );  // Menu 9 is the Tools Menu.
             wxASSERT( pMenu != NULL );
 
             c->SetCurrentMenu(pMenu);
             c->AddSeparator();
-            c->SetDefaultFlags(AudioIONotBusyFlag, AudioIONotBusyFlag);
             c->AddItem(wxT("NyqBench"),
                _("&Nyquist Workbench..."),
                true,
                findme,
-               static_cast<CommandFunctorPointer>(&NyqBench::ShowNyqBench));
+               static_cast<CommandFunctorPointer>(&NyqBench::ShowNyqBench),
+               AudioIONotBusyFlag);
 
             c->ClearCurrentMenu();
          }
@@ -1402,7 +1404,7 @@ void NyqBench::OnGo(wxCommandEvent & e)
       mRunning = true;
       UpdateWindowUI();
 
-      GetMenuCommandHandler(*p).DoEffect(ID, CommandContext(*p), 0);
+      EffectManager::DoEffect(ID, CommandContext(*p), 0);
 
       mRunning = false;
       UpdateWindowUI();
@@ -1588,6 +1590,7 @@ void NyqBench::OnRunUpdate(wxUpdateUIEvent & e)
    wxToolBar *tbar = GetToolBar();
    wxMenuBar *mbar = GetMenuBar();
 
+   auto gAudioIO = AudioIOBase::Get();
    if (p && gAudioIO->IsBusy()) {
       mbar->Enable(ID_GO, false);
       mbar->Enable(ID_STOP, false);
@@ -1632,7 +1635,7 @@ bool NyqBench::Validate()
 {
    if (mScript->GetLastPosition() > 0 && mScript->IsModified()) {
       int ans;
-      ans = AudacityMessageBox(_("Code has been modified.  Are you sure?"),
+      ans = AudacityMessageBox(_("Code has been modified. Are you sure?"),
                          _("Warning"),
                          wxYES_NO | wxICON_QUESTION,
                          this);

@@ -20,14 +20,12 @@
 #ifndef __AUDACITY_MIX__
 #define __AUDACITY_MIX__
 
-#include "MemoryX.h"
-#include <wx/string.h>
 #include "SampleFormat.h"
 #include <vector>
 
 class Resample;
 class DirManager;
-class TimeTrack;
+class BoundedEnvelope;
 class TrackFactory;
 class TrackList;
 class WaveTrack;
@@ -49,7 +47,8 @@ class WaveTrackCache;
 void MixAndRender(TrackList * tracks, TrackFactory *factory,
                   double rate, sampleFormat format,
                   double startTime, double endTime,
-                  std::unique_ptr<WaveTrack> &uLeft, std::unique_ptr<WaveTrack> &uRight);
+                  std::shared_ptr<WaveTrack> &uLeft,
+                  std::shared_ptr<WaveTrack> &uRight);
 
 void MixBuffers(unsigned numChannels, int *channelFlags, float *gains,
                 samplePtr src,
@@ -84,15 +83,15 @@ class AUDACITY_DLL_API Mixer {
     class WarpOptions
     {
     public:
-       explicit WarpOptions(const TimeTrack *t)
-          : timeTrack(t), minSpeed(0.0), maxSpeed(0.0)
+       explicit WarpOptions(const BoundedEnvelope *e)
+          : envelope(e), minSpeed(0.0), maxSpeed(0.0)
        {}
 
        WarpOptions(double min, double max);
 
     private:
        friend class Mixer;
-       const TimeTrack *timeTrack;
+       const BoundedEnvelope *envelope = nullptr;
        double minSpeed, maxSpeed;
     };
 
@@ -131,7 +130,7 @@ class AUDACITY_DLL_API Mixer {
 
    /// Reposition processing to absolute time next time
    /// Process() is called.
-   void Reposition(double t);
+   void Reposition(double t, bool bSkipping = false);
 
    // Used in scrubbing.
    void SetTimesAndSpeed(double t0, double t1, double speed);
@@ -165,7 +164,7 @@ class AUDACITY_DLL_API Mixer {
    size_t           mNumInputTracks;
    ArrayOf<WaveTrackCache> mInputTrack;
    bool             mbVariableRates;
-   const TimeTrack *mTimeTrack;
+   const BoundedEnvelope *mEnvelope;
    ArrayOf<sampleCount> mSamplePos;
    bool             mApplyTrackGains;
    Doubles          mEnvValues;

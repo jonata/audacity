@@ -24,17 +24,14 @@ and sample size to help you importing data of an unknown format.
 #include "../Audacity.h"
 #include "ImportRaw.h"
 
-#include "Import.h"
-
 #include "../DirManager.h"
-#include "../FileException.h"
 #include "../FileFormats.h"
-#include "../Internat.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
 #include "../UserException.h"
 #include "../WaveTrack.h"
 #include "../prefs/QualityPrefs.h"
+#include "../widgets/ProgressDialog.h"
 
 #include <cmath>
 #include <cstdio>
@@ -54,7 +51,6 @@ and sample size to help you importing data of an unknown format.
 #include <wx/timer.h>
 
 // #include "RawAudioGuess.h"
-#include "MultiFormatReader.h"
 #include "FormatClassifier.h"
 
 #include "sndfile.h"
@@ -320,9 +316,7 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
    SetName(GetTitle());
 
    ShuttleGui S(this, eIsCreating);
-   wxArrayString encodings;
-   wxArrayString endians;
-   wxArrayString chans;
+   wxArrayStringEx encodings;
    int num;
    int selection;
    int endian;
@@ -345,7 +339,7 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
 
       if (sf_format_check(&info)) {
          mEncodingSubtype[mNumEncodings] = subtype;
-         encodings.Add(sf_encoding_index_name(i));
+         encodings.push_back(sf_encoding_index_name(i));
 
          if ((mEncoding & SF_FORMAT_SUBMASK) == subtype)
             selection = mNumEncodings;
@@ -354,18 +348,20 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
       }
    }
 
-   /* i18n-hint: Refers to byte-order.  Don't translate "endianness" if you don't
+   wxArrayStringEx endians{
+      /* i18n-hint: Refers to byte-order.  Don't translate "endianness" if you don't
+          know the correct technical word. */
+      _("No endianness") ,
+      /* i18n-hint: Refers to byte-order.  Don't translate this if you don't
        know the correct technical word. */
-   endians.Add(_("No endianness"));
-   /* i18n-hint: Refers to byte-order.  Don't translate this if you don't
-    know the correct technical word. */
-   endians.Add(_("Little-endian"));
-   /* i18n-hint: Refers to byte-order.  Don't translate this if you don't
-      know the correct technical word. */
-   endians.Add(_("Big-endian"));
-   /* i18n-hint: Refers to byte-order.  Don't translate "endianness" if you don't
-      know the correct technical word. */
-   endians.Add(_("Default endianness"));
+      _("Little-endian") ,
+      /* i18n-hint: Refers to byte-order.  Don't translate this if you don't
+         know the correct technical word. */
+      _("Big-endian") ,
+      /* i18n-hint: Refers to byte-order.  Don't translate "endianness" if you don't
+         know the correct technical word. */
+      _("Default endianness") ,
+   };
 
    switch (mEncoding & (SF_FORMAT_ENDMASK))
    {
@@ -384,10 +380,12 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
          break;
    }
 
-   chans.Add(_("1 Channel (Mono)"));
-   chans.Add(_("2 Channels (Stereo)"));
+   wxArrayStringEx chans{
+      _("1 Channel (Mono)") ,
+      _("2 Channels (Stereo)") ,
+   };
    for (i=2; i<16; i++) {
-      chans.Add(wxString::Format(_("%d Channels"), i + 1));
+      chans.push_back(wxString::Format(_("%d Channels"), i + 1));
    }
 
    S.StartVerticalLay(false);
@@ -396,14 +394,14 @@ ImportRawDialog::ImportRawDialog(wxWindow * parent,
       S.StartTwoColumn();
       {
          mEncodingChoice = S.Id(ChoiceID).AddChoice(_("Encoding:"),
-                                                    encodings[selection],
-                                                    &encodings);
+                                                    encodings,
+                                                    selection);
          mEndianChoice = S.Id(ChoiceID).AddChoice(_("Byte order:"),
-                                                  endians[endian],
-                                                  &endians);
+                                                  endians,
+                                                  endian);
          mChannelChoice = S.Id(ChoiceID).AddChoice(_("Channels:"),
-                                                   chans[mChannels-1],
-                                                   &chans);
+                                                   chans,
+                                                   mChannels - 1);
       }
       S.EndTwoColumn();
 

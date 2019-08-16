@@ -13,15 +13,12 @@
 #ifndef __AUDACITY_EFFECT_NOISE__
 #define __AUDACITY_EFFECT_NOISE__
 
-#include <wx/string.h>
-
-#include "../widgets/NumericTextCtrl.h"
-
 #include "Effect.h"
 
+class NumericTextCtrl;
 class ShuttleGui;
 
-#define NOISE_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Noise") }
+#define NOISE_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Noise") }
 
 class EffectNoise final : public Effect
 {
@@ -29,9 +26,9 @@ public:
    EffectNoise();
    virtual ~EffectNoise();
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
-   IdentInterfaceSymbol GetSymbol() override;
+   ComponentInterfaceSymbol GetSymbol() override;
    wxString GetDescription() override;
    wxString ManualPage() override;
 

@@ -22,14 +22,14 @@ The summary is eventually computed and written to a file in a background thread.
 #include <float.h>
 
 #include <wx/utils.h>
-#include <wx/wxchar.h>
+#include <wx/wxcrtvararg.h>
 #include <wx/log.h>
 #include <wx/thread.h>
 #include <sndfile.h>
 
-#include "../FileException.h"
+#include "../DirManager.h"
 #include "../FileFormats.h"
-#include "../Internat.h"
+#include "../ondemand/ODManager.h"
 #include "NotYetAvailableException.h"
 
 const int bheaderTagLen = 20;
@@ -238,7 +238,7 @@ void ODDecodeBlockFile::SaveXML(XMLWriter &xmlFile)
 /// Also schedules the ODDecodeBlockFile for OD loading.
 // BuildFromXML methods should always return a BlockFile, not NULL,
 // even if the result is flawed (e.g., refers to nonexistent file),
-// as testing will be done in DirManager::ProjectFSCK().
+// as testing will be done in ProjectFSCK().
 BlockFilePtr ODDecodeBlockFile::BuildFromXML(DirManager &dm, const wxChar **attrs)
 {
    wxFileNameWrapper summaryFileName;
@@ -261,7 +261,7 @@ BlockFilePtr ODDecodeBlockFile::BuildFromXML(DirManager &dm, const wxChar **attr
       if (!wxStricmp(attr, wxT("summaryfile")) &&
             // Can't use XMLValueChecker::IsGoodFileName here, but do part of its test.
             XMLValueChecker::IsGoodFileString(strValue) &&
-            (strValue.Length() + 1 + dm.GetProjectDataDir().Length() <= PLATFORM_MAX_PATH))
+            (strValue.length() + 1 + dm.GetProjectDataDir().length() <= PLATFORM_MAX_PATH))
       {
          if (!dm.AssignFile(summaryFileName, strValue, false))
             // Make sure summaryFileName is back to uninitialized state so we can detect problem later.
@@ -503,6 +503,18 @@ void ODDecodeBlockFile::UnlockRead() const
    mReadDataMutex.Unlock();
 }
 
+const wxFileNameWrapper &ODDecodeBlockFile::GetExternalFileName() const
+{
+   if ( !IsDataAvailable() )
+      return GetEncodedAudioFilename();
+   return SimpleBlockFile::GetExternalFileName();
+}
+
+void ODDecodeBlockFile::SetExternalFileName( wxFileNameWrapper &&newName )
+{
+   ChangeAudioFile( std::move( newName ) );
+}
+
 /// Modify this block to point at a different file.  This is generally
 /// looked down on, but it is necessary in one case: see
 /// DirManager::EnsureSafeFilename().
@@ -512,4 +524,41 @@ void ODDecodeBlockFile::ChangeAudioFile(wxFileNameWrapper &&newAudioFile)
 }
 
 
+
+static DirManager::RegisteredBlockFileDeserializer sRegistration {
+   "oddecodeblockfile",
+   []( DirManager &dm, const wxChar **attrs ){
+      auto result = ODDecodeBlockFile::BuildFromXML( dm, attrs );
+      ODManager::MarkLoadedODFlag();
+      return result;
+   }
+};
+
+///This should handle unicode converted to UTF-8 on mac/linux, but OD TODO:check on windows
+ODFileDecoder::ODFileDecoder(const wxString & fName)
+   : mFName{ fName }
+{
+   mInited = false;
+}
+
+ODFileDecoder::~ODFileDecoder()
+{
+}
+
+bool ODFileDecoder::IsInitialized()
+{
+   bool ret;
+   mInitedLock.Lock();
+   ret = mInited;
+   mInitedLock.Unlock();
+   return ret;
+}
+
+///Derived classes should call this after they have parsed the header.
+void ODFileDecoder::MarkInitialized()
+{
+   mInitedLock.Lock();
+   mInited=true;
+   mInitedLock.Unlock();
+}
 

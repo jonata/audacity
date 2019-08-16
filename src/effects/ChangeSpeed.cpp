@@ -18,13 +18,16 @@
 
 #include <math.h>
 
+#include <wx/choice.h>
 #include <wx/intl.h>
+#include <wx/slider.h>
 
 #include "../LabelTrack.h"
 #include "../Prefs.h"
-#include "../Project.h"
 #include "../Resample.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
+#include "../widgets/NumericTextCtrl.h"
 #include "../widgets/valnum.h"
 
 #include "TimeWarper.h"
@@ -103,9 +106,9 @@ EffectChangeSpeed::~EffectChangeSpeed()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectChangeSpeed::GetSymbol()
+ComponentInterfaceSymbol EffectChangeSpeed::GetSymbol()
 {
    return CHANGESPEED_PLUGIN_SYMBOL;
 }
@@ -336,26 +339,26 @@ void EffectChangeSpeed::PopulateOrExchange(ShuttleGui & S)
 
          wxASSERT(nVinyl == WXSIZEOF(kVinylStrings));
 
-         wxArrayString vinylChoices;
+         wxArrayStringEx vinylChoices;
          for (int i = 0; i < nVinyl; i++)
          {
             if (i == kVinyl_NA)
             {
-               vinylChoices.Add(wxGetTranslation(kVinylStrings[i]));
+               vinylChoices.push_back(wxGetTranslation(kVinylStrings[i]));
             }
             else
             {
-               vinylChoices.Add(kVinylStrings[i]);
+               vinylChoices.push_back(kVinylStrings[i]);
             }
          }
 
          mpChoice_FromVinyl =
-            S.Id(ID_FromVinyl).AddChoice(_("from"), wxT(""), &vinylChoices);
+            S.Id(ID_FromVinyl).AddChoice(_("from"), vinylChoices);
          mpChoice_FromVinyl->SetName(_("From rpm"));
          mpChoice_FromVinyl->SetSizeHints(100, -1);
 
          mpChoice_ToVinyl =
-            S.Id(ID_ToVinyl).AddChoice(_("to"), wxT(""), &vinylChoices);
+            S.Id(ID_ToVinyl).AddChoice(_("to"), vinylChoices);
          mpChoice_ToVinyl->SetName(_("To rpm"));
          mpChoice_ToVinyl->SetSizeHints(100, -1);
       }

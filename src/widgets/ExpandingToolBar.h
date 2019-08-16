@@ -11,25 +11,20 @@
 #ifndef __AUDACITY_EXPANDING_TOOL_BAR__
 #define __AUDACITY_EXPANDING_TOOL_BAR__
 
-#include "../MemoryX.h"
 #include <vector>
 #include <wx/defs.h>
-#include <wx/dialog.h>
-#include <wx/panel.h>
-#include <wx/hashmap.h>
-#include <wx/timer.h>
-#include <wx/minifram.h>
+#include <wx/dragimag.h> // use macros and typedefs in this header
+#include <wx/timer.h> // member variable
+#include <wx/minifram.h> // to inherit
 
-#include "ImageRoll.h"
-#include "wxPanelWrapper.h"
+#include "wxPanelWrapper.h" // to inherit
 
 #include <unordered_map>
-
-class wxDragImage;
 
 class AButton;
 
 class ExpandingToolBar;
+class ImageRollPanel;
 class ToolBarFrame;
 class ToolBarDialog;
 class ToolBarArea;
@@ -156,7 +151,7 @@ class ToolBarDialog final : public wxDialogWrapper
 
    ToolBarDialog(wxWindow* parent,
                  wxWindowID id,
-                 const wxString& name = wxEmptyString,
+                 const wxString& name = {},
                  const wxPoint& pos = wxDefaultPosition);
 
    ~ToolBarDialog();
@@ -178,7 +173,7 @@ class ToolBarFrame final : public wxMiniFrame
 
    ToolBarFrame(wxWindow* parent,
                 wxWindowID id,
-                const wxString& name = wxEmptyString,
+                const wxString& name = {},
                 const wxPoint& pos = wxDefaultPosition);
 
    ~ToolBarFrame();

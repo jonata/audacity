@@ -20,28 +20,32 @@ KeyConfigPrefs and MousePrefs use.
 *//*********************************************************************/
 
 #include "../Audacity.h"
-#include "../Experimental.h"
+
 #include "KeyConfigPrefs.h"
 
+#include <wx/setup.h> // for wxUSE_* macros
 #include <wx/defs.h>
 #include <wx/ffile.h>
 #include <wx/intl.h>
 #include <wx/filedlg.h>
+#include <wx/menu.h>
 #include <wx/button.h>
+#include <wx/radiobut.h>
+#include <wx/stattext.h>
+#include <wx/statbox.h>
+#include <wx/textctrl.h>
 
 #include "../Prefs.h"
 #include "../Project.h"
 #include "../commands/CommandManager.h"
-#include "../commands/Keyboard.h"
 #include "../xml/XMLFileReader.h"
 
-#include "../Internat.h"
 #include "../ShuttleGui.h"
 
 #include "../FileNames.h"
 
 #include "../widgets/KeyView.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 
 #if wxUSE_ACCESSIBILITY
 #include "../widgets/WindowAccessible.h"
@@ -77,7 +81,7 @@ BEGIN_EVENT_TABLE(KeyConfigPrefs, PrefsPanel)
 END_EVENT_TABLE()
 
 KeyConfigPrefs::KeyConfigPrefs(wxWindow * parent, wxWindowID winid,
-                               const wxString &name)
+                               const CommandID &name)
 /* i18n-hint: as in computer keyboard (not musical!) */
 :  PrefsPanel(parent, winid, _("Keyboard")),
    mView(NULL),
@@ -91,6 +95,21 @@ KeyConfigPrefs::KeyConfigPrefs(wxWindow * parent, wxWindowID winid,
       auto index = mView->GetIndexByName(name);
       mView->SelectNode(index);
    }
+}
+
+ComponentInterfaceSymbol KeyConfigPrefs::GetSymbol()
+{
+   return KEY_CONFIG_PREFS_PLUGIN_SYMBOL;
+}
+
+wxString KeyConfigPrefs::GetDescription()
+{
+   return _("Preferences for KeyConfig");
+}
+
+wxString KeyConfigPrefs::HelpPageName()
+{
+   return "Keyboard_Preferences";
 }
 
 void KeyConfigPrefs::Populate()
@@ -117,7 +136,7 @@ void KeyConfigPrefs::Populate()
 
    mCommandSelected = wxNOT_FOUND;
 
-   mManager = project->GetCommandManager();
+   mManager = &CommandManager::Get( *project );
 
    // For speed, don't sort here.  We're just creating.
    // Instead sort when we do SetView later in this function.
@@ -185,7 +204,7 @@ void KeyConfigPrefs::PopulateOrExchange(ShuttleGui & S)
             mFilterLabel = S.AddVariableText(_("Searc&h:"));
 
             if (!mFilter) {
-               mFilter = safenew wxTextCtrl(this,
+               mFilter = safenew wxTextCtrl(S.GetParent(),
                                         FilterID,
                                         wxT(""),
                                         wxDefaultPosition,
@@ -213,7 +232,7 @@ void KeyConfigPrefs::PopulateOrExchange(ShuttleGui & S)
       S.StartHorizontalLay(wxEXPAND, 1);
       {
          if (!mView) {
-            mView = safenew KeyView(this, CommandsListID);
+            mView = safenew KeyView(S.GetParent(), CommandsListID);
             mView->SetName(_("Bindings"));
          }
          S.Prop(true);
@@ -224,7 +243,7 @@ void KeyConfigPrefs::PopulateOrExchange(ShuttleGui & S)
       S.StartThreeColumn();
       {
          if (!mKey) {
-            mKey = safenew wxTextCtrl(this,
+            mKey = safenew wxTextCtrl(S.GetParent(),
                                   CurrentComboID,
                                   wxT(""),
                                   wxDefaultPosition,
@@ -283,7 +302,7 @@ void KeyConfigPrefs::RefreshBindings(bool bSort)
    wxArrayString Categories;
    wxArrayString Prefixes;
 
-   mNames.Clear();
+   mNames.clear();
    mKeys.clear();
    mDefaultKeys.clear();
    mStandardDefaultKeys.clear();
@@ -416,7 +435,7 @@ void KeyConfigPrefs::OnHotkeyKeyDown(wxKeyEvent & e)
    // active, buttons on the Mac do not accept focus and all the
    // controls between this one and the tree control are buttons.
    if (e.GetKeyCode() == WXK_TAB) {
-      NavigateIn(e.ShiftDown()
+      t->Navigate(e.ShiftDown()
                  ? wxNavigationKeyEvent::IsBackward
                  : wxNavigationKeyEvent::IsForward);
       return;
@@ -432,7 +451,7 @@ void KeyConfigPrefs::OnHotkeyChar(wxKeyEvent & WXUNUSED(e))
 
 void KeyConfigPrefs::OnHotkeyKillFocus(wxFocusEvent & e)
 {
-   if (mKey->GetValue().IsEmpty() && mCommandSelected != wxNOT_FOUND) {
+   if (mKey->GetValue().empty() && mCommandSelected != wxNOT_FOUND) {
       mKey->AppendText(mView->GetKey(mCommandSelected).Display());
    }
 
@@ -472,7 +491,7 @@ void KeyConfigPrefs::OnFilterKeyDown(wxKeyEvent & e)
       wxString key = KeyEventToKeyString(e).Display();
       t->SetValue(key);
 
-      if (key != wxEmptyString) {
+      if (!key.empty()) {
          mView->SetFilter(t->GetValue());
       }
    }
@@ -501,7 +520,7 @@ void KeyConfigPrefs::OnFilterChar(wxKeyEvent & e)
 
 // Given a hotkey combination, returns the name (description) of the
 // corresponding command, or the empty string if none is found.
-wxString KeyConfigPrefs::NameFromKey(const NormalizedKeyString & key)
+CommandID KeyConfigPrefs::NameFromKey(const NormalizedKeyString & key)
 {
    return mView->GetNameByKey(key);
 }
@@ -510,7 +529,7 @@ wxString KeyConfigPrefs::NameFromKey(const NormalizedKeyString & key)
 // This is not yet a committed change, which will happen on a save.
 void KeyConfigPrefs::SetKeyForSelected(const NormalizedKeyString & key)
 {
-   wxString name = mView->GetName(mCommandSelected);
+   auto name = mView->GetName(mCommandSelected);
 
    if (!mView->CanSetKey(mCommandSelected))
    {
@@ -521,7 +540,7 @@ void KeyConfigPrefs::SetKeyForSelected(const NormalizedKeyString & key)
 
    mView->SetKey(mCommandSelected, key);
    mManager->SetKeyFromName(name, key);
-   mNewKeys[mNames.Index(name)] = key;
+   mNewKeys[ make_iterator_range( mNames ).index( name ) ] = key;
 }
 
 
@@ -534,8 +553,8 @@ void KeyConfigPrefs::OnSet(wxCommandEvent & WXUNUSED(event))
    }
 
    NormalizedKeyString key { mKey->GetValue() };
-   wxString oldname = mView->GetNameByKey(key);
-   wxString newname = mView->GetName(mCommandSelected);
+   auto oldname = mView->GetNameByKey(key);
+   auto newname = mView->GetName(mCommandSelected);
 
    // Just ignore it if they are the same
    if (oldname == newname) {
@@ -552,7 +571,7 @@ void KeyConfigPrefs::OnSet(wxCommandEvent & WXUNUSED(event))
          mManager->GetPrefixedLabelFromName(newname) );
       if (AudacityMessageBox(
             wxString::Format(
-            _("The keyboard shortcut '%s' is already assigned to:\n\n\t'%s'\n\nClick OK to assign the shortcut to\n\n\t'%s'\n\ninstead.  Otherwise, click Cancel."),
+            _("The keyboard shortcut '%s' is already assigned to:\n\n\t'%s'\n\nClick OK to assign the shortcut to\n\n\t'%s'\n\ninstead. Otherwise, click Cancel."),
             mKey->GetValue(),
             oldlabel,
             newlabel),
@@ -563,7 +582,7 @@ void KeyConfigPrefs::OnSet(wxCommandEvent & WXUNUSED(event))
 
       mView->SetKeyByName(oldname, {});
       mManager->SetKeyFromName(oldname, {});
-      mNewKeys[mNames.Index(oldname)] = {};
+      mNewKeys[ make_iterator_range( mNames ).index( oldname ) ] = {};
 
    }
 
@@ -635,14 +654,15 @@ bool KeyConfigPrefs::Commit()
    PopulateOrExchange(S);
 
    bool bFull = gPrefs->ReadBool(wxT("/GUI/Shortcuts/FullDefaults"), false);
-   for (size_t i = 0; i < mNames.GetCount(); i++) {
+   for (size_t i = 0; i < mNames.size(); i++) {
       const auto &dkey = bFull ? mDefaultKeys[i] : mStandardDefaultKeys[i];
-      wxString name = wxT("/NewKeys/") + mNames[i];
+      // using GET to interpret CommandID as a config path component
+      auto name = wxT("/NewKeys/") + mNames[i].GET();
       const auto &key = mNewKeys[i];
 
       if (gPrefs->HasEntry(name)) {
-         if (key != NormalizedKeyString{ gPrefs->Read(name, key.Raw()) } ) {
-            gPrefs->Write(name, key.Raw());
+         if (key != NormalizedKeyString{ gPrefs->ReadObject(name, key) } ) {
+            gPrefs->Write(name, key);
          }
          if (key == dkey) {
             gPrefs->DeleteEntry(name);
@@ -650,7 +670,7 @@ bool KeyConfigPrefs::Commit()
       }
       else {
          if (key != dkey) {
-            gPrefs->Write(name, key.Raw());
+            gPrefs->Write(name, key);
          }
       }
    }
@@ -661,21 +681,20 @@ bool KeyConfigPrefs::Commit()
 void KeyConfigPrefs::Cancel()
 {
    // Restore original key values
-   for (size_t i = 0; i < mNames.GetCount(); i++) {
+   for (size_t i = 0; i < mNames.size(); i++) {
       mManager->SetKeyFromIndex(i, mKeys[i]);
    }
 
    return;
 }
 
-wxString KeyConfigPrefs::HelpPageName()
+PrefsPanel::Factory
+KeyConfigPrefsFactory( const CommandID &name )
 {
-   return "Keyboard_Preferences";
-}
-
-PrefsPanel *KeyConfigPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
-{
-   wxASSERT(parent); // to justify safenew
-   auto result = safenew KeyConfigPrefs{ parent, winid, mName };
-   return result;
+   return [=](wxWindow *parent, wxWindowID winid)
+   {
+      wxASSERT(parent); // to justify safenew
+      auto result = safenew KeyConfigPrefs{ parent, winid, name };
+      return result;
+   };
 }

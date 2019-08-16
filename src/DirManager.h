@@ -11,26 +11,20 @@
 #ifndef _DIRMANAGER_
 #define _DIRMANAGER_
 
-#include "MemoryX.h"
-#include <wx/list.h>
-#include <wx/string.h>
-#include <wx/filename.h>
-#include <wx/hashmap.h>
-#include <wx/utils.h>
-
 #include "audacity/Types.h"
 #include "xml/XMLTagHandler.h"
-#include "wxFileNameWrapper.h"
 
+#include <functional>
+#include <memory>
 #include <unordered_map>
 
-class wxHashTable;
+#include "ClientData.h"
+
+class wxFileNameWrapper;
+class AudacityProject;
 class BlockArray;
 class BlockFile;
-
-#define FSCKstatus_CLOSE_REQ 0x1
-#define FSCKstatus_CHANGED   0x2
-#define FSCKstatus_SAVE_AUP  0x4 // used in combination with FSCKstatus_CHANGED
+class ProgressDialog;
 
 using DirHash = std::unordered_map<int, int>;
 
@@ -49,43 +43,104 @@ enum {
 };
 
 
-class PROFILE_DLL_API DirManager final : public XMLTagHandler {
+class PROFILE_DLL_API DirManager final
+   : public XMLTagHandler
+   , public ClientData::Base
+   , public std::enable_shared_from_this< DirManager >
+{
  public:
 
+   static DirManager &Get( AudacityProject &project );
+   static const DirManager &Get( const AudacityProject &project );
+   static DirManager &Reset( AudacityProject &project );
+   static void Destroy( AudacityProject &project );
+
+   static int RecursivelyEnumerate(const FilePath &dirPath,
+                                     FilePaths& filePathArray,  // output: all files in dirPath tree
+                                     wxString dirspec,
+                                     wxString filespec,
+                                     bool bFiles, bool bDirs,
+                                     int progress_count = 0,
+                                     int progress_bias = 0,
+                                     ProgressDialog* progress = nullptr);
+
+   static int RecursivelyEnumerateWithProgress(const FilePath &dirPath,
+                                                FilePaths& filePathArray, // output: all files in dirPath tree
+                                                wxString dirspec,
+                                                wxString filespec,
+                                                bool bFiles, bool bDirs,
+                                                int progress_count,
+                                                const wxChar* message);
+
+   static int RecursivelyCountSubdirs( const FilePath &dirPath );
+
+   static int RecursivelyRemoveEmptyDirs(const FilePath &dirPath,
+                                          int nDirCount = 0,
+                                          ProgressDialog* pProgress = nullptr);
+
+   static void RecursivelyRemove(const FilePaths& filePathArray, int count, int bias,
+                                 int flags, const wxChar* message = nullptr);
+
+   // Type of a function that builds a block file, using attributes from XML
+   using BlockFileDeserializer =
+      std::function< BlockFilePtr( DirManager&, const wxChar ** ) >;
+   // Typically a statically declared object,
+   // registers a function for an XML tag
+   struct RegisteredBlockFileDeserializer {
+      RegisteredBlockFileDeserializer(
+         const wxString &tag, BlockFileDeserializer function );
+   };
+
+ private:
    // MM: Construct DirManager
+   // Don't call this directly but use Create() instead
    DirManager();
 
+ public:
+
+   static std::shared_ptr< DirManager > Create();
+
+   DirManager( const DirManager & ) PROHIBITED;
+   DirManager &operator=( const DirManager & ) PROHIBITED;
    virtual ~DirManager();
 
+   size_t NumBlockFiles() const { return mBlockFileHash.size(); }
+
    static void SetTempDir(const wxString &_temp) { globaltemp = _temp; }
+
+   class ProjectSetter
+   {
+   public:
+      ProjectSetter(
+         DirManager &dirManager,
+         FilePath& newProjPath,  // assigns it if empty
+         const FilePath& newProjName, const bool bCreate, bool moving);
+      ~ProjectSetter();
+
+      bool Ok();
+      void Commit();
+
+   private:
+      struct Impl;
+      std::unique_ptr<Impl> mpImpl;
+   };
 
    // Returns true on success.
    // If SetProject is told NOT to create the directory
    // but it doesn't already exist, SetProject fails and returns false.
-   bool SetProject(wxString& newProjPath, wxString& newProjName, const bool bCreate);
+   // This function simply creates a ProjectSetter and commits it if successful.
+   // Using ProjectSetter directly allows separation of those steps.
+   bool SetProject(
+      FilePath& newProjPath, // assigns it if empty
+      const FilePath& newProjName, const bool bCreate);
 
-   wxString GetProjectDataDir();
-   wxString GetProjectName();
+   FilePath GetProjectDataDir();
+   FilePath GetProjectName();
 
    wxLongLong GetFreeDiskSpace();
 
-   BlockFilePtr
-      NewSimpleBlockFile(samplePtr sampleData,
-                                 size_t sampleLen,
-                                 sampleFormat format,
-                                 bool allowDeferredWrite = false);
-
-   BlockFilePtr
-      NewAliasBlockFile( const wxString &aliasedFile, sampleCount aliasStart,
-                                 size_t aliasLen, int aliasChannel);
-
-   BlockFilePtr
-      NewODAliasBlockFile( const wxString &aliasedFile, sampleCount aliasStart,
-                                 size_t aliasLen, int aliasChannel);
-
-   BlockFilePtr
-      NewODDecodeBlockFile( const wxString &aliasedFile, sampleCount aliasStart,
-                                 size_t aliasLen, int aliasChannel, int decodeType);
+   using BlockFileFactory = std::function< BlockFilePtr( wxFileNameWrapper ) >;
+   BlockFilePtr NewBlockFile( const BlockFileFactory &factory );
 
    /// Returns true if the blockfile pointed to by b is contained by the DirManager
    bool ContainsBlockFile(const BlockFile *b) const;
@@ -107,16 +162,19 @@ class PROFILE_DLL_API DirManager final : public XMLTagHandler {
    void SaveBlockFile(BlockFile * f, wxTextFile * out);
 #endif
 
-   std::pair<bool, wxString> CopyToNewProjectDirectory(BlockFile *f);
+   std::pair<bool, FilePath>
+      LinkOrCopyToNewProjectDirectory(BlockFile *f, bool &link);
 
    bool EnsureSafeFilename(const wxFileName &fName);
 
-   void SetLoadingTarget(BlockArray *pArray, unsigned idx)
+   using LoadingTarget = std::function< BlockFilePtr &() >;
+   void SetLoadingTarget( LoadingTarget loadingTarget )
    {
-      mLoadingTarget = pArray;
-      mLoadingTargetIdx = idx;
+      mLoadingTarget = loadingTarget;
    }
+   sampleFormat GetLoadingFormat() const { return mLoadingFormat; }
    void SetLoadingFormat(sampleFormat format) { mLoadingFormat = format; }
+   size_t GetLoadingBlockLength() const { return mLoadingBlockLen; }
    void SetLoadingBlockLength(size_t len) { mLoadingBlockLen = len; }
 
    // Note: following affects only the loading of block files when opening a project
@@ -132,30 +190,23 @@ class PROFILE_DLL_API DirManager final : public XMLTagHandler {
    // program is exited normally.
    static void CleanTempDir();
    static void CleanDir(
-      const wxString &path, 
+      const FilePath &path, 
       const wxString &dirSpec, 
       const wxString &fileSpec, 
       const wxString &msg,
       int flags = 0);
 
-   // Check the project for errors and possibly prompt user
-   // bForceError: Always show log error alert even if no errors are found here.
-   //    Important when you know that there are already errors in the log.
-   // bAutoRecoverMode: Do not show any option dialogs for how to deal with errors found here.
-   //    Too complicated during auto-recover. Just correct problems the "safest" way.
-   int ProjectFSCK(const bool bForceError, const bool bAutoRecoverMode);
-
-   void FindMissingAliasedFiles(
-         BlockHash& missingAliasedFileAUFHash,     // output: (.auf) AliasBlockFiles whose aliased files are missing
-         BlockHash& missingAliasedFilePathHash);   // output: full paths of missing aliased files
+   void FindMissingAliasFiles(
+         BlockHash& missingAliasFilesAUFHash,     // output: (.auf) AliasBlockFiles whose aliased files are missing
+         BlockHash& missingAliasFilesPathHash);   // output: full paths of missing aliased files
    void FindMissingAUFs(
          BlockHash& missingAUFHash);               // output: missing (.auf) AliasBlockFiles
    void FindMissingAUs(
          BlockHash& missingAUHash);                // missing data (.au) blockfiles
    // Find .au and .auf files that are not in the project.
    void FindOrphanBlockFiles(
-         const wxArrayString& filePathArray,       // input: all files in project directory
-         wxArrayString& orphanFilePathArray);      // output: orphan files
+         const FilePaths &filePathArray,       // input: all files in project directory
+         FilePaths &orphanFilePathArray);      // output: orphan files
 
 
    // Remove all orphaned blockfiles without user interaction. This is
@@ -166,7 +217,7 @@ class PROFILE_DLL_API DirManager final : public XMLTagHandler {
    // Get directory where data files are in. Note that projects are normally
    // not interested in this information, but it is important for the
    // auto-save functionality
-   wxString GetDataFilesDir() const;
+   FilePath GetDataFilesDir() const;
 
    // This should only be used by the auto save functionality
    void SetLocalTempDir(const wxString &path);
@@ -208,16 +259,13 @@ class PROFILE_DLL_API DirManager final : public XMLTagHandler {
    void BalanceFileAdd(int);
    int BalanceMidAdd(int, int);
 
-   wxString projName;
-   wxString projPath;
-   wxString projFull;
+   FilePath projName;
+   FilePath projPath;
+   FilePath projFull;
 
-   wxString lastProject;
+   FilePaths aliasList;
 
-   wxArrayString aliasList;
-
-   BlockArray *mLoadingTarget;
-   unsigned mLoadingTargetIdx;
+   LoadingTarget mLoadingTarget;
    sampleFormat mLoadingFormat;
    size_t mLoadingBlockLen;
 

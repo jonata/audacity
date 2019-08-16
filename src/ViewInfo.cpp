@@ -9,126 +9,150 @@ Paul Licameli
 **********************************************************************/
 
 #include "ViewInfo.h"
+
 #include "Experimental.h"
 
 #include <algorithm>
 
-#include "AudioIO.h"
-#include "Internat.h"
-#include "Project.h"
-#include "prefs/GUISettings.h"
+#include "AudioIOBase.h"
 #include "Prefs.h"
+#include "Project.h"
 #include "xml/XMLWriter.h"
 #include "prefs/TracksBehaviorsPrefs.h"
+#include "xml/XMLWriter.h"
 
-namespace {
-static const double gMaxZoom = 6000000;
-static const double gMinZoom = 0.001;
+wxDEFINE_EVENT( EVT_SELECTED_REGION_CHANGE, SelectedRegionEvent );
+
+SelectedRegionEvent::SelectedRegionEvent(
+   wxEventType commandType, NotifyingSelectedRegion *pReg )
+: wxEvent{ 0, commandType }
+, pRegion{ pReg }
+{}
+
+wxEvent *SelectedRegionEvent::Clone() const
+{
+   return safenew SelectedRegionEvent{ *this };
 }
 
-ZoomInfo::ZoomInfo(double start, double pixelsPerSecond)
-   : vpos(0)
-   , h(start)
-   , zoom(pixelsPerSecond)
+NotifyingSelectedRegion& NotifyingSelectedRegion::operator =
+( const SelectedRegion &other )
 {
-   UpdatePrefs();
-}
-
-ZoomInfo::~ZoomInfo()
-{
-}
-
-void ZoomInfo::UpdatePrefs()
-{
-   dBr = gPrefs->Read(ENV_DB_KEY, ENV_DB_RANGE);
-}
-
-/// Converts a position (mouse X coordinate) to
-/// project time, in seconds.  Needs the left edge of
-/// the track as an additional parameter.
-double ZoomInfo::PositionToTime(wxInt64 position,
-   wxInt64 origin
-   , bool // ignoreFisheye
-) const
-{
-   return h + (position - origin) / zoom;
-}
-
-
-/// STM: Converts a project time to screen x position.
-wxInt64 ZoomInfo::TimeToPosition(double projectTime,
-   wxInt64 origin
-   , bool // ignoreFisheye
-) const
-{
-   double t = 0.5 + zoom * (projectTime - h) + origin ;
-   if( t < wxINT64_MIN )
-      return wxINT64_MIN;
-   if( t > wxINT64_MAX )
-      return wxINT64_MAX;
-   t = floor( t );
-   return t;
-}
-
-// This always ignores the fisheye.  Use with caution!
-// You should prefer to call TimeToPosition twice, for endpoints, and take the difference!
-double ZoomInfo::TimeRangeToPixelWidth(double timeRange) const
-{
-   return timeRange * zoom;
-}
-
-bool ZoomInfo::ZoomInAvailable() const
-{
-   return zoom < gMaxZoom;
-}
-
-bool ZoomInfo::ZoomOutAvailable() const
-{
-   return zoom > gMinZoom;
-}
-
-double ZoomInfo::GetZoom( ){ return zoom;};
-double ZoomInfo::GetMaxZoom( ){ return gMaxZoom;};
-double ZoomInfo::GetMinZoom( ){ return gMinZoom;};
-
-void ZoomInfo::SetZoom(double pixelsPerSecond)
-{
-   zoom = std::max(gMinZoom, std::min(gMaxZoom, pixelsPerSecond));
-// DA: Avoids stuck in snap-to
-#ifdef EXPERIMENTAL_DA
-   // Disable snapping if user zooms in a long way.
-   // Helps stop users be trapped in snap-to.
-   // The level chosen is in sample viewing range with samples
-   // still quite close together.
-   if( zoom > (gMaxZoom * 0.06  ))
-   {
-      AudacityProject * project = GetActiveProject();
-      if( project )
-         project->OnSnapToOff();
+   if ( mRegion != other ) {
+      mRegion = other;
+      Notify();
    }
-#endif
+   return *this;
 }
 
-void ZoomInfo::ZoomBy(double multiplier)
+bool NotifyingSelectedRegion::setTimes(double t0, double t1)
 {
-   SetZoom(zoom * multiplier);
-}
-
-void ZoomInfo::FindIntervals
-   (double /*rate*/, Intervals &results, wxInt64 width, wxInt64 origin) const
-{
-   results.clear();
-   results.reserve(2);
-
-   const wxInt64 rightmost(origin + (0.5 + width));
-   wxASSERT(origin <= rightmost);
-   {
-      results.push_back(Interval(origin, zoom, false));
+   bool result = false;
+   if ( mRegion.t0() != t0 || mRegion.t1() != t1 ) {
+      result = mRegion.setTimes( t0, t1 );
+      Notify();
    }
+   return result;
+}
 
-   if (origin < rightmost)
-      results.push_back(Interval(rightmost, 0, false));
-   wxASSERT(!results.empty() && results[0].position == origin);
+bool NotifyingSelectedRegion::setT0(double t, bool maySwap)
+{
+   bool result = false;
+   if ( mRegion.t0() != t ) {
+      result = mRegion.setT0( t, maySwap );
+      Notify();
+   }
+   return result;
+}
+
+bool NotifyingSelectedRegion::setT1(double t, bool maySwap)
+{
+   bool result = false;
+   if ( mRegion.t1() != t ) {
+      result = mRegion.setT1( t, maySwap );
+      Notify();
+   }
+   return result;
+}
+
+void NotifyingSelectedRegion::collapseToT0()
+{
+   if ( mRegion.t0() !=  mRegion.t1() ) {
+      mRegion.collapseToT0();
+      Notify();
+   }
+}
+
+void NotifyingSelectedRegion::collapseToT1()
+{
+   if ( mRegion.t0() !=  mRegion.t1() ) {
+      mRegion.collapseToT1();
+      Notify();
+   }
+}
+
+void NotifyingSelectedRegion::move(double delta)
+{
+   if (delta != 0) {
+      mRegion.move( delta );
+      Notify();
+   }
+}
+
+bool NotifyingSelectedRegion::setFrequencies(double f0, double f1)
+{
+   bool result = false;
+   if ( mRegion.f0() != f0 || mRegion.f1() != f1 ) {
+      result = mRegion.setFrequencies( f0, f1 );
+      Notify();
+   }
+   return result;
+}
+
+bool NotifyingSelectedRegion::setF0(double f, bool maySwap)
+{
+   bool result = false;
+   if ( mRegion.f0() != f ) {
+      result = mRegion.setF0( f, maySwap );
+      Notify();
+   }
+   return result;
+}
+
+bool NotifyingSelectedRegion::setF1(double f, bool maySwap)
+{
+   bool result = false;
+   if ( mRegion.f1() != f ) {
+      result = mRegion.setF1( f, maySwap );
+      Notify();
+   }
+   return result;
+}
+
+void NotifyingSelectedRegion::Notify()
+{
+   SelectedRegionEvent evt{ EVT_SELECTED_REGION_CHANGE, this };
+   ProcessEvent( evt );
+}
+
+static const AudacityProject::AttachedObjects::RegisteredFactory key{
+   []( AudacityProject &project ) {
+      auto result =
+         std::make_unique<ViewInfo>(0.0, 1.0, ZoomInfo::GetDefaultZoom());
+      project.Bind(EVT_TRACK_PANEL_TIMER,
+         &ViewInfo::OnTimer,
+         result.get());
+      return std::move( result );
+   }
+};
+
+ViewInfo &ViewInfo::Get( AudacityProject &project )
+{
+   return project.AttachedObjects::Get< ViewInfo >( key );
+}
+
+const ViewInfo &ViewInfo::Get( const AudacityProject &project )
+{
+   return Get( const_cast< AudacityProject & >( project ) );
 }
 
 ViewInfo::ViewInfo(double start, double screenDuration, double pixelsPerSecond)
@@ -147,6 +171,14 @@ ViewInfo::ViewInfo(double start, double screenDuration, double pixelsPerSecond)
    UpdatePrefs();
 }
 
+void ViewInfo::UpdateSelectedPrefs( int id )
+{
+   if (id == UpdateScrollPrefsID())
+      gPrefs->Read(wxT("/GUI/AutoScroll"), &bUpdateTrackIndicator,
+                   true);
+   ZoomInfo::UpdateSelectedPrefs( id );
+}
+
 void ViewInfo::UpdatePrefs()
 {
    ZoomInfo::UpdatePrefs();
@@ -156,6 +188,8 @@ void ViewInfo::UpdatePrefs()
 #endif
    gPrefs->Read(wxT("/GUI/AdjustSelectionEdges"), &bAdjustSelectionEdges,
       true);
+
+   UpdateSelectedPrefs( UpdateScrollPrefsID() );
 }
 
 void ViewInfo::SetBeforeScreenWidth(wxInt64 beforeWidth, wxInt64 screenWidth, double lowerBoundTime)
@@ -202,6 +236,15 @@ bool ViewInfo::ReadXMLAttribute(const wxChar *attr, const wxChar *value)
 
 void ViewInfo::OnTimer(wxCommandEvent &event)
 {
+   auto gAudioIO = AudioIOBase::Get();
    mRecentStreamTime = gAudioIO->GetStreamTime();
    event.Skip();
+   // Propagate the message to other listeners bound to this
+   this->ProcessEvent( event );
+}
+
+int ViewInfo::UpdateScrollPrefsID()
+{
+   static int value = wxNewId();
+   return value;
 }

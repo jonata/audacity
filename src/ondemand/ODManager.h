@@ -20,10 +20,8 @@ number of threads.
 #define __AUDACITY_ODMANAGER__
 
 #include <vector>
-#include "ODTask.h"
 #include "ODTaskThread.h"
-#include <wx/thread.h>
-#include <wx/wx.h>
+#include <wx/event.h> // for DECLARE_EXPORTED_EVENT_TYPE
 
 #ifdef __WXMAC__
 // On Mac OS X, it's better not to use the wxThread class.
@@ -32,12 +30,14 @@ number of threads.
 #include <time.h>
 #endif //__WXMAC__
 
-DECLARE_EXPORTED_EVENT_TYPE(AUDACITY_DLL_API, EVT_ODTASK_UPDATE, -1)
+wxDECLARE_EXPORTED_EVENT(AUDACITY_DLL_API,
+                         EVT_ODTASK_UPDATE, wxCommandEvent);
 
 ///wxstring compare function for sorting case, which is needed to load correctly.
 int CompareNoCaseFileName(const wxString& first, const wxString& second);
 /// A singleton that manages currently running Tasks on an arbitrary
 /// number of threads.
+class Track;
 class WaveTrack;
 class ODWaveTrackTaskQueue;
 class ODManager final
@@ -67,19 +67,20 @@ class ODManager final
    ///Wakes the queue loop up by signalling its condition variable.
    void SignalTaskQueueLoop();
 
-   ///removes a wavetrack and notifies its associated tasks to stop using its reference.
-   void RemoveWaveTrack(WaveTrack* track);
-
    ///if it shares a queue/task, creates a NEW queue/task for the track, and removes it from any previously existing tasks.
-   void MakeWaveTrackIndependent(WaveTrack* track);
+   void MakeWaveTrackIndependent( const std::shared_ptr< WaveTrack > &track);
 
    ///attach the track in question to another, already existing track's queues and tasks.  Remove the task/tracks.
    ///Returns success if it was possible..  Some ODTask conditions make it impossible until the Tasks finish.
-   bool MakeWaveTrackDependent(WaveTrack* dependentTrack,WaveTrack* masterTrack);
+   bool MakeWaveTrackDependent(
+      const std::shared_ptr< WaveTrack > &dependentTrack,
+      WaveTrack* masterTrack
+   );
 
    ///if oldTrack is being watched,
    ///replace the wavetrack whose wavecache the gui watches for updates
-   void ReplaceWaveTrack(Track *oldTrack, Track *newTrack);
+   void ReplaceWaveTrack(Track *oldTrack,
+      const std::shared_ptr< Track > &newTrack);
 
    ///Adds a task to the running queue.  Threas-safe.
    void AddTask(ODTask* task);

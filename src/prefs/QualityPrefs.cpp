@@ -18,21 +18,21 @@
 #include "../Audacity.h"
 #include "QualityPrefs.h"
 
+#include <wx/choice.h>
 #include <wx/defs.h>
+#include <wx/textctrl.h>
 
-#include "../AudioIO.h"
+#include "../AudioIOBase.h"
 #include "../Dither.h"
 #include "../Prefs.h"
 #include "../Resample.h"
-#include "../SampleFormat.h"
 #include "../ShuttleGui.h"
-#include "../Internat.h"
 
 #define ID_SAMPLE_RATE_CHOICE           7001
 
 //////////
 
-static const IdentInterfaceSymbol choicesFormat[] = {
+static const EnumValueSymbol choicesFormat[] = {
    { wxT("Format16Bit"), XO("16-bit") },
    { wxT("Format24Bit"), XO("24-bit") },
    { wxT("Format32BitFloat"), XO("32-bit float") }
@@ -47,50 +47,12 @@ static_assert( nChoicesFormat == WXSIZEOF(intChoicesFormat), "size mismatch" );
 
 static const size_t defaultChoiceFormat = 2; // floatSample
 
-static EncodedEnumSetting formatSetting{
+static EnumSetting formatSetting{
    wxT("/SamplingRate/DefaultProjectSampleFormatChoice"),
    choicesFormat, nChoicesFormat, defaultChoiceFormat,
    
    intChoicesFormat,
    wxT("/SamplingRate/DefaultProjectSampleFormat"),
-};
-
-//////////
-static const IdentInterfaceSymbol choicesDither[] = {
-   { XO("None") },
-   { XO("Rectangle") },
-   { XO("Triangle") },
-   { XO("Shaped") },
-};
-static const size_t nChoicesDither = WXSIZEOF( choicesDither );
-static const int intChoicesDither[] = {
-   (int) DitherType::none,
-   (int) DitherType::rectangle,
-   (int) DitherType::triangle,
-   (int) DitherType::shaped,
-};
-static_assert(
-   nChoicesDither == WXSIZEOF( intChoicesDither ),
-   "size mismatch"
-);
-
-static const size_t defaultFastDither = 0; // none
-
-static EncodedEnumSetting fastDitherSetting{
-   wxT("Quality/DitherAlgorithmChoice"),
-   choicesDither, nChoicesDither, defaultFastDither,
-   intChoicesDither,
-   wxT("Quality/DitherAlgorithm")
-};
-
-static const size_t defaultBestDither = 3; // shaped
-
-static EncodedEnumSetting bestDitherSetting{
-   wxT("Quality/HQDitherAlgorithmChoice"),
-   choicesDither, nChoicesDither, defaultBestDither,
-
-   intChoicesDither,
-   wxT("Quality/HQDitherAlgorithm")
 };
 
 //////////
@@ -109,13 +71,28 @@ QualityPrefs::~QualityPrefs()
 {
 }
 
+ComponentInterfaceSymbol QualityPrefs::GetSymbol()
+{
+   return QUALITY_PREFS_PLUGIN_SYMBOL;
+}
+
+wxString QualityPrefs::GetDescription()
+{
+   return _("Preferences for Quality");
+}
+
+wxString QualityPrefs::HelpPageName()
+{
+   return "Quality_Preferences";
+}
+
 void QualityPrefs::Populate()
 {
    // First any pre-processing for constructing the GUI.
    GetNamesAndLabels();
    gPrefs->Read(wxT("/SamplingRate/DefaultProjectSampleRate"),
                 &mOtherSampleRateValue,
-                44100);
+                AudioIOBase::GetOptimalSupportedSampleRate());
 
    //------------------------- Main section --------------------
    // Now construct the GUI itself.
@@ -149,13 +126,13 @@ void QualityPrefs::GetNamesAndLabels()
    //
    //      GetSupportedSampleRates() allows passing in device names, but
    //      how do you get at them as they are on the Audio I/O page????
-   for (int i = 0; i < AudioIO::NumStandardRates; i++) {
-      int iRate = AudioIO::StandardRates[i];
+   for (int i = 0; i < AudioIOBase::NumStandardRates; i++) {
+      int iRate = AudioIOBase::StandardRates[i];
       mSampleRateLabels.push_back(iRate);
-      mSampleRateNames.Add(wxString::Format(wxT("%i Hz"), iRate));
+      mSampleRateNames.push_back(wxString::Format(wxT("%i Hz"), iRate));
    }
 
-   mSampleRateNames.Add(_("Other..."));
+   mSampleRateNames.push_back(_("Other..."));
 
    // The label for the 'Other...' case can be any value at all.
    mSampleRateLabels.push_back(44100); // If chosen, this value will be overwritten
@@ -176,14 +153,14 @@ void QualityPrefs::PopulateOrExchange(ShuttleGui & S)
          {
             // If the value in Prefs isn't in the list, then we want
             // the last item, 'Other...' to be shown.
-            S.SetNoMatchSelector(mSampleRateNames.GetCount() - 1);
+            S.SetNoMatchSelector(mSampleRateNames.size() - 1);
             // First the choice...
             // We make sure it uses the ID we want, so that we get changes
             S.Id(ID_SAMPLE_RATE_CHOICE);
             // We make sure we have a pointer to it, so that we can drive it.
             mSampleRates = S.TieNumberAsChoice( {},
                                        wxT("/SamplingRate/DefaultProjectSampleRate"),
-                                       AudioIO::GetOptimalSupportedSampleRate(),
+                                       AudioIOBase::GetOptimalSupportedSampleRate(),
                                        mSampleRateNames,
                                        mSampleRateLabels);
 
@@ -210,7 +187,7 @@ void QualityPrefs::PopulateOrExchange(ShuttleGui & S)
 
          /* i18n-hint: technical term for randomization to reduce undesirable resampling artifacts */
          S.TieChoice(_("&Dither:"),
-                     fastDitherSetting);
+                     Dither::FastSetting);
       }
       S.EndMultiColumn();
    }
@@ -225,7 +202,7 @@ void QualityPrefs::PopulateOrExchange(ShuttleGui & S)
 
          /* i18n-hint: technical term for randomization to reduce undesirable resampling artifacts */
          S.TieChoice(_("Dit&her:"),
-                     bestDitherSetting);
+                     Dither::BestSetting);
       }
       S.EndMultiColumn();
    }
@@ -260,29 +237,15 @@ bool QualityPrefs::Commit()
    return true;
 }
 
-wxString QualityPrefs::HelpPageName()
-{
-   return "Quality_Preferences";
-}
-
-PrefsPanel *QualityPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
+PrefsPanel::Factory
+QualityPrefsFactory = [](wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
    return safenew QualityPrefs(parent, winid);
-}
+};
 
 sampleFormat QualityPrefs::SampleFormatChoice()
 {
    return (sampleFormat)formatSetting.ReadInt();
-}
-
-DitherType QualityPrefs::FastDitherChoice()
-{
-   return (DitherType) fastDitherSetting.ReadInt();
-}
-
-DitherType QualityPrefs::BestDitherChoice()
-{
-   return (DitherType) bestDitherSetting.ReadInt();
 }
 

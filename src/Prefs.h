@@ -30,13 +30,18 @@
 #define __AUDACITY_PREFS__
 
 #include "Audacity.h"
-#include "../include/audacity/IdentInterface.h"
 
-#include <wx/config.h>
-#include <wx/fileconf.h>
-#include <wx/convauto.h>
+#include "../include/audacity/ComponentInterface.h"
 
-void InitPreferences();
+#include <memory>
+#include <wx/fileconf.h>  // to inherit wxFileConfig
+#include <wx/event.h> // to declare custom event types
+
+class wxFileName;
+
+void InitPreferences( const wxFileName &configFileName );
+bool CheckWritablePreferences();
+wxString UnwritablePreferencesErrorMessage( const wxFileName &configFileName );
 void FinishPreferences();
 
 class AudacityPrefs;
@@ -45,27 +50,50 @@ class AudacityPrefs;
 extern AUDACITY_DLL_API AudacityPrefs *gPrefs;
 extern int gMenusDirty;
 
+
+/// \brief Our own specialisation of wxFileConfig.  It is essentially a renaming,
+/// though it does provide one new access function.  Most of the prefs work
+/// is actually done by the InitPreferences() function.
 class  AUDACITY_DLL_API AudacityPrefs : public wxFileConfig 
 {
 public:
-   AudacityPrefs(const wxString& appName = wxEmptyString,
-               const wxString& vendorName = wxEmptyString,
-               const wxString& localFilename = wxEmptyString,
-               const wxString& globalFilename = wxEmptyString,
+   AudacityPrefs(const wxString& appName = {},
+               const wxString& vendorName = {},
+               const wxString& localFilename = {},
+               const wxString& globalFilename = {},
                long style = wxCONFIG_USE_LOCAL_FILE | wxCONFIG_USE_GLOBAL_FILE,
                const wxMBConv& conv = wxConvAuto());
    bool GetEditClipsCanMove();
+
+   // Set and Get values of the version major/minor/micro keys in audacity.cfg when Audacity first opens
+   void SetVersionKeysInit( int major, int minor, int micro)
+   {
+      mVersionMajorKeyInit = major;
+      mVersionMinorKeyInit = minor;
+      mVersionMicroKeyInit = micro;
+   }
+   void GetVersionKeysInit( int& major, int& minor, int& micro) const
+   {
+      major = mVersionMajorKeyInit;
+      minor = mVersionMinorKeyInit;
+      micro = mVersionMicroKeyInit;
+   }
+
+   // values of the version major/minor/micro keys in audacity.cfg
+   // when Audacity first opens
+   int mVersionMajorKeyInit{};
+   int mVersionMinorKeyInit{};
+   int mVersionMicroKeyInit{};
 };
 
-// Packages a table of user-visible choices each with an internal code string,
-// a preference key path,
-// and a default choice
-class EnumSetting
+/// Packages a table of user-visible choices each with an internal code string,
+/// a preference key path, and a default choice
+class ChoiceSetting
 {
 public:
-   EnumSetting(
+   ChoiceSetting(
       const wxString &key,
-      const IdentInterfaceSymbol symbols[], size_t nSymbols,
+      const EnumValueSymbol symbols[], size_t nSymbols,
       size_t defaultSymbol
    )
       : mKey{ key }
@@ -79,10 +107,10 @@ public:
    }
 
    const wxString &Key() const { return mKey; }
-   const IdentInterfaceSymbol &Default() const
+   const EnumValueSymbol &Default() const
       { return mSymbols[mDefaultSymbol]; }
-   const IdentInterfaceSymbol *begin() const { return mSymbols; }
-   const IdentInterfaceSymbol *end() const { return mSymbols + mnSymbols; }
+   const EnumValueSymbol *begin() const { return mSymbols; }
+   const EnumValueSymbol *end() const { return mSymbols + mnSymbols; }
 
    wxString Read() const;
    bool Write( const wxString &value ); // you flush gPrefs afterward
@@ -93,7 +121,7 @@ protected:
 
    const wxString mKey;
 
-   const IdentInterfaceSymbol *mSymbols;
+   const EnumValueSymbol *mSymbols;
    const size_t mnSymbols;
 
    // stores an internal value
@@ -102,22 +130,22 @@ protected:
    const size_t mDefaultSymbol;
 };
 
-// Extends EnumSetting with a corresponding table of integer codes
-// (generally not equal to their table positions),
-// and optionally an old preference key path that stored integer codes, to be
-// migrated into one that stores internal string values instead
-class EncodedEnumSetting : public EnumSetting
+/// Extends ChoiceSetting with a corresponding table of integer codes
+/// (generally not equal to their table positions),
+/// and optionally an old preference key path that stored integer codes, to be
+/// migrated into one that stores internal string values instead
+class EnumSetting : public ChoiceSetting
 {
 public:
-   EncodedEnumSetting(
+   EnumSetting(
       const wxString &key,
-      const IdentInterfaceSymbol symbols[], size_t nSymbols,
+      const EnumValueSymbol symbols[], size_t nSymbols,
       size_t defaultSymbol,
 
       const int intValues[] = nullptr, // must have same size as symbols
       const wxString &oldKey = wxString("")
    )
-      : EnumSetting{ key, symbols, nSymbols, defaultSymbol }
+      : ChoiceSetting{ key, symbols, nSymbols, defaultSymbol }
       , mIntValues{ intValues }
       , mOldKey{ oldKey }
    {
@@ -136,5 +164,36 @@ private:
    const int *mIntValues;
    const wxString mOldKey;
 };
+
+// An event emitted by the application when the Preference dialog commits
+// changes
+wxDECLARE_EVENT(EVT_PREFS_UPDATE, wxCommandEvent);
+
+// Invoke UpdatePrefs() when Preference dialog commits changes.
+class AUDACITY_DLL_API PrefsListener
+{
+public:
+   PrefsListener();
+   virtual ~PrefsListener();
+
+   // Called when all preferences should be updated.
+   virtual void UpdatePrefs() = 0;
+
+protected:
+   // Called when only selected preferences are to be updated.
+   // id is some value generated by wxNewId() that identifies the portion
+   // of preferences.
+   // Default function does nothing.
+   virtual void UpdateSelectedPrefs( int id );
+
+private:
+   struct Impl;
+   std::unique_ptr<Impl> mpImpl;
+};
+
+/// Return the config file key associated with a warning dialog identified
+/// by internalDialogName.  When the box is checked, the value at the key
+/// becomes false.
+wxString WarningDialogKey(const wxString &internalDialogName);
 
 #endif

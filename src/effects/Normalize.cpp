@@ -19,16 +19,22 @@
 #include "../Audacity.h" // for rint from configwin.h
 #include "Normalize.h"
 
+#include "../Experimental.h"
+
 #include <math.h>
 
+#include <wx/checkbox.h>
 #include <wx/intl.h>
+#include <wx/stattext.h>
 #include <wx/valgen.h>
 
-#include "../Internat.h"
 #include "../Prefs.h"
+#include "../ProjectFileManager.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "../WaveTrack.h"
 #include "../widgets/valnum.h"
+#include "../widgets/ProgressDialog.h"
 
 // Define keys, defaults, minimums, and maximums for the effect parameters
 //
@@ -65,9 +71,9 @@ EffectNormalize::~EffectNormalize()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectNormalize::GetSymbol()
+ComponentInterfaceSymbol EffectNormalize::GetSymbol()
 {
    return NORMALIZE_PLUGIN_SYMBOL;
 }
@@ -275,7 +281,8 @@ bool EffectNormalize::Process()
          
          // Analysis loop over channels collects offsets and extent
          for (auto channel : range) {
-            float offset, extent2;
+            float offset = 0;
+            float extent2 = 0;
             bGoodResult =
                AnalyseTrack( channel, msg, progress, offset, extent2 );
             if ( ! bGoodResult )
@@ -357,7 +364,7 @@ void EffectNormalize::PopulateOrExchange(ShuttleGui & S)
          S.StartVerticalLay(false);
          {
             mDCCheckBox = S.AddCheckBox(_("Remove DC offset (center on 0.0 vertically)"),
-                                        mDC ? wxT("true") : wxT("false"));
+                                        mDC);
             mDCCheckBox->SetValidator(wxGenericValidator(&mDC));
 
             S.StartHorizontalLay(wxALIGN_LEFT, false);
@@ -368,13 +375,13 @@ void EffectNormalize::PopulateOrExchange(ShuttleGui & S)
                wxString prompt1 = _("Normalize peak amplitude to");
 #ifdef EXPERIMENTAL_R128_NORM
                wxString prompt2 = _("Normalize loudness to");
-               wxString longerPrompt = ((prompt1.Length() > prompt2.Length()) ? prompt1 : prompt2) + "   ";
+               wxString longerPrompt = ((prompt1.length() > prompt2.length()) ? prompt1 : prompt2) + "   ";
 #else
                wxString longerPrompt = prompt1 + "   ";
 #endif
                // Now make the checkbox.
                mGainCheckBox = S.AddCheckBox(longerPrompt,
-                                             mGain ? wxT("true") : wxT("false"));
+                                             mGain);
                mGainCheckBox->SetValidator(wxGenericValidator(&mGain));
                mGainCheckBox->SetMinSize( mGainCheckBox->GetSize());
 
@@ -393,11 +400,11 @@ void EffectNormalize::PopulateOrExchange(ShuttleGui & S)
             S.EndHorizontalLay();
 #ifdef EXPERIMENTAL_R128_NORM
             mUseLoudnessCheckBox = S.AddCheckBox(_("Use loudness instead of peak amplitude"),
-                                                 mUseLoudness ? wxT("true") : wxT("false"));
+                                                 mUseLoudness);
             mUseLoudnessCheckBox->SetValidator(wxGenericValidator(&mGUIUseLoudness));
 #endif
             mStereoIndCheckBox = S.AddCheckBox(_("Normalize stereo channels independently"),
-                                               mStereoInd ? wxT("true") : wxT("false"));
+                                               mStereoInd);
             mStereoIndCheckBox->SetValidator(wxGenericValidator(&mStereoInd));
          }
          S.EndVerticalLay();
@@ -468,7 +475,7 @@ bool EffectNormalize::AnalyseTrack(const WaveTrack * track, const wxString &msg,
          // Since we need complete summary data, we need to block until the OD tasks are done for this track
          // This is needed for track->GetMinMax
          // TODO: should we restrict the flags to just the relevant block files (for selections)
-         while (track->GetODFlags()) {
+         while (ProjectFileManager::GetODFlags( *track )) {
             // update the gui
             if (ProgressResult::Cancelled == mProgress->Update(
                0, _("Waiting for waveform to finish computing...")) )
@@ -753,7 +760,7 @@ void EffectNormalize::UpdateUI()
 
    if (!mUIParent->TransferDataFromWindow())
    {
-      mWarning->SetLabel(_(".  Maximum 0dB."));
+      mWarning->SetLabel(_("(Maximum 0dB)"));
       EnableApply(false);
       return;
    }

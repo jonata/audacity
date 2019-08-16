@@ -20,19 +20,18 @@ threshold of difference in two selected tracks
 
 #include "../Audacity.h"
 #include "CompareAudioCommand.h"
-#include "../MemoryX.h"
-#include "../Project.h"
+
+#include "../ViewInfo.h"
 #include "../WaveTrack.h"
-#include "Command.h"
 
 
 #include <float.h>
 #include <wx/intl.h>
 
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 #include "../widgets/valnum.h"
-#include "../SampleFormat.h"
 #include "CommandContext.h"
 
 extern void RegisterCompareAudio( Registrar & R){
@@ -44,10 +43,6 @@ extern void RegisterCompareAudio( Registrar & R){
 
 bool CompareAudioCommand::DefineParams( ShuttleParams & S ){
    S.Define( errorThreshold,  wxT("Threshold"),   0.0f,  0.0f,    0.01f,    1.0f );
-   return true;
-}
-
-bool CompareAudioCommand::Apply(){
    return true;
 }
 
@@ -66,8 +61,9 @@ void CompareAudioCommand::PopulateOrExchange(ShuttleGui & S)
 bool CompareAudioCommand::GetSelection(const CommandContext &context, AudacityProject &proj)
 {
    // Get the selected time interval
-   mT0 = proj.mViewInfo.selectedRegion.t0();
-   mT1 = proj.mViewInfo.selectedRegion.t1();
+   auto &selectedRegion = ViewInfo::Get( proj ).selectedRegion;
+   mT0 = selectedRegion.t0();
+   mT1 = selectedRegion.t1();
    if (mT0 >= mT1)
    {
       context.Error(wxT("There is no selection!"));
@@ -76,7 +72,7 @@ bool CompareAudioCommand::GetSelection(const CommandContext &context, AudacityPr
 
    // Get the selected tracks and check that there are at least two to
    // compare
-   auto trackRange = proj.GetTracks()->Selected< const WaveTrack >();
+   auto trackRange = TrackList::Get( proj ).Selected< const WaveTrack >();
    mTrack0 = *trackRange.first;
    if (mTrack0 == NULL)
    {
@@ -108,7 +104,7 @@ inline int min(int a, int b)
 
 bool CompareAudioCommand::Apply(const CommandContext & context)
 {
-   if (!GetSelection(context, *context.GetProject()))
+   if (!GetSelection(context, context.project))
    {
       return false;
    }

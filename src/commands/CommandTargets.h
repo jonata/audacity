@@ -56,12 +56,10 @@ and sends it to that message target.
 #define __COMMANDTARGETS__
 
 #include "../MemoryX.h"
-#include <wx/string.h>
-#include <wx/statusbr.h>
-//#include "../src/Project.h"
-#include "../widgets/ProgressDialog.h"
+#include <vector>
 #include "../commands/ResponseQueue.h"
-#include "../widgets/ErrorDialog.h"
+
+class wxStatusBar;
 
 /// Interface for objects that can receive command progress information
 class CommandProgressTarget /* not final */
@@ -82,14 +80,14 @@ public:
    virtual void EndArray();
    virtual void StartStruct();
    virtual void EndStruct();
-   virtual void AddItem(const wxString &value , const wxString &name="" );
-   virtual void AddBool(const bool value      , const wxString &name="" );
-   virtual void AddItem(const double value    , const wxString &name="" );
-   virtual void StartField( const wxString &name="" );
+   virtual void AddItem(const wxString &value , const wxString &name = {} );
+   virtual void AddBool(const bool value      , const wxString &name = {} );
+   virtual void AddItem(const double value    , const wxString &name = {} );
+   virtual void StartField( const wxString &name = {} );
    virtual void EndField( );
    virtual void Flush();
    wxString Escaped( const wxString & str);
-   wxArrayInt mCounts;
+   std::vector<int> mCounts;
 };
 
 class CommandMessageTargetDecorator : public CommandMessageTarget
@@ -102,13 +100,13 @@ public:
    void EndArray() override { mTarget.EndArray();}
    void StartStruct() override { mTarget.StartStruct();}
    void EndStruct() override { mTarget.EndStruct();}
-   void AddItem(const wxString &value , const wxString &name="" ) override
+   void AddItem(const wxString &value , const wxString &name = {} ) override
       { mTarget.AddItem(value,name);}
-   void AddBool(const bool value      , const wxString &name="" ) override
+   void AddBool(const bool value      , const wxString &name = {} ) override
       { mTarget.AddBool(value,name);}
-   void AddItem(const double value    , const wxString &name="" ) override
+   void AddItem(const double value    , const wxString &name = {} ) override
       { mTarget.AddItem(value,name);}
-   void StartField( const wxString &name="" ) override
+   void StartField( const wxString &name = {} ) override
       { mTarget.StartField(name);}
    void EndField( ) override
       { mTarget.EndField();}
@@ -125,10 +123,10 @@ public:
    virtual void EndArray() override;
    virtual void StartStruct() override;
    virtual void EndStruct() override;
-   virtual void AddItem(const wxString &value , const wxString &name="" )override;
-   virtual void AddBool(const bool value      , const wxString &name="" )override;
-   virtual void AddItem(const double value    , const wxString &name="" )override;
-   virtual void StartField( const wxString &name="" )override;
+   virtual void AddItem(const wxString &value , const wxString &name = {} )override;
+   virtual void AddBool(const bool value      , const wxString &name = {} )override;
+   virtual void AddItem(const double value    , const wxString &name = {} )override;
+   virtual void StartField( const wxString &name = {} )override;
    virtual void EndField( ) override;
 };
 
@@ -140,10 +138,10 @@ public:
    virtual void EndArray() override;
    virtual void StartStruct() override;
    virtual void EndStruct() override;
-   virtual void AddItem(const wxString &value , const wxString &name="" )override;
-   virtual void AddBool(const bool value      , const wxString &name="" )override;
-   virtual void AddItem(const double value    , const wxString &name="" )override;
-   virtual void StartField( const wxString &name="" )override;
+   virtual void AddItem(const wxString &value , const wxString &name = {} )override;
+   virtual void AddBool(const bool value      , const wxString &name = {} )override;
+   virtual void AddItem(const double value    , const wxString &name = {} )override;
+   virtual void StartField( const wxString &name = {} )override;
    virtual void EndField( ) override;
 };
 
@@ -154,6 +152,10 @@ public:
    virtual ~NullProgressTarget() {}
    void Update(double WXUNUSED(completed)) override {}
 };
+
+#if 0
+
+//#include "../widgets/ProgressDialog.h" // Member variable
 
 /// Sends command progress information to a ProgressDialog
 class GUIProgressTarget final : public CommandProgressTarget
@@ -170,6 +172,7 @@ public:
       mProgress.Update(completed);
    }
 };
+#endif
 
 
 ///
@@ -203,10 +206,7 @@ class MessageBoxTarget final : public CommandMessageTarget
 {
 public:
    virtual ~MessageBoxTarget() {}
-   void Update(const wxString &message) override
-   {
-      AudacityMessageBox(message);
-   }
+   void Update(const wxString &message) override;
 };
 
 /// Displays messages from a command in a wxStatusBar
@@ -218,29 +218,26 @@ public:
    StatusBarTarget(wxStatusBar &sb)
       : mStatus(sb)
    {}
-   void Update(const wxString &message) override
-   {
-      mStatus.SetStatusText(message, 0);
-   }
+   void Update(const wxString &message) override;
 };
 
-/// Adds messages to a response queue (to be sent back to a script)
+/// Adds messages to the global response queue (to be sent back to a script)
 class ResponseQueueTarget final : public CommandMessageTarget
 {
 private:
-   ResponseQueue &mResponseQueue;
    wxString mBuffer;
 public:
-   ResponseQueueTarget(ResponseQueue &responseQueue)
-      : mResponseQueue(responseQueue),
-       mBuffer( wxEmptyString )
+   static ResponseQueue &sResponseQueue();
+
+   ResponseQueueTarget()
+      : mBuffer( wxEmptyString )
    { }
    virtual ~ResponseQueueTarget()
    {
       if( mBuffer.StartsWith("\n" ) )
          mBuffer = mBuffer.Mid( 1 );
-      mResponseQueue.AddResponse( mBuffer  );
-      mResponseQueue.AddResponse(wxString(wxT("\n")));
+      sResponseQueue().AddResponse( mBuffer  );
+      sResponseQueue().AddResponse(wxString(wxT("\n")));
    }
    void Update(const wxString &message) override
    {
@@ -366,17 +363,17 @@ public:
       if (mStatusTarget)
          mStatusTarget->EndField();
    }
-   void AddItem(const wxString &value , const wxString &name="" )
+   void AddItem(const wxString &value , const wxString &name = {} )
    {
       if (mStatusTarget)
          mStatusTarget->AddItem( value, name );
    }
-   void AddBool(const bool value      , const wxString &name="" )
+   void AddBool(const bool value      , const wxString &name = {} )
    {
       if (mStatusTarget)
          mStatusTarget->AddItem( value, name );
    }
-   void AddItem(const double value    , const wxString &name="" )
+   void AddItem(const double value    , const wxString &name = {} )
    {
       if (mStatusTarget)
          mStatusTarget->AddItem( value, name );

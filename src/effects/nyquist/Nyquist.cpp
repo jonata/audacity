@@ -24,46 +24,61 @@ effects from this one class.
 
 *//*******************************************************************/
 
-#include "../../Audacity.h"
+#include "../../Audacity.h" // for USE_* macros
+#include "Nyquist.h"
+
+#include "../../Experimental.h"
 
 #include <algorithm>
 #include <cmath>
 
 #include <locale.h>
 
+#include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
 #include <wx/datetime.h>
 #include <wx/intl.h>
 #include <wx/log.h>
+#include <wx/scrolwin.h>
+#include <wx/sizer.h>
+#include <wx/slider.h>
 #include <wx/sstream.h>
+#include <wx/stattext.h>
 #include <wx/textdlg.h>
+#include <wx/tokenzr.h>
 #include <wx/txtstrm.h>
 #include <wx/valgen.h>
 #include <wx/wfstream.h>
 #include <wx/numformatter.h>
+#include <wx/stdpaths.h>
 
-#include "../../AudacityApp.h"
-#include "../../FileException.h"
+#include "../EffectManager.h"
+#include "../../DirManager.h"
 #include "../../FileNames.h"
-#include "../../Internat.h"
 #include "../../LabelTrack.h"
 #include "../../NoteTrack.h"
 #include "../../TimeTrack.h"
 #include "../../prefs/SpectrogramSettings.h"
 #include "../../Project.h"
+#include "../../ProjectSettings.h"
+#include "../../ShuttleGetDefinition.h"
 #include "../../ShuttleGui.h"
+#include "../../ViewInfo.h"
 #include "../../WaveClip.h"
 #include "../../WaveTrack.h"
 #include "../../widgets/valnum.h"
-#include "../../widgets/ErrorDialog.h"
+#include "../../widgets/AudacityMessageBox.h"
 #include "../../Prefs.h"
+#include "../../wxFileNameWrapper.h"
+#include "../../prefs/GUIPrefs.h"
 #include "../../prefs/WaveformSettings.h"
+#include "../../tracks/playabletrack/wavetrack/ui/WaveTrackView.h"
+#include "../../tracks/playabletrack/wavetrack/ui/WaveTrackViewConstants.h"
 #include "../../widgets/NumericTextCtrl.h"
+#include "../../widgets/ProgressDialog.h"
 
 #include "../lib-src/FileDialog/FileDialog.h"
-
-#include "Nyquist.h"
 
 #ifndef nyx_returns_start_and_end_time
 #error You need to update lib-src/libnyquist
@@ -74,8 +89,6 @@ effects from this one class.
 #include <ostream>
 #include <sstream>
 #include <float.h>
-
-#include "../../Experimental.h"
 
 int NyquistEffect::mReentryCount = 0;
 
@@ -128,8 +141,6 @@ NyquistEffect::NyquistEffect(const wxString &fName)
    mOutputTrack[0] = mOutputTrack[1] = nullptr;
 
    mAction = XO("Applying Nyquist Effect...");
-   mInputCmd = wxEmptyString;
-   mCmd = wxEmptyString;
    mIsPrompt = false;
    mExternal = false;
    mCompiler = false;
@@ -155,19 +166,8 @@ NyquistEffect::NyquistEffect(const wxString &fName)
 
    mMaxLen = NYQ_MAX_LEN;
 
-   // Interactive Nyquist (for effects)
-   if (fName == NYQUIST_EFFECTS_PROMPT_ID) {
-      mName = XO("Nyquist Effects Prompt");
-      mType = EffectTypeProcess;
-      mPromptName = mName;
-      mPromptType = mType;
-      mOK = true;
-      mIsPrompt = true;
-      return;
-   }
-
-   // Interactive Nyquist (for general tools)
-   if (fName == NYQUIST_TOOLS_PROMPT_ID) {
+   // Interactive Nyquist
+   if (fName == NYQUIST_PROMPT_ID) {
       mName = XO("Nyquist Prompt");
       mType = EffectTypeTool;
       mIsTool = true;
@@ -198,29 +198,25 @@ NyquistEffect::~NyquistEffect()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-wxString NyquistEffect::GetPath()
+PluginPath NyquistEffect::GetPath()
 {
    if (mIsPrompt)
-      return (mPromptType == EffectTypeTool) ?
-         NYQUIST_TOOLS_PROMPT_ID :
-         NYQUIST_EFFECTS_PROMPT_ID;
+      return NYQUIST_PROMPT_ID;
 
    return mFileName.GetFullPath();
 }
 
-IdentInterfaceSymbol NyquistEffect::GetSymbol()
+ComponentInterfaceSymbol NyquistEffect::GetSymbol()
 {
    if (mIsPrompt)
-      return (mPromptType == EffectTypeTool) ?
-         XO("Nyquist Prompt") :
-         XO("Nyquist Effects Prompt");
+      return XO("Nyquist Prompt");
 
    return mName;
 }
 
-IdentInterfaceSymbol NyquistEffect::GetVendor()
+VendorSymbol NyquistEffect::GetVendor()
 {
    if (mIsPrompt)
    {
@@ -249,10 +245,10 @@ wxString NyquistEffect::ManualPage()
 
 wxString NyquistEffect::HelpPage()
 {
-   wxArrayString paths = NyquistEffect::GetNyquistSearchPath();
+   auto paths = NyquistEffect::GetNyquistSearchPath();
    wxString fileName;
 
-   for (size_t i = 0, cnt = paths.GetCount(); i < cnt; i++) {
+   for (size_t i = 0, cnt = paths.size(); i < cnt; i++) {
       fileName = wxFileName(paths[i] + wxT("/") + mHelpFile).GetFullPath();
       if (wxFileExists(fileName)) {
          mHelpFileExists = true;
@@ -276,7 +272,7 @@ EffectType NyquistEffect::GetClassification()
    return mType;
 }
 
-IdentInterfaceSymbol NyquistEffect::GetFamilyId()
+EffectFamilySymbol NyquistEffect::GetFamily()
 {
    return NYQUISTEFFECTS_FAMILY;
 }
@@ -547,8 +543,12 @@ bool NyquistEffect::Init()
       bool bAllowSpectralEditing = true;
 
       for ( auto t :
-               project->GetTracks()->Selected< const WaveTrack >() ) {
-         if (t->GetDisplay() != WaveTrack::Spectrum ||
+               TrackList::Get( *project ).Selected< const WaveTrack >() ) {
+         const auto displays = WaveTrackView::Get(*t).GetDisplays();
+         bool hasSpectral =
+            make_iterator_range( displays.begin(), displays.end())
+               .contains( WaveTrackViewConstants::Spectrum );
+         if ( !hasSpectral ||
              !(t->GetSpectrogramSettings().SpectralSelectionEnabled())) {
             bAllowSpectralEditing = false;
             break;
@@ -650,8 +650,8 @@ bool NyquistEffect::Process()
       ? 0
       : mOutputTracks->Selected< const WaveTrack >().size();
 
-   mDebugOutput.Clear();
-   if (!mHelpFile.IsEmpty() && !mHelpFileExists) {
+   mDebugOutput.clear();
+   if (!mHelpFile.empty() && !mHelpFileExists) {
       mDebugOutput = wxString::Format(_("error: File \"%s\" specified in header but not found in plug-in path.\n"), mHelpFile);
    }
 
@@ -662,9 +662,8 @@ bool NyquistEffect::Process()
       mProps = wxEmptyString;
 
       mProps += wxString::Format(wxT("(putprop '*AUDACITY* (list %d %d %d) 'VERSION)\n"), AUDACITY_VERSION, AUDACITY_RELEASE, AUDACITY_REVISION);
-      // TODO: Document.
       wxString lang = gPrefs->Read(wxT("/Locale/Language"), wxT(""));
-      lang = (lang == wxEmptyString)? wxGetApp().InitLang(lang) : lang;
+      lang = (lang.empty())? GUIPrefs::SetLang(lang) : lang;
       mProps += wxString::Format(wxT("(putprop '*AUDACITY* \"%s\" 'LANGUAGE)\n"), lang);
 
       mProps += wxString::Format(wxT("(setf *DECIMAL-SEPARATOR* #\\%c)\n"), wxNumberFormatter::GetDecimalSeparator());
@@ -673,10 +672,13 @@ bool NyquistEffect::Process()
       mProps += wxString::Format(wxT("(putprop '*SYSTEM-DIR* \"%s\" 'DATA)\n"), EscapeString(FileNames::DataDir()));
       mProps += wxString::Format(wxT("(putprop '*SYSTEM-DIR* \"%s\" 'HELP)\n"), EscapeString(FileNames::HtmlHelpDir().RemoveLast()));
       mProps += wxString::Format(wxT("(putprop '*SYSTEM-DIR* \"%s\" 'TEMP)\n"), EscapeString(FileNames::TempDir()));
+      mProps += wxString::Format(wxT("(putprop '*SYSTEM-DIR* \"%s\" 'SYS-TEMP)\n"), EscapeString(wxStandardPaths::Get().GetTempDir()));
+      mProps += wxString::Format(wxT("(putprop '*SYSTEM-DIR* \"%s\" 'DOCUMENTS)\n"), EscapeString(wxStandardPaths::Get().GetDocumentsDir()));
+      mProps += wxString::Format(wxT("(putprop '*SYSTEM-DIR* \"%s\" 'HOME)\n"), EscapeString(wxGetHomeDir()));
 
-      wxArrayString paths = NyquistEffect::GetNyquistSearchPath();
+      auto paths = NyquistEffect::GetNyquistSearchPath();
       wxString list;
-      for (size_t i = 0, cnt = paths.GetCount(); i < cnt; i++)
+      for (size_t i = 0, cnt = paths.size(); i < cnt; i++)
       {
          list += wxT("\"") + EscapeString(paths[i]) + wxT("\" ");
       }
@@ -684,7 +686,8 @@ bool NyquistEffect::Process()
 
       mProps += wxString::Format(wxT("(putprop '*SYSTEM-DIR* (list %s) 'PLUGIN)\n"), list);
       mProps += wxString::Format(wxT("(putprop '*SYSTEM-DIR* (list %s) 'PLUG-IN)\n"), list);
-
+      mProps += wxString::Format(wxT("(putprop '*SYSTEM-DIR* \"%s\" 'USER-PLUG-IN)\n"),
+                                 EscapeString(FileNames::PlugInDir()));
 
       // Date and time:
       wxDateTime now = wxDateTime::Now();
@@ -709,18 +712,19 @@ bool NyquistEffect::Process()
       mProps += wxString::Format(wxT("(putprop '*SYSTEM-TIME* \"%s\" 'MONTH-NAME)\n"), now.GetMonthName(month));
       mProps += wxString::Format(wxT("(putprop '*SYSTEM-TIME* \"%s\" 'DAY-NAME)\n"), now.GetWeekDayName(day));
 
-      mProps += wxString::Format(wxT("(putprop '*PROJECT* %d 'PROJECTS)\n"), (int) gAudacityProjects.size());
-      mProps += wxString::Format(wxT("(putprop '*PROJECT* \"%s\" 'NAME)\n"), project->GetName());
+      mProps += wxString::Format(wxT("(putprop '*PROJECT* %d 'PROJECTS)\n"),
+         (int) AllProjects{}.size());
+      mProps += wxString::Format(wxT("(putprop '*PROJECT* \"%s\" 'NAME)\n"), project->GetProjectName());
 
       int numTracks = 0;
       int numWave = 0;
       int numLabel = 0;
       int numMidi = 0;
       int numTime = 0;
-      wxString waveTrackList = wxT("");   // track positions of selected audio tracks.
+      wxString waveTrackList;   // track positions of selected audio tracks.
 
       {
-         auto countRange = project->GetTracks()->Leaders();
+         auto countRange = TrackList::Get( *project ).Leaders();
          for (auto t : countRange) {
             t->TypeSwitch( [&](const WaveTrack *) {
                numWave++;
@@ -741,7 +745,7 @@ bool NyquistEffect::Process()
       // numbers to Nyquist, whereas using "%g" will use the user's
       // decimal separator which may be a comma in some countries.
       mProps += wxString::Format(wxT("(putprop '*PROJECT* (float %s) 'RATE)\n"),
-                                 Internat::ToString(project->GetRate()));
+         Internat::ToString(ProjectSettings::Get(*project).GetRate()));
       mProps += wxString::Format(wxT("(putprop '*PROJECT* %d 'TRACKS)\n"), numTracks);
       mProps += wxString::Format(wxT("(putprop '*PROJECT* %d 'WAVETRACKS)\n"), numWave);
       mProps += wxString::Format(wxT("(putprop '*PROJECT* %d 'LABELTRACKS)\n"), numLabel);
@@ -783,7 +787,8 @@ bool NyquistEffect::Process()
 
    for (;
         bOnePassTool || pRange->first != pRange->second;
-        ++pRange->first) {
+        (void) (!pRange || (++pRange->first, true))
+   ) {
       mCurTrack[0] = pRange ? *pRange->first : nullptr;
       mCurNumChannels = 1;
       if ( (mT1 >= mT0) || bOnePassTool ) {
@@ -915,7 +920,7 @@ bool NyquistEffect::Process()
 finish:
 
    // Show debug window if trace set in plug-in header and something to show.
-   mDebug = (mTrace && !mDebugOutput.IsEmpty())? true : mDebug;
+   mDebug = (mTrace && !mDebugOutput.empty())? true : mDebug;
 
    if (mDebug && !mRedirectOutput) {
       NyquistOutputDialog dlog(mUIParent, -1,
@@ -934,8 +939,9 @@ finish:
       // Selection is to be set to whatever it is in the project.
       AudacityProject *project = GetActiveProject();
       if (project) {
-         mT0 = project->GetSel0();
-         mT1 = project->GetSel1();
+         auto &selectedRegion = ViewInfo::Get( *project ).selectedRegion;
+         mT0 = selectedRegion.t0();
+         mT1 = selectedRegion.t1();
       }
       else {
          mT0 = 0;
@@ -1061,16 +1067,22 @@ bool NyquistEffect::ProcessOne()
       wxString bitFormat;
       wxString spectralEditp;
 
+      using namespace WaveTrackViewConstants;
       mCurTrack[0]->TypeSwitch(
          [&](const WaveTrack *wt) {
             type = wxT("wave");
             spectralEditp = mCurTrack[0]->GetSpectrogramSettings().SpectralSelectionEnabled()? wxT("T") : wxT("NIL");
-            switch (wt->GetDisplay())
+            // To do: accommodate split views
+            auto viewType = WaveTrackViewConstants::NoDisplay;
+            auto displays = WaveTrackView::Get( *wt ).GetDisplays();
+            if (!displays.empty())
+               viewType = displays[0];
+            switch ( viewType )
             {
-            case WaveTrack::Waveform:
+            case Waveform:
                view = (mCurTrack[0]->GetWaveformSettings().scaleType == 0) ? wxT("\"Waveform\"") : wxT("\"Waveform (dB)\"");
                break;
-            case WaveTrack::Spectrum:
+            case Spectrum:
                view = wxT("\"Spectrogram\"");
                break;
             default: view = wxT("NIL"); break;
@@ -1312,7 +1324,7 @@ bool NyquistEffect::ProcessOne()
    rval = nyx_eval_expression(cmd.mb_str(wxConvUTF8));
 
    // If we're not showing debug window, log errors and warnings:
-   if (!mDebugOutput.IsEmpty() && !mDebug && !mTrace) {
+   if (!mDebugOutput.empty() && !mDebug && !mTrace) {
       /* i18n-hint: An effect "returned" a message.*/
       wxLogMessage(_("\'%s\' returned:\n%s"), mName, mDebugOutput);
    }
@@ -1350,20 +1362,21 @@ bool NyquistEffect::ProcessOne()
       if (mTrace) {
          /* i18n-hint: "%s" is replaced by name of plug-in.*/
          mDebugOutput = wxString::Format(_("nyx_error returned from %s.\n"),
-                                         mName.IsEmpty()? _("plug-in") : mName) + mDebugOutput;
+                                         mName.empty()? _("plug-in") : mName) + mDebugOutput;
          mDebug = true;
-         return false;
       }
       else {
          wxLogMessage("Nyquist returned nyx_error:\n%s", mDebugOutput);
       }
-      return true;
+      return false;
    }
 
    if (rval == nyx_string) {
       wxString msg = NyquistToWxString(nyx_get_string());
-      if (!msg.IsEmpty())  // Not currently a documented feature, but could be useful as a No-Op.
+      if (!msg.empty())  // Empty string may be used as a No-Op return value.
          Effect::MessageBox(msg);
+      else
+         return true;
 
       // True if not process type.
       // If not returning audio from process effect,
@@ -1374,7 +1387,7 @@ bool NyquistEffect::ProcessOne()
 
    if (rval == nyx_double) {
       wxString str;
-      str.Printf(_("Nyquist returned the value:") + wxString(wxT(" %f")),
+      str.Printf(_("Nyquist returned the value: %f"),
                  nyx_get_double());
       Effect::MessageBox(str);
       return (GetType() != EffectTypeProcess || mIsPrompt);
@@ -1382,7 +1395,7 @@ bool NyquistEffect::ProcessOne()
 
    if (rval == nyx_int) {
       wxString str;
-      str.Printf(_("Nyquist returned the value:") + wxString(wxT(" %d")),
+      str.Printf(_("Nyquist returned the value: %d"),
                  nyx_get_int());
       Effect::MessageBox(str);
       return (GetType() != EffectTypeProcess || mIsPrompt);
@@ -1405,7 +1418,7 @@ bool NyquistEffect::ProcessOne()
          // let Nyquist analyzers define more complicated selections
          nyx_get_label(l, &t0, &t1, &str);
 
-         ltrack->AddLabel(SelectedRegion(t0 + mT0, t1 + mT0), UTF8CTOWX(str), -2);
+         ltrack->AddLabel(SelectedRegion(t0 + mT0, t1 + mT0), UTF8CTOWX(str));
       }
       return (GetType() != EffectTypeProcess || mIsPrompt);
    }
@@ -1428,7 +1441,7 @@ bool NyquistEffect::ProcessOne()
       return false;
    }
 
-   std::unique_ptr<WaveTrack> outputTrack[2];
+   std::shared_ptr<WaveTrack> outputTrack[2];
 
    double rate = mCurTrack[0]->GetRate();
    for (int i = 0; i < outChannels; i++) {
@@ -1439,7 +1452,6 @@ bool NyquistEffect::ProcessOne()
       }
 
       outputTrack[i] = mFactory->NewWaveTrack(format, rate);
-      outputTrack[i]->SetWaveColorIndex( mCurTrack[i]->GetWaveColorIndex() );
 
       // Clean the initial buffer states again for the get callbacks
       // -- is this really needed?
@@ -1471,7 +1483,7 @@ bool NyquistEffect::ProcessOne()
 
       if (mOutputTime <= 0) {
          Effect::MessageBox(_("Nyquist returned nil audio.\n"));
-         return true;
+         return false;
       }
    }
 
@@ -1520,7 +1532,7 @@ bool NyquistEffect::ProcessOne()
 wxString NyquistEffect::NyquistToWxString(const char *nyqString)
 {
     wxString str(nyqString, wxConvUTF8);
-    if (nyqString != NULL && nyqString[0] && str.IsEmpty()) {
+    if (nyqString != NULL && nyqString[0] && str.empty()) {
         // invalid UTF-8 string, convert as Latin-1
         str = _("[Warning: Nyquist returned invalid UTF-8 string, converted here as Latin-1]");
        // TODO: internationalization of strings from Nyquist effects, at least
@@ -1540,9 +1552,9 @@ wxString NyquistEffect::EscapeString(const wxString & inStr)
    return str;
 }
 
-std::vector<IdentInterfaceSymbol> NyquistEffect::ParseChoice(const wxString & text)
+std::vector<EnumValueSymbol> NyquistEffect::ParseChoice(const wxString & text)
 {
-   std::vector<IdentInterfaceSymbol> results;
+   std::vector<EnumValueSymbol> results;
    if (text[0] == wxT('(')) {
       // New style:  expecting a Lisp-like list of strings
       Tokenizer tzer;
@@ -1562,7 +1574,7 @@ std::vector<IdentInterfaceSymbol> NyquistEffect::ParseChoice(const wxString & te
       // un-internationalized names, ignoring leading and trailing spaces
       // on each; and the whole may be quoted
       auto choices = wxStringTokenize(
-         text[0] == wxT('"') ? text.Mid(1, text.Length() - 2) : text,
+         text[0] == wxT('"') ? text.Mid(1, text.length() - 2) : text,
          wxT(",")
       );
       for (auto &choice : choices)
@@ -1604,7 +1616,7 @@ wxString NyquistEffect::UnQuote(const wxString &s, bool allowParens,
    if (pExtraString)
       *pExtraString = wxString{};
 
-   int len = s.Length();
+   int len = s.length();
    if (len >= 2 && s[0] == wxT('\"') && s[len - 1] == wxT('\"')) {
       auto unquoted = s.Mid(1, len - 2);
       return wxGetTranslation( unquoted );
@@ -1645,7 +1657,7 @@ double NyquistEffect::GetCtrlValue(const wxString &s)
    AudacityProject *project = GetActiveProject();
    if (project && s.IsSameAs(wxT("half-srate"), false)) {
       auto rate =
-         project->GetTracks()->Selected< const WaveTrack >()
+         TrackList::Get( *project ).Selected< const WaveTrack >()
             .min( &WaveTrack::GetRate );
       return (rate / 2.0);
    }
@@ -1982,7 +1994,7 @@ bool NyquistEffect::Parse(
          // valStr may or may not be a quoted string
          ctrl.valStr = len > 5 ? tokens[5] : wxT("");
          ctrl.val = GetCtrlValue(ctrl.valStr);
-         if (ctrl.valStr.Len() > 0 &&
+         if (ctrl.valStr.length() > 0 &&
                (ctrl.valStr[0] == wxT('(') ||
                ctrl.valStr[0] == wxT('"')))
             ctrl.valStr = UnQuote( ctrl.valStr );
@@ -2081,7 +2093,7 @@ bool NyquistEffect::Parse(
          }
       }
 
-      if( mPresetNames.Index( ctrl.var ) == wxNOT_FOUND )
+      if( ! make_iterator_range( mPresetNames ).contains( ctrl.var ) )
       {
          mControls.push_back(ctrl);
       }
@@ -2089,8 +2101,8 @@ bool NyquistEffect::Parse(
 
    // Deprecated
    if (len >= 2 && tokens[0] == wxT("categories")) {
-      for (size_t i = 1; i < tokens.GetCount(); ++i) {
-         mCategories.Add(tokens[i]);
+      for (size_t i = 1; i < tokens.size(); ++i) {
+         mCategories.push_back(tokens[i]);
       }
    }
    return true;
@@ -2104,12 +2116,12 @@ bool NyquistEffect::ParseProgram(wxInputStream & stream)
       return false;
    }
 
-   wxTextInputStream pgm(stream, wxT(" \t"), wxConvUTF8);
+   wxTextInputStream pgm(stream, wxT(" \t"), wxConvAuto());
 
    mCmd = wxT("");
    mIsSal = false;
    mControls.clear();
-   mCategories.Clear();
+   mCategories.clear();
    mIsSpectral = false;
    mManPage = wxEmptyString; // If not wxEmptyString, must be a page in the Audacity manual.
    mHelpFile = wxEmptyString; // If not wxEmptyString, must be a valid HTML help file.
@@ -2128,8 +2140,8 @@ bool NyquistEffect::ParseProgram(wxInputStream & stream)
    while (!stream.Eof() && stream.IsOk())
    {
       bool dollar = false;
-      wxString line = pgm.ReadLine().Trim(false);
-      if (line.Length() > 1 &&
+      wxString line = pgm.ReadLine();
+      if (line.length() > 1 &&
           // New in 2.3.0:  allow magic comment lines to start with $
           // The trick is that xgettext will not consider such lines comments
           // and will extract the strings they contain
@@ -2143,7 +2155,7 @@ bool NyquistEffect::ParseProgram(wxInputStream & stream)
             // Allow run-ons only for new $ format header lines
             done = Parse(tzer, line, !dollar || stream.Eof(), nLines == 1);
          while(!done &&
-            (line = pgm.ReadLine().Trim(false), ++nLines, true));
+            (line = pgm.ReadLine(), ++nLines, true));
 
          // Don't pass these lines to the interpreter, so it doesn't get confused
          // by $, but pass blanks,
@@ -2153,9 +2165,9 @@ bool NyquistEffect::ParseProgram(wxInputStream & stream)
       }
       else
       {
-         if(!mFoundType && line.Length() > 0) {
+         if(!mFoundType && line.length() > 0) {
             if (line[0] == wxT('(') ||
-                (line[0] == wxT('#') && line.Length() > 1 && line[1] == wxT('|')))
+                (line[0] == wxT('#') && line.length() > 1 && line[1] == wxT('|')))
             {
                mIsSal = false;
                mFoundType = true;
@@ -2350,19 +2362,19 @@ void NyquistEffect::OSCallback()
 #endif
 }
 
-wxArrayString NyquistEffect::GetNyquistSearchPath()
+FilePaths NyquistEffect::GetNyquistSearchPath()
 {
-   wxArrayString audacityPathList = wxGetApp().audacityPathList;
-   wxArrayString pathList;
+   const auto &audacityPathList = FileNames::AudacityPathList();
+   FilePaths pathList;
 
-   for (size_t i = 0; i < audacityPathList.GetCount(); i++)
+   for (size_t i = 0; i < audacityPathList.size(); i++)
    {
       wxString prefix = audacityPathList[i] + wxFILE_SEP_PATH;
-      wxGetApp().AddUniquePathToPathList(prefix + wxT("nyquist"), pathList);
-      wxGetApp().AddUniquePathToPathList(prefix + wxT("plugins"), pathList);
-      wxGetApp().AddUniquePathToPathList(prefix + wxT("plug-ins"), pathList);
+      FileNames::AddUniquePathToPathList(prefix + wxT("nyquist"), pathList);
+      FileNames::AddUniquePathToPathList(prefix + wxT("plugins"), pathList);
+      FileNames::AddUniquePathToPathList(prefix + wxT("plug-ins"), pathList);
    }
-   pathList.Add(FileNames::PlugInDir());
+   pathList.push_back(FileNames::PlugInDir());
 
    return pathList;
 }
@@ -2556,7 +2568,7 @@ void NyquistEffect::BuildPromptWindow(ShuttleGui & S)
          S.AddSpace(1, 1);
 
          mVersionCheckBox = S.AddCheckBox(_("&Use legacy (version 3) syntax."),
-                                          (mVersion == 3) ? wxT("true") : wxT("false"));
+                                          (mVersion == 3));
       }
       S.EndMultiColumn();
 
@@ -2620,7 +2632,7 @@ void NyquistEffect::BuildEffectWindow(ShuttleGui & S)
 
                   auto choices =
                      LocalizedStrings(ctrl.choices.data(), ctrl.choices.size());
-                  S.Id(ID_Choice + i).AddChoice( {}, wxT(""), &choices);
+                  S.Id(ID_Choice + i).AddChoice( {}, choices );
                }
                else if (ctrl.type == NYQ_CTRL_TIME)
                {
@@ -2646,7 +2658,7 @@ void NyquistEffect::BuildEffectWindow(ShuttleGui & S)
                   S.AddSpace(10, 10);
 
                   // Get default file extension if specified in wildcards
-                  wxString defaultExtension = "";
+                  wxString defaultExtension;
                   size_t len = ctrl.lowStr.length();
                   int characters = ctrl.lowStr.Find("*");
 
@@ -2665,7 +2677,7 @@ void NyquistEffect::BuildEffectWindow(ShuttleGui & S)
                   item->SetValidator(wxGenericValidator(&ctrl.valStr));
                   item->SetName(prompt);
 
-                  if (ctrl.label == wxEmptyString)
+                  if (ctrl.label.empty())
                      // We'd expect wxFileSelectorPromptStr to already be translated, but apparently not.
                      ctrl.label = wxGetTranslation( wxFileSelectorPromptStr );
                   S.Id(ID_FILE + i).AddButton(ctrl.label, wxALIGN_LEFT);
@@ -2716,7 +2728,7 @@ void NyquistEffect::BuildEffectWindow(ShuttleGui & S)
 
                if (ctrl.type != NYQ_CTRL_FILE)
                {
-                  if (ctrl.type == NYQ_CTRL_CHOICE || ctrl.label.IsEmpty())
+                  if (ctrl.type == NYQ_CTRL_CHOICE || ctrl.label.empty())
                   {
                      S.AddSpace(10, 10);
                   }
@@ -2872,7 +2884,7 @@ void NyquistEffect::OnFileButton(wxCommandEvent& evt)
 
    // Basic sanity check of wildcard flags so that we
    // don't show scary wxFAIL_MSG from wxParseCommonDialogsFilter.
-   if (ctrl.lowStr != wxEmptyString)
+   if (!ctrl.lowStr.empty())
    {
       bool validWildcards = true;
       size_t wildcards = 0;
@@ -2880,7 +2892,7 @@ void NyquistEffect::OnFileButton(wxCommandEvent& evt)
       while (tokenizer.HasMoreTokens())
       {
          wxString token = tokenizer.GetNextToken().Trim(true).Trim(false);
-         if (token == wxEmptyString)
+         if (token.empty())
          {
             validWildcards = false;
             break;
@@ -2899,8 +2911,8 @@ void NyquistEffect::OnFileButton(wxCommandEvent& evt)
 
    // Get style flags:
    // Ensure legal combinations so that wxWidgets does not throw an assert error.
-   unsigned char flags = 0;
-   if (ctrl.highStr != wxEmptyString)
+   unsigned int flags = 0;
+   if (!ctrl.highStr.empty())
    {
       wxStringTokenizer tokenizer(ctrl.highStr, ",");
       while ( tokenizer.HasMoreTokens() )
@@ -2958,14 +2970,14 @@ void NyquistEffect::OnFileButton(wxCommandEvent& evt)
       return;
    }
 
-   wxString path = "";
+   wxString path;
    // When multiple files selected, return file paths as a list of quoted strings.
    if (flags & wxFD_MULTIPLE)
    {
       wxArrayString selectedFiles;
       openFileDialog.GetPaths(selectedFiles);
 
-      for (size_t sf = 0; sf < selectedFiles.GetCount(); sf++) {
+      for (size_t sf = 0; sf < selectedFiles.size(); sf++) {
          path += "\"";
          path += selectedFiles[sf];
          path += "\"";
@@ -2988,7 +3000,7 @@ void NyquistEffect::resolveFilePath(wxString& path, wxString extension /* empty 
 
    path.Trim(true).Trim(false);
 
-   typedef std::unordered_map<wxString, wxString> map;
+   typedef std::unordered_map<wxString, FilePath> map;
    map pathKeys = {
       {"*home*", wxGetHomeDir()},
       {"~", wxGetHomeDir()},
@@ -3001,7 +3013,7 @@ void NyquistEffect::resolveFilePath(wxString& path, wxString extension /* empty 
    int characters = path.Find(wxFileName::GetPathSeparator());
    if(characters == wxNOT_FOUND) // Just a path or just a file name
    {
-      if (path.IsEmpty())
+      if (path.empty())
          path = "*default*";
 
       if (pathKeys.find(path) != pathKeys.end())
@@ -3029,10 +3041,10 @@ void NyquistEffect::resolveFilePath(wxString& path, wxString extension /* empty 
 
    // If the directory is invalid, better to leave it as is (invalid) so that
    // the user sees the error rather than an unexpected file path.
-   if (fname.wxFileName::IsOk() && fname.GetFullName() == wxEmptyString)
+   if (fname.wxFileName::IsOk() && fname.GetFullName().empty())
    {
       path = fname.GetPathWithSep() + _("untitled");
-      if (!extension.IsEmpty())
+      if (!extension.empty())
          path = path + extension;
    }
 }
@@ -3045,7 +3057,7 @@ bool NyquistEffect::validatePath(wxString path)
 
    return (fname.wxFileName::IsOk() &&
            wxFileName::DirExists(dir) &&
-           fname.GetFullName() != wxEmptyString);
+           !fname.GetFullName().empty());
 }
 
 
@@ -3187,8 +3199,8 @@ void * nyq_reformat_aud_do_response(const wxString & Str) {
    LVAL dst;
    LVAL message;
    LVAL success;
-   wxString Left = Str.BeforeLast('\n').BeforeLast('\n');
-   wxString Right = Str.BeforeLast('\n').AfterLast('\n');
+   wxString Left = Str.BeforeLast('\n').BeforeLast('\n').ToAscii();
+   wxString Right = Str.BeforeLast('\n').AfterLast('\n').ToAscii();
    message = cvstring(Left);
    success = Right.EndsWith("OK") ? s_true : nullptr;
    dst = cons(message, success);
@@ -3201,16 +3213,15 @@ void * nyq_reformat_aud_do_response(const wxString & Str) {
 LVAL xlc_aud_do(void)
 {
 // Based on string-trim...
-    unsigned char *leftp,*rightp;
+    unsigned char *leftp;
     LVAL src,dst;
 
     /* get the string */
     src = xlgastring();
     xllastarg();
 
-    /* setup the string pointers */
+    /* setup the string pointer */
     leftp = getstring(src);
-    rightp = leftp + getslength(src) - 2;
 
     // Go call my real function here...
     dst = (LVAL)ExecForLisp( (char *)leftp );
@@ -3228,9 +3239,10 @@ static void RegisterFunctions()
    if (firstTime) {
       firstTime = false;
 
+      // All function names must be UP-CASED
       static const FUNDEF functions[] = {
          { "_", SUBR, gettext },
-         { "ngettext", SUBR, ngettext },
+         { "NGETTEXT", SUBR, ngettext },
          { "AUD-DO",  SUBR, xlc_aud_do },
        };
 

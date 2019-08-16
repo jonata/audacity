@@ -11,18 +11,23 @@
 #ifndef __AUDACITY_DIRECTORIES_PREFS__
 #define __AUDACITY_DIRECTORIES_PREFS__
 
-#include <wx/stattext.h>
-#include <wx/textctrl.h>
-
 #include "PrefsPanel.h"
 
 class ShuttleGui;
+
+class wxStaticText;
+class wxTextCtrl;
+
+#define DIRECTORIES_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Directories") }
 
 class DirectoriesPrefs final : public PrefsPanel
 {
  public:
    DirectoriesPrefs(wxWindow * parent, wxWindowID winid);
    ~DirectoriesPrefs();
+   ComponentInterfaceSymbol GetSymbol() override;
+   wxString GetDescription() override;
+
    bool Commit() override;
    bool Validate() override;
    wxString HelpPageName() override;
@@ -39,9 +44,7 @@ class DirectoriesPrefs final : public PrefsPanel
    DECLARE_EVENT_TABLE()
 };
 
-class DirectoriesPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-};
+/// A PrefsPanel::Factory that creates one DirectoriesPrefs panel.
+/// This one is used not only in the Preferences command.
+extern PrefsPanel::Factory DirectoriesPrefsFactory();
 #endif

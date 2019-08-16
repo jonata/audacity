@@ -24,13 +24,16 @@ frequency changes smoothly during the tone.
 #include <math.h>
 #include <float.h>
 
+#include <wx/choice.h>
 #include <wx/intl.h>
 #include <wx/valgen.h>
 
 #include "../Project.h"
+#include "../ProjectSettings.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
-#include "../widgets/NumericTextCtrl.h"
 #include "../widgets/valnum.h"
+#include "../widgets/NumericTextCtrl.h"
 
 enum kInterpolations
 {
@@ -39,7 +42,7 @@ enum kInterpolations
    nInterpolations
 };
 
-static const IdentInterfaceSymbol kInterStrings[nInterpolations] =
+static const EnumValueSymbol kInterStrings[nInterpolations] =
 {
    // These are acceptable dual purpose internal/visible names
    { XO("Linear") },
@@ -55,7 +58,7 @@ enum kWaveforms
    nWaveforms
 };
 
-static const IdentInterfaceSymbol kWaveStrings[nWaveforms] =
+static const EnumValueSymbol kWaveStrings[nWaveforms] =
 {
    { XO("Sine") },
    { XO("Square") },
@@ -109,9 +112,9 @@ EffectToneGen::~EffectToneGen()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectToneGen::GetSymbol()
+ComponentInterfaceSymbol EffectToneGen::GetSymbol()
 {
    return mChirp
       ? CHIRP_PLUGIN_SYMBOL
@@ -217,7 +220,7 @@ size_t EffectToneGen::ProcessBlock(float **WXUNUSED(inBlock), float **outBlock, 
          f = pre4divPI * sin(pre2PI * mPositionInCycles / mSampleRate);
          for (k = 3; (k < 200) && (k * BlendedFrequency < mSampleRate / 2.0); k += 2)
          {
-            //Hanning Window in freq domain
+            //Hann Window in freq domain
             a = 1.0 + cos((pre2PI * k * BlendedFrequency) / mSampleRate);
             //calc harmonic, apply window, scale to amplitude of fundamental
             f += a * sin(pre2PI * mPositionInCycles / mSampleRate * k) / (b * k);
@@ -319,7 +322,11 @@ bool EffectToneGen::SetAutomationParameters(CommandParameters & parms)
    mWaveform = Waveform;
    mInterpolation = Interp;
 
-   double freqMax = (GetActiveProject() ? GetActiveProject()->GetRate() : 44100.0) / 2.0;
+   double freqMax =
+      (GetActiveProject()
+         ? ProjectSettings::Get( *GetActiveProject() ).GetRate()
+         : 44100.0)
+      / 2.0;
    mFrequency[1] = TrapDouble(mFrequency[1], MIN_EndFreq, freqMax);
 
    return true;
@@ -334,7 +341,7 @@ void EffectToneGen::PopulateOrExchange(ShuttleGui & S)
    S.StartMultiColumn(2, wxCENTER);
    {
       auto waveforms = LocalizedStrings(kWaveStrings, nWaveforms);
-      wxChoice *c = S.AddChoice(_("Waveform:"), wxT(""), &waveforms);
+      wxChoice *c = S.AddChoice(_("Waveform:"), waveforms);
       c->SetValidator(wxGenericValidator(&mWaveform));
 
       if (mChirp)
@@ -362,7 +369,10 @@ void EffectToneGen::PopulateOrExchange(ShuttleGui & S)
             S.StartHorizontalLay(wxLEFT, 50);
             {
                FloatingPointValidator<double> vldStartFreq(6, &mFrequency[0], NumValidatorStyle::NO_TRAILING_ZEROES);
-               vldStartFreq.SetRange(MIN_StartFreq, GetActiveProject()->GetRate() / 2.0);
+               vldStartFreq.SetRange(
+                  MIN_StartFreq,
+                  ProjectSettings::Get( *GetActiveProject() ).GetRate() / 2.0
+               );
                t = S.AddTextBox( {}, wxT(""), 12);
                t->SetName(_("Frequency Hertz Start"));
                t->SetValidator(vldStartFreq);
@@ -372,7 +382,10 @@ void EffectToneGen::PopulateOrExchange(ShuttleGui & S)
             S.StartHorizontalLay(wxLEFT, 50);
             {
                FloatingPointValidator<double> vldEndFreq(6, &mFrequency[1], NumValidatorStyle::NO_TRAILING_ZEROES);
-               vldEndFreq.SetRange(MIN_EndFreq, GetActiveProject()->GetRate() / 2.0);
+               vldEndFreq.SetRange(
+                  MIN_EndFreq,
+                  ProjectSettings::Get( *GetActiveProject() ).GetRate() / 2.0
+               );
                t = S.AddTextBox( {}, wxT(""), 12);
                t->SetName(_("Frequency Hertz End"));
                t->SetValidator(vldEndFreq);
@@ -407,13 +420,16 @@ void EffectToneGen::PopulateOrExchange(ShuttleGui & S)
          S.EndHorizontalLay();
 
          auto interpolations = LocalizedStrings(kInterStrings, nInterpolations);
-         c = S.AddChoice(_("Interpolation:"), wxT(""), &interpolations);
+         c = S.AddChoice(_("Interpolation:"), interpolations);
          c->SetValidator(wxGenericValidator(&mInterpolation));
       }
       else
       {
          FloatingPointValidator<double> vldFrequency(6, &mFrequency[0], NumValidatorStyle::NO_TRAILING_ZEROES);
-         vldFrequency.SetRange(MIN_Frequency, GetActiveProject()->GetRate() / 2.0);
+         vldFrequency.SetRange(
+            MIN_Frequency,
+            ProjectSettings::Get( *GetActiveProject() ).GetRate() / 2.0
+         );
          t = S.AddTextBox(_("Frequency (Hz):"), wxT(""), 12);
          t->SetValidator(vldFrequency);
 

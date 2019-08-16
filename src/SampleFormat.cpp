@@ -34,17 +34,17 @@
 
 *//*******************************************************************/
 
+#include "SampleFormat.h"
+
 #include <wx/intl.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "SampleFormat.h"
 #include "Prefs.h"
 #include "Dither.h"
 #include "Internat.h"
-#include "prefs/QualityPrefs.h"
 
 static DitherType gLowQualityDither = DitherType::none;
 static DitherType gHighQualityDither = DitherType::none;
@@ -53,8 +53,8 @@ static Dither gDitherAlgorithm;
 void InitDitherers()
 {
    // Read dither preferences
-   gLowQualityDither = QualityPrefs::FastDitherChoice();
-   gHighQualityDither = QualityPrefs::BestDitherChoice();
+   gLowQualityDither = Dither::FastDitherChoice();
+   gHighQualityDither = Dither::BestDitherChoice();
 }
 
 const wxChar *GetSampleFormatStr(sampleFormat format)

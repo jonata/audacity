@@ -8,17 +8,17 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../../../Audacity.h"
+#include "../../../../Audacity.h" // for USE_* macros
 
 #ifdef USE_MIDI
-
 #include "NoteTrackButtonHandle.h"
 
-#include "../../../../HitTestResult.h"
+#include "NoteTrackControls.h"
 #include "../../../../TrackPanelMouseEvent.h"
 #include "../../../../NoteTrack.h"
-#include "../../../../Project.h"
+#include "../../../../ProjectHistory.h"
 #include "../../../../RefreshCode.h"
+#include "../../../../TrackInfo.h"
 #include "../../../../TrackPanel.h"
 
 NoteTrackButtonHandle::NoteTrackButtonHandle
@@ -54,7 +54,7 @@ UIHandlePtr NoteTrackButtonHandle::HitTest
     const std::shared_ptr<NoteTrack> &pTrack)
 {
    wxRect midiRect;
-   TrackInfo::GetMidiControlsRect(rect, midiRect);
+   NoteTrackControls::GetMidiControlsRect(rect, midiRect);
    if ( TrackInfo::HideTopItem( rect, midiRect ) )
       return {};
    if (midiRect.Contains(state.m_x, state.m_y)) {
@@ -96,7 +96,7 @@ UIHandle::Result NoteTrackButtonHandle::Release
 {
    using namespace RefreshCode;
 
-   auto pTrack = pProject->GetTracks()->Lock(mpTrack);
+   auto pTrack = TrackList::Get( *pProject ).Lock(mpTrack);
    if (!pTrack)
       return Cancelled;
 
@@ -104,7 +104,7 @@ UIHandle::Result NoteTrackButtonHandle::Release
    if (pTrack->LabelClick(mRect, event.m_x, event.m_y,
       event.Button(wxMOUSE_BTN_RIGHT))) {
       // No undo items needed??
-      pProject->ModifyState(false);
+      ProjectHistory::Get( *pProject ).ModifyState(false);
       return RefreshAll;
    }
    return RefreshNone;

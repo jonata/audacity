@@ -21,8 +21,9 @@
 
 #include "WaveClip.h"
 
+#include "Experimental.h"
+
 #include <math.h>
-#include "MemoryX.h"
 #include <functional>
 #include <vector>
 #include <wx/log.h>
@@ -32,18 +33,13 @@
 #include "Prefs.h"
 #include "Envelope.h"
 #include "Resample.h"
-#include "Project.h"
 #include "WaveTrack.h"
-#include "FFT.h"
 #include "Profiler.h"
 #include "InconsistencyException.h"
 #include "UserException.h"
 
 #include "prefs/SpectrogramSettings.h"
-
-#include <wx/listimpl.cpp>
-
-#include "Experimental.h"
+#include "widgets/ProgressDialog.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -414,6 +410,11 @@ void WaveClip::SetSamples(samplePtr buffer, sampleFormat format,
 }
 
 BlockArray* WaveClip::GetSequenceBlockArray()
+{
+   return &mSequence->GetBlockArray();
+}
+
+const BlockArray* WaveClip::GetSequenceBlockArray() const
 {
    return &mSequence->GetBlockArray();
 }
@@ -1200,7 +1201,7 @@ bool WaveClip::GetSpectrogram(WaveTrackCache &waveTrackCache,
                               size_t numPixels,
                               double t0, double pixelsPerSecond) const
 {
-   const WaveTrack *const track = waveTrackCache.GetTrack();
+   const WaveTrack *const track = waveTrackCache.GetTrack().get();
    const SpectrogramSettings &settings = track->GetSpectrogramSettings();
 
    bool match =
@@ -1447,24 +1448,11 @@ void WaveClip::Append(samplePtr buffer, sampleFormat format,
    }
 }
 
-void WaveClip::AppendAlias(const wxString &fName, sampleCount start,
-                            size_t len, int channel,bool useOD)
+void WaveClip::AppendBlockFile( const BlockFileFactory &factory, size_t len)
 // STRONG-GUARANTEE
 {
    // use STRONG-GUARANTEE
-   mSequence->AppendAlias(fName, start, len, channel,useOD);
-
-   // use NOFAIL-GUARANTEE
-   UpdateEnvelopeTrackLen();
-   MarkChanged();
-}
-
-void WaveClip::AppendCoded(const wxString &fName, sampleCount start,
-                            size_t len, int channel, int decodeType)
-// STRONG-GUARANTEE
-{
-   // use STRONG-GUARANTEE
-   mSequence->AppendCoded(fName, start, len, channel, decodeType);
+   mSequence->AppendBlockFile( factory, len );
 
    // use NOFAIL-GUARANTEE
    UpdateEnvelopeTrackLen();

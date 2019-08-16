@@ -16,6 +16,7 @@ of languages for Audacity.
 
 
 #include "Audacity.h"
+#include "LangChoice.h"
 
 #include <wx/defs.h>
 #include <wx/button.h>
@@ -24,12 +25,10 @@ of languages for Audacity.
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 
-#include "LangChoice.h"
 #include "Languages.h"
 #include "ShuttleGui.h"
+#include "widgets/AudacityMessageBox.h"
 #include "widgets/wxPanelWrapper.h"
-#include "widgets/ErrorDialog.h"
-#include "Internat.h"
 
 class LangChoiceDialog final : public wxDialogWrapper {
 public:
@@ -47,7 +46,7 @@ private:
 
    int mNumLangs;
    wxArrayString mLangCodes;
-   wxArrayString mLangNames;
+   wxArrayStringEx mLangNames;
 
    DECLARE_EVENT_TABLE()
 };
@@ -77,12 +76,8 @@ LangChoiceDialog::LangChoiceDialog(wxWindow * parent,
 {
    SetName(GetTitle());
    GetLanguages(mLangCodes, mLangNames);
-   int ndx = mLangCodes.Index(GetSystemLanguageCode());
-   wxString lang;
-
-   if (ndx != wxNOT_FOUND) {
-      lang = mLangNames[ndx];
-   }
+   int lang =
+      make_iterator_range( mLangCodes ).index( GetSystemLanguageCode() );
 
    ShuttleGui S(this, eIsCreating);
 
@@ -92,8 +87,8 @@ LangChoiceDialog::LangChoiceDialog(wxWindow * parent,
       {
          S.SetBorder(15);
          mChoice = S.AddChoice(_("Choose Language for Audacity to use:"),
-                              lang,
-                              &mLangNames);
+                              mLangNames,
+                              lang);
       }
       S.EndVerticalLay();
 
@@ -111,7 +106,7 @@ void LangChoiceDialog::OnOk(wxCommandEvent & WXUNUSED(event))
    mLang = mLangCodes[ndx];
 
    wxString slang = GetSystemLanguageCode();
-   int sndx = mLangCodes.Index(slang);
+   int sndx = make_iterator_range( mLangCodes ).index( slang );
    wxString sname;
 
    if (sndx == wxNOT_FOUND) {

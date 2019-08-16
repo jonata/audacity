@@ -30,9 +30,8 @@
 #include <wx/utils.h>
 #include <wx/log.h>
 
-#include "../MemoryX.h"
 #include "../FileFormats.h"
-#include "../Internat.h"
+#include "../xml/XMLTagHandler.h"
 
 #include "sndfile.h"
 
@@ -219,9 +218,9 @@ void LegacyBlockFile::SaveXML(XMLWriter &xmlFile)
 
 // BuildFromXML methods should always return a BlockFile, not NULL,
 // even if the result is flawed (e.g., refers to nonexistent file),
-// as testing will be done in DirManager::ProjectFSCK().
+// as testing will be done in ProjectFSCK().
 /// static
-BlockFilePtr LegacyBlockFile::BuildFromXML(const wxString &projDir, const wxChar **attrs,
+BlockFilePtr LegacyBlockFile::BuildFromXML(const FilePath &projDir, const wxChar **attrs,
                                          size_t len, sampleFormat format)
 {
    wxFileNameWrapper fileName;

@@ -8,15 +8,18 @@
 
 **********************************************************************/
 
-#include "Audacity.h"
+#include "Audacity.h" // for USE_* macros
 #include "Snap.h"
 
 #include <algorithm>
 #include <cstdlib>
 
 #include "Project.h"
+#include "ProjectSettings.h"
 #include "LabelTrack.h"
 #include "NoteTrack.h"
+#include "WaveClip.h"
+#include "ViewInfo.h"
 #include "WaveTrack.h"
 
 inline bool operator < (SnapPoint s1, SnapPoint s2)
@@ -70,9 +73,10 @@ SnapManager::~SnapManager()
 
 void SnapManager::Reinit()
 {
-   int snapTo = mProject->GetSnapTo();
-   double rate = mProject->GetRate();
-   auto format = mProject->GetSelectionFormat();
+   const auto &settings = ProjectSettings::Get( *mProject );
+   int snapTo = settings.GetSnapTo();
+   double rate = settings.GetRate();
+   auto format = settings.GetSelectionFormat();
 
    // No need to reinit if these are still the same
    if (snapTo == mSnapTo && rate == mRate && format == mFormat)
@@ -327,7 +331,10 @@ SnapResults SnapManager::Snap
 
    if (mSnapToTime) {
       // Find where it would snap time to the grid
-      mConverter.ValueToControls(t, GetActiveProject()->GetSnapTo() == SNAP_NEAREST);
+      mConverter.ValueToControls(
+         t,
+         ProjectSettings::Get( *GetActiveProject() ).GetSnapTo() == SNAP_NEAREST
+      );
       mConverter.ControlsToValue();
       results.timeSnappedTime = mConverter.GetValue();
    }
@@ -353,51 +360,13 @@ SnapResults SnapManager::Snap
    return results;
 }
 
-/* static */ wxArrayString SnapManager::GetSnapLabels()
+/* static */ wxArrayStringEx SnapManager::GetSnapLabels()
 {
-   wxArrayString labels;
-
-   labels.Add(_("Off"));
-   labels.Add(_("Nearest"));
-   labels.Add(_("Prior"));
-
-   return labels;
-}
-
-/* static */ wxArrayString SnapManager::GetSnapValues()
-{
-   wxArrayString values;
-
-   values.Add(wxT("Off"));
-   values.Add(wxT("Nearest"));
-   values.Add(wxT("Prior"));
-
-   return values;
-}
-
-/* static */ const wxString & SnapManager::GetSnapValue(int index)
-{
-   wxArrayString values = SnapManager::GetSnapValues();
-
-   if (index >= 0 && index < (int) values.GetCount())
-   {
-      return values[index];
-   }
-
-   return values[SNAP_OFF];
-}
-
-/* static */ int SnapManager::GetSnapIndex(const wxString & value)
-{
-   wxArrayString values = SnapManager::GetSnapValues();
-   int index = values.Index(value);
-
-   if (index != wxNOT_FOUND)
-   {
-      return index;
-   }
-
-   return SNAP_OFF;
+   return wxArrayStringEx{
+      _("Off") ,
+      _("Nearest") ,
+      _("Prior") ,
+   };
 }
 
 #include "AColor.h"

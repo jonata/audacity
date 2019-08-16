@@ -13,16 +13,16 @@
 #ifndef __AUDACITY_TOOLMANAGER__
 #define __AUDACITY_TOOLMANAGER__
 
-#include "../MemoryX.h"
+#include <functional>
+
 #include <wx/defs.h>
-#include <wx/eventfilter.h>
-#include <wx/frame.h>
-#include <wx/timer.h>
+#include <wx/eventfilter.h> // to inherit
+#include <wx/frame.h> // to inherit
+#include <wx/timer.h> // member variable
 
+#include "../ClientData.h"
 #include "ToolDock.h"
-#include "ToolBar.h"
 
-class wxBitmap;
 class wxCommandEvent;
 class wxFrame;
 class wxMouseEvent;
@@ -36,22 +36,33 @@ class wxTimerEvent;
 class wxWindow;
 
 class AudacityProject;
+class ProjectWindow;
 class ToolFrame;
 
 ////////////////////////////////////////////////////////////
 /// class ToolManager
 ////////////////////////////////////////////////////////////
 
-class ToolManager final : public wxEvtHandler, public wxEventFilter
+class ToolManager final
+   : public wxEvtHandler
+   , public wxEventFilter
+   , public ClientData::Base
 {
 
  public:
+   // a hook function to break dependency of ToolManager on ProjectWindow
+   using GetTopPanelHook = std::function< wxWindow*( wxWindow& ) >;
+   static GetTopPanelHook SetGetTopPanelHook( const GetTopPanelHook& );
+
+   static ToolManager &Get( AudacityProject &project );
+   static const ToolManager &Get( const AudacityProject &project );
 
    ToolManager( AudacityProject *parent, wxWindow *topDockParent );
+   ToolManager( const ToolManager & ) PROHIBITED;
+   ToolManager &operator=( const ToolManager & ) PROHIBITED;
    ~ToolManager();
 
    void LayoutToolBars();
-   void UpdatePrefs();
 
    bool IsDocked( int type );
 
@@ -64,9 +75,12 @@ class ToolManager final : public wxEvtHandler, public wxEventFilter
    ToolBar *GetToolBar( int type ) const;
 
    ToolDock *GetTopDock();
+   const ToolDock *GetTopDock() const;
    ToolDock *GetBotDock();
+   const ToolDock *GetBotDock() const;
 
    void Reset();
+   void Destroy();
    void RegenerateTooltips();
 
    int FilterEvent(wxEvent &event) override;
@@ -179,8 +193,6 @@ public:
    void OnKeyDown( wxKeyEvent &event );
 
    void Resize( const wxSize &size );
-
-   AudacityProject *GetParent() const { return mParent; }
 
 private:
 

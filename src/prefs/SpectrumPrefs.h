@@ -21,16 +21,17 @@
 #ifndef __AUDACITY_SPECTRUM_PREFS__
 #define __AUDACITY_SPECTRUM_PREFS__
 
-#include <wx/defs.h>
-#include <wx/string.h>
-#include <wx/window.h>
-
 #include "../Experimental.h"
-#include "../WaveTrack.h"
+
+#include <vector>
+#include <wx/defs.h>
+
+#include "../tracks/playabletrack/wavetrack/ui/WaveTrackViewConstants.h"
 
 #include "PrefsPanel.h"
 #include "SpectrogramSettings.h"
 
+class wxArrayStringEx;
 class wxChoice;
 class wxCheckBox;
 class wxTextCtrl;
@@ -38,12 +39,18 @@ struct FFTParam;
 class ShuttleGui;
 class SpectrogramSettings;
 class WaveTrack;
+struct WaveTrackSubViewPlacement;
+
+#define SPECTRUM_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Spectrum") }
 
 class SpectrumPrefs final : public PrefsPanel
 {
  public:
    SpectrumPrefs(wxWindow * parent, wxWindowID winid, WaveTrack *wt);
    virtual ~SpectrumPrefs();
+   ComponentInterfaceSymbol GetSymbol() override;
+   wxString GetDescription() override;
+
    void Preview() override;
    bool Commit() override;
    void PopulateOrExchange(ShuttleGui & S) override;
@@ -73,19 +80,15 @@ class SpectrumPrefs final : public PrefsPanel
    wxTextCtrl *mRange;
    wxTextCtrl *mFrequencyGain;
 
-   wxArrayString mSizeChoices;
-
 #ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
    int mZeroPaddingChoice;
    wxChoice *mZeroPaddingChoiceCtrl;
-   wxArrayString mZeroPaddingChoices;
+   wxArrayStringEx mZeroPaddingChoices;
 #endif
 
-   wxArrayString mTypeChoices;
-   wxArrayString mScaleChoices;
+   wxArrayStringEx mTypeChoices;
 
    wxChoice *mAlgorithmChoice;
-   wxArrayString mAlgorithmChoices;
 
 
 #ifdef EXPERIMENTAL_FIND_NOTES
@@ -97,20 +100,15 @@ class SpectrumPrefs final : public PrefsPanel
 
    SpectrogramSettings mTempSettings, mOrigSettings;
 
-   WaveTrack::WaveTrackDisplay mOrigDisplay;
+   std::vector<WaveTrackSubViewPlacement> mOrigPlacements;
    float mOrigMin, mOrigMax;
 
    bool mPopulating;
    bool mCommitted{};
 };
 
-class SpectrumPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   explicit SpectrumPrefsFactory(WaveTrack *wt = 0);
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-
-private:
-   WaveTrack *const mWt;
-};
+/// A PrefsPanel::Factory that creates one SpectrumPrefs panel.
+/// This factory can be parametrized by a single track, to change settings
+/// non-globally
+extern PrefsPanel::Factory SpectrumPrefsFactory( WaveTrack *wt = 0 );
 #endif

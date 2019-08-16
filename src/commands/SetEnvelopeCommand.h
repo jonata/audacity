@@ -16,18 +16,16 @@
 #ifndef __SET_ENVELOPE_COMMAND__
 #define __SET_ENVELOPE_COMMAND__
 
-#include "Command.h"
-#include "CommandType.h"
 #include "SetTrackInfoCommand.h"
 
-#define SET_ENVELOPE_PLUGIN_SYMBOL IdentInterfaceSymbol{ XO("Set Envelope") }
+#define SET_ENVELOPE_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("Set Envelope") }
 
 class SetEnvelopeCommand : public SetTrackBase
 {
 public:
    SetEnvelopeCommand();
-   // CommandDefinitionInterface overrides
-   IdentInterfaceSymbol GetSymbol() override {return SET_ENVELOPE_PLUGIN_SYMBOL;};
+   // ComponentInterface overrides
+   ComponentInterfaceSymbol GetSymbol() override {return SET_ENVELOPE_PLUGIN_SYMBOL;};
    wxString GetDescription() override {return _("Sets an envelope point position.");};
    bool DefineParams( ShuttleParams & S ) override;
    void PopulateOrExchange(ShuttleGui & S) override;

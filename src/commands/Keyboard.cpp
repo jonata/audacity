@@ -10,10 +10,12 @@
 **********************************************************************/
 
 #include "../Audacity.h"
-
 #include "Keyboard.h"
 
-NormalizedKeyString::NormalizedKeyString(const wxString & key)
+#include <wx/event.h>
+
+NormalizedKeyString::NormalizedKeyString( const wxString & key )
+   : NormalizedKeyStringBase( key )
 {
 #if defined(__WXMAC__)
    wxString newkey;
@@ -44,16 +46,19 @@ NormalizedKeyString::NormalizedKeyString(const wxString & key)
       newkey += wxT("Ctrl+");
    }
 
-   (wxString&)*this = newkey + temp.AfterLast(wxT('+'));
+   (NormalizedKeyStringBase&)*this =
+      newkey + temp.AfterLast(wxT('+'));
 #else
-   (wxString&)*this = key;
+   (NormalizedKeyStringBase&)*this = key;
 #endif
 }
 
 wxString NormalizedKeyString::Display(bool usesSpecialChars) const
 {
    (void)usesSpecialChars;//compiler food
-   wxString newkey = *this;
+   // using GET to manipulate key string as needed for macOS differences
+   // in displaying of it
+   auto newkey = this->GET();
 #if defined(__WXMAC__)
 
    if (!usesSpecialChars) {
@@ -77,7 +82,7 @@ wxString NormalizedKeyString::Display(bool usesSpecialChars) const
 
 NormalizedKeyString KeyEventToKeyString(const wxKeyEvent & event)
 {
-   wxString newStr = wxT("");
+   wxString newStr;
 
    long key = event.GetKeyCode();
 

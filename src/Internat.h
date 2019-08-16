@@ -12,16 +12,15 @@
 #ifndef __AUDACITY_INTERNAT__
 #define __AUDACITY_INTERNAT__
 
-#include <wx/arrstr.h>
-#include <wx/string.h>
-#include <wx/longlong.h>
-
-#include <algorithm>
-
-#ifndef IN_RC
 #include "Audacity.h"
 
-class wxString;
+#include <wx/longlong.h>
+
+#ifndef IN_RC
+#include "audacity/Types.h"
+
+class wxArrayString;
+class wxArrayStringEx;
 
 extern AUDACITY_DLL_API const wxString& GetCustomTranslation(const wxString& str1 );
 extern AUDACITY_DLL_API const wxString& GetCustomSubstitution(const wxString& str1 );
@@ -121,12 +120,6 @@ public:
    static wxString FormatSize(wxLongLong size);
    static wxString FormatSize(double size);
 
-   /** \brief Protect against Unicode to multi-byte conversion failures
-    * on Windows */
-#if defined(__WXMSW__)
-   static char *VerifyFilename(const wxString &s, bool input = true);
-#endif
-
    /** \brief Check a proposed file name string for illegal characters and
     * remove them
     * return true iff name is "visibly" changed (not necessarily equivalent to
@@ -149,39 +142,18 @@ public:
 private:
    static wxChar mDecimalSeparator;
 
-   // stuff for file name sanitisation
    static wxArrayString exclude;
-
-   static wxCharBuffer mFilename;
 };
 
 #define _NoAcc(X) Internat::StripAccelerators(_(X))
-
-// Use this macro to wrap all filenames and pathnames that get
-// passed directly to a system call, like opening a file, creating
-// a directory, checking to see that a file exists, etc...
-#if defined(__WXMSW__)
-// Note, on Windows we don't define an OSFILENAME() to prevent accidental use.
-// See VerifyFilename() for an explanation.
-#define OSINPUT(X) Internat::VerifyFilename(X, true)
-#define OSOUTPUT(X) Internat::VerifyFilename(X, false)
-#elif defined(__WXMAC__)
-#define OSFILENAME(X) ((char *) (const char *)(X).fn_str())
-#define OSINPUT(X) OSFILENAME(X)
-#define OSOUTPUT(X) OSFILENAME(X)
-#else
-#define OSFILENAME(X) ((char *) (const char *)(X).mb_str())
-#define OSINPUT(X) OSFILENAME(X)
-#define OSOUTPUT(X) OSFILENAME(X)
-#endif
 
 // Convert C strings to wxString
 #define UTF8CTOWX(X) wxString((X), wxConvUTF8)
 #define LAT1CTOWX(X) wxString((X), wxConvISO8859_1)
 
-class IdentInterfaceSymbol;
-wxArrayString LocalizedStrings(
-   const IdentInterfaceSymbol strings[], size_t nStrings);
+class ComponentInterfaceSymbol;
+wxArrayStringEx LocalizedStrings(
+   const EnumValueSymbol strings[], size_t nStrings);
 
 // This object pairs an internal string, maybe empty, with a translated string.
 // Any internal string may be written to configuration or other files and,
@@ -194,7 +166,9 @@ class TranslatedInternalString
 {
 public:
 
-   TranslatedInternalString() = default;
+   using ID = CommandID;
+
+   TranslatedInternalString() =  default;
 
    // One-argument constructor from a msgid
    explicit TranslatedInternalString( const wxString &internal )
@@ -202,22 +176,21 @@ public:
    {}
 
    // Two-argument version, when translated does not derive from internal
-   TranslatedInternalString( const wxString &internal,
+   TranslatedInternalString( const ID &internal,
                              const wxString &translated )
    : mInternal{ internal }, mTranslated{ translated }
    {}
 
-   const wxString &Internal() const { return mInternal; }
+   const ID &Internal() const { return mInternal; }
    const wxString Translated() const 
    {  
       wxString Temp = mTranslated;
       Temp.Replace( "&","" );
       return Temp;
    }
-   const wxString &TranslatedForMenu() const { return mTranslated; }
 
 private:
-   wxString mInternal;
+   ID mInternal;
    wxString mTranslated;
 };
 

@@ -11,10 +11,9 @@
 
 **********************************************************************/
 
-#include "../../Audacity.h"
+#include "../../Audacity.h" // for USE_* macros
 
 #if defined(USE_VAMP)
-
 #include "VampEffect.h"
 
 #include <vamp-hostsdk/Plugin.h>
@@ -24,6 +23,7 @@
 #include <wx/wxprec.h>
 #include <wx/button.h>
 #include <wx/checkbox.h>
+#include <wx/choice.h>
 #include <wx/combobox.h>
 #include <wx/sizer.h>
 #include <wx/slider.h>
@@ -38,7 +38,7 @@
 
 #include "../../ShuttleGui.h"
 #include "../../widgets/valnum.h"
-#include "../../widgets/ErrorDialog.h"
+#include "../../widgets/AudacityMessageBox.h"
 
 #include "../../LabelTrack.h"
 #include "../../WaveTrack.h"
@@ -66,7 +66,7 @@ BEGIN_EVENT_TABLE(VampEffect, wxEvtHandler)
 END_EVENT_TABLE()
 
 VampEffect::VampEffect(std::unique_ptr<Vamp::Plugin> &&plugin,
-                       const wxString & path,
+                       const PluginPath & path,
                        int output,
                        bool hasParameters)
 :  mPlugin(std::move(plugin)),
@@ -84,20 +84,20 @@ VampEffect::~VampEffect()
 }
 
 // ============================================================================
-// IdentInterface implementation
+// ComponentInterface implementation
 // ============================================================================
 
-wxString VampEffect::GetPath()
+PluginPath VampEffect::GetPath()
 {
    return mPath;
 }
 
-IdentInterfaceSymbol VampEffect::GetSymbol()
+ComponentInterfaceSymbol VampEffect::GetSymbol()
 {
    return mName;
 }
 
-IdentInterfaceSymbol VampEffect::GetVendor()
+VendorSymbol VampEffect::GetVendor()
 {
    return { wxString::FromUTF8(mPlugin->getMaker().c_str()) };
 }
@@ -121,7 +121,7 @@ EffectType VampEffect::GetType()
    return EffectTypeAnalyze;
 }
 
-IdentInterfaceSymbol VampEffect::GetFamilyId()
+EffectFamilySymbol VampEffect::GetFamily()
 {
    return VAMPEFFECTS_FAMILY;
 }
@@ -166,7 +166,7 @@ bool VampEffect::GetAutomationParameters(CommandParameters & parms)
                mParameters[p].quantizeStep == 1.0 &&
                !mParameters[p].valueNames.empty())
       {
-         std::vector<IdentInterfaceSymbol> choices;
+         std::vector<EnumValueSymbol> choices;
          int val = 0;
 
          for (size_t i = 0, choiceCount = mParameters[p].valueNames.size(); i < choiceCount; i++)
@@ -213,7 +213,7 @@ bool VampEffect::SetAutomationParameters(CommandParameters & parms)
                mParameters[p].quantizeStep == 1.0 &&
                !mParameters[p].valueNames.empty())
       {
-         std::vector<IdentInterfaceSymbol> choices;
+         std::vector<EnumValueSymbol> choices;
          int val;
 
          for (size_t i = 0, choiceCount = mParameters[p].valueNames.size(); i < choiceCount; i++)
@@ -259,7 +259,7 @@ bool VampEffect::SetAutomationParameters(CommandParameters & parms)
                mParameters[p].quantizeStep == 1.0 &&
                !mParameters[p].valueNames.empty())
       {
-         std::vector<IdentInterfaceSymbol> choices;
+         std::vector<EnumValueSymbol> choices;
          int val = 0;
 
          for (size_t i = 0, choiceCount = mParameters[p].valueNames.size(); i < choiceCount; i++)
@@ -372,7 +372,9 @@ bool VampEffect::Process()
 
       unsigned channels = 1;
 
-      const WaveTrack *right = *channelGroup.first++;
+      // channelGroup now contains all but the first channel
+      const WaveTrack *right =
+         channelGroup.size() ? *channelGroup.first++ : nullptr;
       if (right)
       {
          channels = 2;
@@ -558,16 +560,20 @@ void VampEffect::PopulateOrExchange(ShuttleGui & S)
             {
                wxString currentProgram =  wxString::FromUTF8(mPlugin->getCurrentProgram().c_str());
 
-               wxArrayString choices;
+               wxArrayStringEx choices;
                for (size_t i = 0, cnt = programs.size(); i < cnt; i++)
                {
-                  choices.Add(wxString::FromUTF8(programs[i].c_str()));
+                  choices.push_back(wxString::FromUTF8(programs[i].c_str()));
                }
 
                S.AddPrompt(_("Program"));
 
                S.Id(ID_Program);
-               mProgram = S.AddChoice( {}, currentProgram, &choices);
+               mProgram = S.AddChoice(
+                  {},
+                  choices,
+                  choices.Index( currentProgram )
+               );
                mProgram->SetName(_("Program"));
                mProgram->SetSizeHints(-1, -1);
                wxSizer *s = mProgram->GetContainingSizer();
@@ -592,7 +598,7 @@ void VampEffect::PopulateOrExchange(ShuttleGui & S)
                mValues[p] = 0.0;
 
                wxString labelText = wxString::FromUTF8(mParameters[p].name.c_str());
-               if (!unit.IsEmpty())
+               if (!unit.empty())
                {
                   labelText += wxT(" (") + unit + wxT(")");
                }
@@ -605,9 +611,9 @@ void VampEffect::PopulateOrExchange(ShuttleGui & S)
                {
                   S.Id(ID_Toggles + p);
                   mToggles[p] = S.AddCheckBox( {},
-                                              value > 0.5 ? wxT("true") : wxT("false"));
+                                              value > 0.5);
                   mToggles[p]->SetName(labelText);
-                  if (!tip.IsEmpty())
+                  if (!tip.empty())
                   {
                      mToggles[p]->SetToolTip(tip);
                   }
@@ -623,24 +629,24 @@ void VampEffect::PopulateOrExchange(ShuttleGui & S)
                         mParameters[p].quantizeStep == 1.0 &&
                         !mParameters[p].valueNames.empty())
                {
-                  wxArrayString choices;
-                  wxString selected;
+                  wxArrayStringEx choices;
+                  int selected = -1;
 
                   for (size_t i = 0, cnt = mParameters[p].valueNames.size(); i < cnt; i++)
                   {
                      wxString choice = wxString::FromUTF8(mParameters[p].valueNames[i].c_str());
                      if (size_t(value - mParameters[p].minValue + 0.5) == i)
                      {
-                        selected = choice;
+                        selected = i;
                      }
-                     choices.Add(choice);
+                     choices.push_back(choice);
                   }
 
                   S.Id(ID_Choices + p);
-                  mChoices[p] = S.AddChoice( {}, selected, &choices);
+                  mChoices[p] = S.AddChoice( {}, choices, selected );
                   mChoices[p]->SetName(labelText);
                   mChoices[p]->SetSizeHints(-1, -1);
-                  if (!tip.IsEmpty())
+                  if (!tip.empty())
                   {
                      mChoices[p]->SetToolTip(tip);
                   }
@@ -667,7 +673,7 @@ void VampEffect::PopulateOrExchange(ShuttleGui & S)
                   mFields[p] = S.AddTextBox( {}, wxT(""), 12);
                   mFields[p]->SetName(labelText);
                   mFields[p]->SetValidator(vld);
-                  if (!tip.IsEmpty())
+                  if (!tip.empty())
                   {
                      mFields[p]->SetToolTip(tip);
                   }
@@ -682,7 +688,7 @@ void VampEffect::PopulateOrExchange(ShuttleGui & S)
                   mSliders[p] = S.AddSlider( {}, 0, 1000, 0);
                   mSliders[p]->SetName(labelText);
                   mSliders[p]->SetSizeHints(150, -1);
-                  if (!tip.IsEmpty())
+                  if (!tip.empty())
                   {
                      mSliders[p]->SetToolTip(tip);
                   }
@@ -753,7 +759,7 @@ void VampEffect::AddFeatures(LabelTrack *ltrack,
          }
       }
 
-      ltrack->AddLabel(SelectedRegion(ltime0, ltime1), label, -2);
+      ltrack->AddLabel(SelectedRegion(ltime0, ltime1), label);
    }
 }
 

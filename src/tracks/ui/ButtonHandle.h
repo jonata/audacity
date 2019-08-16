@@ -12,14 +12,15 @@ Paul Licameli
 #define __AUDACITY_BUTTON_HANDLE__
 
 #include "../../UIHandle.h"
-#include "../../MemoryX.h"
 
 class wxMouseEvent;
 class wxMouseState;
-#include <wx/gdicmn.h>
 
 class Track;
 
+
+/// \brief A UIHandle for a TrackPanel button, such as the Mute and Solo 
+/// buttons.
 class ButtonHandle /* not final */ : public UIHandle
 {
    ButtonHandle(const ButtonHandle&) = delete;

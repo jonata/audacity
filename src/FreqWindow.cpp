@@ -45,20 +45,27 @@ and in the spectrogram spectral selection.
 
 #include <algorithm>
 
+#include <wx/setup.h> // for wxUSE_* macros
+
 #include <wx/brush.h>
 #include <wx/button.h>
+#include <wx/checkbox.h>
 #include <wx/choice.h>
+#include <wx/dcclient.h>
 #include <wx/font.h>
 #include <wx/image.h>
 #include <wx/dcmemory.h>
 #include <wx/file.h>
 #include <wx/filedlg.h>
 #include <wx/intl.h>
+#include <wx/scrolbar.h>
 #include <wx/sizer.h>
+#include <wx/slider.h>
 #include <wx/statbmp.h>
 #include <wx/stattext.h>
 #include <wx/statusbr.h>
 
+#include <wx/textctrl.h>
 #include <wx/textfile.h>
 
 #include <math.h>
@@ -66,24 +73,21 @@ and in the spectrogram spectral selection.
 #include "ShuttleGui.h"
 #include "AColor.h"
 #include "FFT.h"
-#include "Internat.h"
 #include "PitchName.h"
 #include "prefs/GUISettings.h"
 #include "Prefs.h"
 #include "Project.h"
 #include "WaveClip.h"
-#include "Theme.h"
+#include "ViewInfo.h"
 #include "AllThemeResources.h"
 
 #include "FileNames.h"
 
 #include "WaveTrack.h"
 
-#include "Experimental.h"
-
-#include "./widgets/LinkingHtmlWindow.h"
 #include "./widgets/HelpSystem.h"
-#include "widgets/ErrorDialog.h"
+#include "widgets/AudacityMessageBox.h"
+#include "widgets/Ruler.h"
 
 #if wxUSE_ACCESSIBILITY
 #include "widgets/WindowAccessible.h"
@@ -210,40 +214,43 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
    if (!p)
       return;
 
-   wxArrayString algChoices;
-   algChoices.Add(_("Spectrum"));
-   algChoices.Add(_("Standard Autocorrelation"));
-   algChoices.Add(_("Cuberoot Autocorrelation"));
-   algChoices.Add(_("Enhanced Autocorrelation"));
-     /* i18n-hint: This is a technical term, derived from the word
-      * "spectrum".  Do not translate it unless you are sure you
-      * know the correct technical word in your language. */
-   algChoices.Add(_("Cepstrum"));
+   wxArrayStringEx algChoices{
+      _("Spectrum") ,
+      _("Standard Autocorrelation") ,
+      _("Cuberoot Autocorrelation") ,
+      _("Enhanced Autocorrelation") ,
+        /* i18n-hint: This is a technical term, derived from the word
+         * "spectrum".  Do not translate it unless you are sure you
+         * know the correct technical word in your language. */
+      _("Cepstrum") ,
+   };
 
-   wxArrayString sizeChoices;
-   sizeChoices.Add(wxT("128"));
-   sizeChoices.Add(wxT("256"));
-   sizeChoices.Add(wxT("512"));
-   sizeChoices.Add(wxT("1024"));
-   sizeChoices.Add(wxT("2048"));
-   sizeChoices.Add(wxT("4096"));
-   sizeChoices.Add(wxT("8192"));
-   sizeChoices.Add(wxT("16384"));
-   sizeChoices.Add(wxT("32768"));
-   sizeChoices.Add(wxT("65536"));
+   wxArrayStringEx sizeChoices{
+      wxT("128") ,
+      wxT("256") ,
+      wxT("512") ,
+      wxT("1024") ,
+      wxT("2048") ,
+      wxT("4096") ,
+      wxT("8192") ,
+      wxT("16384") ,
+      wxT("32768") ,
+      wxT("65536") ,
+   };
 
-   wxArrayString funcChoices;
+   wxArrayStringEx funcChoices;
    for (int i = 0, cnt = NumWindowFuncs(); i < cnt; i++)
    {
       /* i18n-hint: This refers to a "window function",
        * such as Hann or Rectangular, used in the
        * Frequency analyze dialog box. */
-      funcChoices.Add(wxString::Format("%s window",  WindowFuncName(i) ) );
+      funcChoices.push_back(wxString::Format("%s window",  WindowFuncName(i) ) );
    }
 
-   wxArrayString axisChoices;
-   axisChoices.Add(_("Linear frequency"));
-   axisChoices.Add(_("Log frequency"));
+   wxArrayStringEx axisChoices{
+      _("Linear frequency") ,
+      _("Log frequency") ,
+   };
 
    mFreqFont = wxFont(fontSize, wxFONTFAMILY_SWISS, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
    mArrowCursor = std::make_unique<wxCursor>(wxCURSOR_ARROW);
@@ -330,7 +337,7 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
 
             S.AddSpace(5);
 
-            mZoomSlider = safenew wxSlider(this, FreqZoomSliderID, 100, 1, 100,
+            mZoomSlider = safenew wxSliderWrapper(this, FreqZoomSliderID, 100, 1, 100,
                wxDefaultPosition, wxDefaultSize, wxSL_VERTICAL);
             S.Prop(1);
             S.AddWindow(mZoomSlider, wxALIGN_CENTER_HORIZONTAL);
@@ -412,8 +419,7 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
             mPeakText = S.AddTextBox( {}, wxT(""), 10);
             S.AddSpace(5);
 
-            mGridOnOff = S.Id(GridOnOffID).AddCheckBox(_("&Grids"), wxT("false"));
-            mGridOnOff->SetValue(mDrawGrid);
+            mGridOnOff = S.Id(GridOnOffID).AddCheckBox(_("&Grids"), mDrawGrid);
          }
          S.EndMultiColumn();
       }
@@ -439,14 +445,14 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
 
       S.AddSpace(5);
 
-      mAlgChoice = S.Id(FreqAlgChoiceID).AddChoice(_("&Algorithm:"), wxT(""), &algChoices);
-      mAlgChoice->SetSelection(mAlg);
+      mAlgChoice = S.Id(FreqAlgChoiceID)
+         .AddChoice(_("&Algorithm:"), algChoices, mAlg);
       S.SetSizeHints(wxDefaultCoord, wxDefaultCoord);
 
       S.AddSpace(5);
 
-      mSizeChoice = S.Id(FreqSizeChoiceID).AddChoice(_("&Size:"), wxT(""), &sizeChoices);
-      mSizeChoice->SetSelection(mSize);
+      mSizeChoice = S.Id(FreqSizeChoiceID)
+         .AddChoice(_("&Size:"), sizeChoices, mSize);
       S.SetSizeHints(wxDefaultCoord, wxDefaultCoord);
 
       S.AddSpace(5);
@@ -462,15 +468,15 @@ FreqWindow::FreqWindow(wxWindow * parent, wxWindowID id,
 
       S.AddSpace(5);
 
-      mFuncChoice = S.Id(FreqFuncChoiceID).AddChoice(_("&Function:"), wxT(""), &funcChoices);
-      mFuncChoice->SetSelection(mFunc);
+      mFuncChoice = S.Id(FreqFuncChoiceID)
+         .AddChoice(_("&Function:"), funcChoices, mFunc);
       S.SetSizeHints(wxDefaultCoord, wxDefaultCoord);
       mFuncChoice->MoveAfterInTabOrder(mSizeChoice);
 
       S.AddSpace(5);
 
-      mAxisChoice = S.Id(FreqAxisChoiceID).AddChoice(_("&Axis:"), wxT(""), &axisChoices);
-      mAxisChoice->SetSelection(mAxis);
+      mAxisChoice = S.Id(FreqAxisChoiceID)
+         .AddChoice(_("&Axis:"), axisChoices, mAxis);
       S.SetSizeHints(wxDefaultCoord, wxDefaultCoord);
       mAxisChoice->MoveAfterInTabOrder(mFuncChoice);
 
@@ -577,11 +583,12 @@ void FreqWindow::GetAudio()
 
    int selcount = 0;
    bool warning = false;
-   for (auto track : p->GetTracks()->Selected< const WaveTrack >()) {
+   for (auto track : TrackList::Get( *p ).Selected< const WaveTrack >()) {
+      auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
       if (selcount==0) {
          mRate = track->GetRate();
-         auto start = track->TimeToLongSamples(p->mViewInfo.selectedRegion.t0());
-         auto end = track->TimeToLongSamples(p->mViewInfo.selectedRegion.t1());
+         auto start = track->TimeToLongSamples(selectedRegion.t0());
+         auto end = track->TimeToLongSamples(selectedRegion.t1());
          auto dataLen = end - start;
          if (dataLen > 10485760) {
             warning = true;
@@ -602,7 +609,7 @@ void FreqWindow::GetAudio()
             mDataLen = 0;
             return;
          }
-         auto start = track->TimeToLongSamples(p->mViewInfo.selectedRegion.t0());
+         auto start = track->TimeToLongSamples(selectedRegion.t0());
          Floats buffer2{ mDataLen };
          // Again, stop exceptions
          track->Get((samplePtr)buffer2.get(), floatSample, start, mDataLen,
@@ -618,7 +625,7 @@ void FreqWindow::GetAudio()
 
    if (warning) {
       wxString msg;
-      msg.Printf(_("Too much audio was selected.  Only the first %.1f seconds of audio will be analyzed."),
+      msg.Printf(_("Too much audio was selected. Only the first %.1f seconds of audio will be analyzed."),
                           (mDataLen / mRate));
       AudacityMessageBox(msg);
    }
@@ -1046,10 +1053,15 @@ void FreqWindow::OnExport(wxCommandEvent & WXUNUSED(event))
    wxString fName = _("spectrum.txt");
 
    fName = FileNames::SelectFile(FileNames::Operation::Export,
-      _("Export Spectral Data As:"),
-      wxEmptyString, fName, wxT("txt"), wxT("*.txt"), wxFD_SAVE | wxRESIZE_BORDER, this);
+                                 _("Export Spectral Data As:"),
+                                 wxEmptyString,
+                                 fName,
+                                 wxT("txt"),
+                                 _("Text files (*.txt)|*.txt|All files|*"),
+                                 wxFD_SAVE | wxRESIZE_BORDER,
+                                 this);
 
-   if (fName == wxT(""))
+   if (fName.empty())
       return;
 
    wxTextFile f(fName);

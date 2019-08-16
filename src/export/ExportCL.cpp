@@ -13,7 +13,8 @@
 
 #include "../Audacity.h"
 #include "ExportCL.h"
-#include "../Project.h"
+
+#include "../ProjectSettings.h"
 
 #include <wx/app.h>
 #include <wx/button.h>
@@ -23,18 +24,21 @@
 #include <wx/process.h>
 #include <wx/sizer.h>
 #include <wx/textctrl.h>
+#if defined(__WXMSW__)
+#include <wx/msw/registry.h> // for wxRegKey
+#endif
+
 #include "../FileNames.h"
 #include "Export.h"
 
 #include "../Mix.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
-#include "../Internat.h"
+#include "../Track.h"
 #include "../float_cast.h"
 #include "../widgets/FileHistory.h"
-#include "../widgets/ErrorDialog.h"
-
-#include "../Track.h"
+#include "../widgets/AudacityMessageBox.h"
+#include "../widgets/ProgressDialog.h"
 
 
 //----------------------------------------------------------------------------
@@ -99,11 +103,12 @@ ExportCLOptions::~ExportCLOptions()
 ///
 void ExportCLOptions::PopulateOrExchange(ShuttleGui & S)
 {
-   wxArrayString cmds;
+   wxArrayStringEx cmds;
    wxString cmd;
 
    for (size_t i = 0; i < mHistory.GetCount(); i++) {
-      cmds.Add(mHistory.GetHistoryFile(i));
+      cmd = mHistory.GetHistoryFile(i);
+      cmds.push_back(mHistory.GetHistoryFile(i));
    }
    cmd = cmds[0];
 
@@ -117,7 +122,7 @@ void ExportCLOptions::PopulateOrExchange(ShuttleGui & S)
             S.SetStretchyCol(1);
             mCmd = S.AddCombo(_("Command:"),
                               cmd,
-                              &cmds);
+                              cmds);
             S.Id(ID_BROWSE).AddButton(_("Browse..."),
                                       wxALIGN_CENTER_VERTICAL);
             S.AddFixedText( {} );
@@ -178,7 +183,7 @@ void ExportCLOptions::OnBrowse(wxCommandEvent& WXUNUSED(event))
                        wxT("*") + ext,
                        wxFD_OPEN | wxRESIZE_BORDER,
                        this);
-   if (path.IsEmpty()) {
+   if (path.empty()) {
       return;
    }
 
@@ -328,6 +333,11 @@ ProgressResult ExportCL::Export(AudacityProject *project,
    // Retrieve settings
    gPrefs->Read(wxT("/FileFormats/ExternalProgramShowOutput"), &show, false);
    cmd = gPrefs->Read(wxT("/FileFormats/ExternalProgramExportCommand"), wxT("lame - \"%f.mp3\""));
+   // Bug 2178 - users who don't know what they are doing will 
+   // now get a file extension of .wav appended to their ffmpeg filename
+   // and therefore ffmpeg will be able to choose a file type.
+   if( cmd == wxT("ffmpeg -i - \"%f\"") && fName.Index( '.' )==wxNOT_FOUND)
+      cmd.Replace( "%f", "%f.wav" );
    cmd.Replace(wxT("%f"), fName);
 
 #if defined(__WXMSW__)
@@ -347,7 +357,7 @@ ProgressResult ExportCL::Export(AudacityProject *project,
       if (reg.Exists()) {
          wxString ipath;
          reg.QueryValue(wxT("InstallPath"), ipath);
-         if (!ipath.IsEmpty()) {
+         if (!ipath.empty()) {
             npath += wxPATH_SEP + ipath;
          }
       }
@@ -362,7 +372,7 @@ ProgressResult ExportCL::Export(AudacityProject *project,
    {
 #if defined(__WXMSW__)
       auto cleanup = finally( [&] {
-         if (!opath.IsEmpty()) {
+         if (!opath.empty()) {
             wxSetEnv(wxT("PATH"),opath);
          }
       } );
@@ -384,7 +394,7 @@ ProgressResult ExportCL::Export(AudacityProject *project,
    wxLogNull nolog;
 
    // establish parameters
-   int rate = lrint(project->GetRate());
+   int rate = lrint( ProjectSettings::Get( *project ).GetRate());
    const size_t maxBlockLen = 44100 * 5;
    unsigned long totalSamples = lrint((t1 - t0) * rate);
    unsigned long sampleBytes = totalSamples * channels * SAMPLE_SIZE(int16Sample);
@@ -423,12 +433,10 @@ ProgressResult ExportCL::Export(AudacityProject *project,
    os->Write(&header, sizeof(wav_header));
 
    // Mix 'em up
-   const TrackList *tracks = project->GetTracks();
-   const WaveTrackConstArray waveTracks =
-      tracks->GetWaveTrackConstArray(selectionOnly, false);
+   const auto &tracks = TrackList::Get( *project );
    auto mixer = CreateMixer(
-                            waveTracks,
-                            tracks->GetTimeTrack(),
+                            tracks,
+                            selectionOnly,
                             t0,
                             t1,
                             channels,

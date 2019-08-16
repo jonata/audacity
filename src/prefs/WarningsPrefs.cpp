@@ -18,13 +18,11 @@
 *//*******************************************************************/
 
 #include "../Audacity.h"
+#include "WarningsPrefs.h"
 
 #include <wx/defs.h>
 
 #include "../ShuttleGui.h"
-
-#include "WarningsPrefs.h"
-#include "../Internat.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -36,6 +34,21 @@ WarningsPrefs::WarningsPrefs(wxWindow * parent, wxWindowID winid)
 
 WarningsPrefs::~WarningsPrefs()
 {
+}
+
+ComponentInterfaceSymbol WarningsPrefs::GetSymbol()
+{
+   return WARNINGS_PREFS_PLUGIN_SYMBOL;
+}
+
+wxString WarningsPrefs::GetDescription()
+{
+   return _("Preferences for Warnings");
+}
+
+wxString WarningsPrefs::HelpPageName()
+{
+   return "Warnings_Preferences";
 }
 
 void WarningsPrefs::Populate()
@@ -74,9 +87,11 @@ void WarningsPrefs::PopulateOrExchange(ShuttleGui & S)
       S.TieCheckBox(_("Mixing down on export (&Custom FFmpeg or external program)"),
                     wxT("/Warnings/MixUnknownChannels"),
                     true);
+#ifdef EXPERIMENTAL_OD_DATA
       S.TieCheckBox(_("&Importing uncompressed audio files"),
                     wxT("/Warnings/CopyOrEditUncompressedDataAsk"),
                     true);
+#endif
    }
    S.EndStatic();
    S.EndScroller();
@@ -91,13 +106,9 @@ bool WarningsPrefs::Commit()
    return true;
 }
 
-wxString WarningsPrefs::HelpPageName()
-{
-   return "Warnings_Preferences";
-}
-
-PrefsPanel *WarningsPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
+PrefsPanel::Factory
+WarningsPrefsFactory = [](wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
    return safenew WarningsPrefs(parent, winid);
-}
+};

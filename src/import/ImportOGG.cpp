@@ -28,8 +28,7 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
-#include "ImportOGG.h"
+#include "../Audacity.h" // for USE_* macros
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
@@ -39,16 +38,16 @@
 #endif
 
 #include <wx/intl.h>
+#include "Import.h"
 #include "../Prefs.h"
-#include "../Internat.h"
 #include "../Tags.h"
 #include "../prefs/QualityPrefs.h"
+#include "../widgets/ProgressDialog.h"
 
 
 #define DESC _("Ogg Vorbis files")
 
-static const wxChar *exts[] =
-{
+static const auto exts = {
    wxT("ogg")
 };
 
@@ -56,14 +55,10 @@ static const wxChar *exts[] =
 /* BPF There is no real reason to compile without LIBVORBIS, but if you do, you will needs this header */
 #include "ImportPlugin.h"
 
-void GetOGGImportPlugin(ImportPluginList &importPluginList,
-                        UnusableImportPluginList &unusableImportPluginList)
-{
-   unusableImportPluginList.push_back(
+static Importer::RegisteredUnusableImportPlugin registered{
       std::make_unique<UnusableImportPlugin>
-         (DESC, wxArrayString(WXSIZEOF(exts), exts))
-   );
-}
+         (DESC, FileExtensions( exts.begin(), exts.end() ) )
+};
 
 #else /* USE_LIBVORBIS */
 
@@ -86,7 +81,7 @@ class OggImportPlugin final : public ImportPlugin
 {
 public:
    OggImportPlugin()
-   :  ImportPlugin(wxArrayString(WXSIZEOF(exts), exts))
+   :  ImportPlugin( FileExtensions( exts.begin(), exts.end() ) )
    {
    }
 
@@ -94,14 +89,16 @@ public:
 
    wxString GetPluginStringID() override { return wxT("liboggvorbis"); }
    wxString GetPluginFormatDescription() override;
-   std::unique_ptr<ImportFileHandle> Open(const wxString &Filename) override;
+   std::unique_ptr<ImportFileHandle> Open(const FilePath &Filename) override;
+
+   unsigned SequenceNumber() const override;
 };
 
 
 class OggImportFileHandle final : public ImportFileHandle
 {
 public:
-   OggImportFileHandle(const wxString & filename,
+   OggImportFileHandle(const FilePath & filename,
                        std::unique_ptr<wxFFile> &&file,
                        std::unique_ptr<OggVorbis_File> &&vorbisFile)
    :  ImportFileHandle(filename),
@@ -115,7 +112,7 @@ public:
       {
          wxString strinfo;
          strinfo.Printf(wxT("Index[%02x] Version[%d], Channels[%d], Rate[%ld]"), (unsigned int) i,mVorbisFile->vi[i].version,mVorbisFile->vi[i].channels,mVorbisFile->vi[i].rate);
-         mStreamInfo.Add(strinfo);
+         mStreamInfo.push_back(strinfo);
          mStreamUsage[i] = 0;
       }
 
@@ -160,18 +157,13 @@ private:
    sampleFormat   mFormat;
 };
 
-void GetOGGImportPlugin(ImportPluginList &importPluginList,
-                        UnusableImportPluginList & WXUNUSED(unusableImportPluginList))
-{
-   importPluginList.push_back( std::make_unique<OggImportPlugin>() );
-}
 
 wxString OggImportPlugin::GetPluginFormatDescription()
 {
     return DESC;
 }
 
-std::unique_ptr<ImportFileHandle> OggImportPlugin::Open(const wxString &filename)
+std::unique_ptr<ImportFileHandle> OggImportPlugin::Open(const FilePath &filename)
 {
    // Suppress some compiler warnings about unused global variables in the library header
    wxUnusedVar(OV_CALLBACKS_DEFAULT);
@@ -216,6 +208,15 @@ std::unique_ptr<ImportFileHandle> OggImportPlugin::Open(const wxString &filename
 
    return std::make_unique<OggImportFileHandle>(filename, std::move(file), std::move(vorbisFile));
 }
+
+unsigned OggImportPlugin::SequenceNumber() const
+{
+   return 20;
+}
+
+static Importer::RegisteredImportPlugin registered{
+   std::make_unique< OggImportPlugin >()
+};
 
 wxString OggImportFileHandle::GetFileDescription()
 {
@@ -370,7 +371,7 @@ ProgressResult OggImportFileHandle::Import(
          wxString value = comment.AfterFirst(wxT('='));
          if (name.Upper() == wxT("DATE") && !tags->HasTag(TAG_YEAR)) {
             long val;
-            if (value.Length() == 4 && value.ToLong(&val)) {
+            if (value.length() == 4 && value.ToLong(&val)) {
                name = TAG_YEAR;
             }
          }

@@ -19,8 +19,6 @@ for each problem encountered, since there can be many orphans.
 *//*******************************************************************/
 
 #include "../Audacity.h"
-#include "../Project.h"
-
 #include "MultiDialog.h"
 
 #include <wx/app.h>
@@ -34,7 +32,8 @@ for each problem encountered, since there can be many orphans.
 #include <wx/artprov.h>
 #include <wx/radiobox.h>
 
-#include "../commands/CommandContext.h"
+#include "../AudacityLogger.h"
+#include "wxPanelWrapper.h"
 
 class MultiDialog final : public wxDialogWrapper
 {
@@ -152,8 +151,10 @@ void MultiDialog::OnOK(wxCommandEvent & WXUNUSED(event))
 
 void MultiDialog::OnShowLog(wxCommandEvent & WXUNUSED(event))
 {
-   auto project = GetActiveProject();
-   GetMenuCommandHandler(*project).OnShowLog(*project);
+   auto logger = AudacityLogger::Get();
+   if (logger) {
+      logger->Show();
+   }
 }
 
 
@@ -188,3 +189,7 @@ int ShowMultiDialog(const wxString &message,
    return dlog.ShowModal();
 }
 
+const wxString &DefaultMultiDialogMessage()
+{
+   return _("Please select an action");
+}

@@ -22,6 +22,7 @@ the audio, rather than actually finding the clicks.
 
 
 #include "../Audacity.h"
+#include "Repair.h"
 
 #include <math.h>
 
@@ -29,9 +30,7 @@ the audio, rather than actually finding the clicks.
 
 #include "../InterpolateAudio.h"
 #include "../WaveTrack.h"
-#include "../widgets/ErrorDialog.h"
-
-#include "Repair.h"
+#include "../widgets/AudacityMessageBox.h"
 
 EffectRepair::EffectRepair()
 {
@@ -41,9 +40,9 @@ EffectRepair::~EffectRepair()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectRepair::GetSymbol()
+ComponentInterfaceSymbol EffectRepair::GetSymbol()
 {
    return REPAIR_PLUGIN_SYMBOL;
 }

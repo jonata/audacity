@@ -18,9 +18,12 @@
 
 
 #include "../Audacity.h"
+#include "MeterToolBar.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
+
+#include <wx/setup.h> // for wxUSE_* macros
 
 #ifndef WX_PRECOMP
 #include <wx/event.h>
@@ -30,10 +33,8 @@
 
 #include <wx/gbsizer.h>
 
-#include "MeterToolBar.h"
 #include "../AllThemeResources.h"
-#include "../AudioIO.h"
-#include "../Project.h"
+#include "../ProjectAudioIO.h"
 #include "../widgets/Meter.h"
 
 IMPLEMENT_CLASS(MeterToolBar, ToolBar);
@@ -47,11 +48,9 @@ BEGIN_EVENT_TABLE( MeterToolBar, ToolBar )
 END_EVENT_TABLE()
 
 //Standard contructor
-MeterToolBar::MeterToolBar(AudacityProject *project, int type)
-: ToolBar(type, _("Combined Meter"), wxT("CombinedMeter"), true)
+MeterToolBar::MeterToolBar(AudacityProject &project, int type)
+: ToolBar(project, type, _("Combined Meter"), wxT("CombinedMeter"), true)
 {
-   mProject = project;
-
    if( mType == RecordMeterBarID ){
       mWhichMeters = kWithRecordMeter;
       mLabel = _("Recording Meter");
@@ -76,6 +75,8 @@ void MeterToolBar::Create(wxWindow * parent)
 {
    ToolBar::Create(parent);
 
+   UpdatePrefs();
+
    // Simulate a size event to set initial meter placement/size
    wxSizeEvent dummy;
    OnSize(dummy);
@@ -85,40 +86,40 @@ void MeterToolBar::ReCreateButtons()
 {
    MeterPanel::State playState{ false }, recordState{ false };
 
-   if (mPlayMeter && mProject->GetPlaybackMeter() == mPlayMeter)
+   auto &projectAudioIO = ProjectAudioIO::Get( mProject );
+   if (mPlayMeter && projectAudioIO.GetPlaybackMeter() == mPlayMeter)
    {
       playState = mPlayMeter->SaveState();
-      mProject->SetPlaybackMeter( NULL );
+      projectAudioIO.SetPlaybackMeter( nullptr );
    }
 
-   if (mRecordMeter && mProject->GetCaptureMeter() == mRecordMeter)
+   if (mRecordMeter && projectAudioIO.GetCaptureMeter() == mRecordMeter)
    {
       recordState = mRecordMeter->SaveState();
-      mProject->SetCaptureMeter( NULL );
+      projectAudioIO.SetCaptureMeter( nullptr );
    }
 
    ToolBar::ReCreateButtons();
 
    mPlayMeter->RestoreState(playState);
    if( playState.mSaved  ){
-      mProject->SetPlaybackMeter( mPlayMeter );
+      projectAudioIO.SetPlaybackMeter( mPlayMeter );
    }
    mRecordMeter->RestoreState(recordState);
    if( recordState.mSaved ){
-      mProject->SetCaptureMeter( mRecordMeter );
+      projectAudioIO.SetCaptureMeter( mRecordMeter );
    }
 }
 
 void MeterToolBar::Populate()
 {
    SetBackgroundColour( theTheme.Colour( clrMedium  ) );
-   wxASSERT(mProject); // to justify safenew
    Add((mSizer = safenew wxGridBagSizer()), 1, wxEXPAND);
 
    if( mWhichMeters & kWithRecordMeter ){
       //JKC: Record on left, playback on right.  Left to right flow
       //(maybe we should do it differently for Arabic language :-)  )
-      mRecordMeter = safenew MeterPanel( mProject,
+      mRecordMeter = safenew MeterPanel( &mProject,
                                 this,
                                 wxID_ANY,
                                 true,
@@ -134,7 +135,7 @@ void MeterToolBar::Populate()
    }
 
    if( mWhichMeters & kWithPlayMeter ){
-      mPlayMeter = safenew MeterPanel( mProject,
+      mPlayMeter = safenew MeterPanel( &mProject,
                               this,
                               wxID_ANY,
                               false,
@@ -154,18 +155,6 @@ void MeterToolBar::Populate()
 
 void MeterToolBar::UpdatePrefs()
 {
-   if( mPlayMeter )
-   {
-      mPlayMeter->UpdatePrefs();
-      mPlayMeter->Refresh();
-   }
-
-   if( mRecordMeter )
-   {
-      mRecordMeter->UpdatePrefs();
-      mRecordMeter->Refresh();
-   }
-
    RegenerateTooltips();
 
    // Set label to pull in language change
@@ -173,8 +162,6 @@ void MeterToolBar::UpdatePrefs()
 
    // Give base class a chance
    ToolBar::UpdatePrefs();
-
-
 }
 
 void MeterToolBar::RegenerateTooltips()
@@ -239,21 +226,22 @@ void MeterToolBar::OnSize( wxSizeEvent & event) //WXUNUSED(event) )
 
 bool MeterToolBar::Expose( bool show )
 {
+   auto &projectAudioIO = ProjectAudioIO::Get( mProject );
    if( show ) {
       if( mPlayMeter ) {
-         mProject->SetPlaybackMeter( mPlayMeter );
+         projectAudioIO.SetPlaybackMeter( mPlayMeter );
       }
 
       if( mRecordMeter ) {
-         mProject->SetCaptureMeter( mRecordMeter );
+         projectAudioIO.SetCaptureMeter( mRecordMeter );
       }
    } else {
-      if( mPlayMeter && mProject->GetPlaybackMeter() == mPlayMeter ) {
-         mProject->SetPlaybackMeter( NULL );
+      if( mPlayMeter && projectAudioIO.GetPlaybackMeter() == mPlayMeter ) {
+         projectAudioIO.SetPlaybackMeter( nullptr );
       }
 
-      if( mRecordMeter && mProject->GetCaptureMeter() == mRecordMeter ) {
-         mProject->SetCaptureMeter( NULL );
+      if( mRecordMeter && projectAudioIO.GetCaptureMeter() == mRecordMeter ) {
+         projectAudioIO.SetCaptureMeter( nullptr );
       }
    }
 
@@ -283,3 +271,18 @@ void MeterToolBar::SetDocked(ToolDock *dock, bool pushed) {
    Fit();
 }
 
+static RegisteredToolbarFactory factory1{ RecordMeterBarID,
+   []( AudacityProject &project ){
+      return ToolBar::Holder{
+         safenew MeterToolBar{ project, RecordMeterBarID } }; }
+};
+static RegisteredToolbarFactory factory2{ PlayMeterBarID,
+   []( AudacityProject &project ){
+      return ToolBar::Holder{
+         safenew MeterToolBar{ project, PlayMeterBarID } }; }
+};
+static RegisteredToolbarFactory factory3{ MeterBarID,
+   []( AudacityProject &project ){
+      return ToolBar::Holder{
+         safenew MeterToolBar{ project, MeterBarID } }; }
+};

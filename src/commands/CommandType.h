@@ -16,9 +16,7 @@
 #ifndef __COMMANDTYPE__
 #define __COMMANDTYPE__
 
-#include "CommandMisc.h"
 #include "CommandSignature.h"
-#include "../MemoryX.h"
 #include "../commands/AudacityCommand.h"
 
 class OldStyleCommand;
@@ -44,13 +42,13 @@ class wxString;
 class OldStyleCommandType : public AudacityCommand
 {
 private:
-   IdentInterfaceSymbol mSymbol;
+   ComponentInterfaceSymbol mSymbol;
    Maybe<CommandSignature> mSignature;
 
 public:
    OldStyleCommandType();
    virtual ~OldStyleCommandType();
-   IdentInterfaceSymbol GetSymbol() override;
+   ComponentInterfaceSymbol GetSymbol() override;
    CommandSignature &GetSignature();
    wxString Describe(); // for debugging only ?
 
@@ -58,7 +56,7 @@ public:
    // =========================================
 
    // Return the name of the command type
-   virtual IdentInterfaceSymbol BuildName() = 0;
+   virtual ComponentInterfaceSymbol BuildName() = 0;
 
    /// Postcondition: signature is a 'signature' map containing parameter
    // names, validators and default values.

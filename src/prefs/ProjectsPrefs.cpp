@@ -17,15 +17,13 @@ handling.
 *//*******************************************************************/
 
 #include "../Audacity.h"
+#include "ProjectsPrefs.h"
 
 #include <wx/defs.h>
 #include <wx/textctrl.h>
 
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
-
-#include "ProjectsPrefs.h"
-#include "../Internat.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -39,6 +37,21 @@ ProjectsPrefs::ProjectsPrefs(wxWindow * parent, wxWindowID winid)
 
 ProjectsPrefs::~ProjectsPrefs()
 {
+}
+
+ComponentInterfaceSymbol ProjectsPrefs::GetSymbol()
+{
+   return PROJECTS_PREFS_PLUGIN_SYMBOL;
+}
+
+wxString ProjectsPrefs::GetDescription()
+{
+   return _("Preferences for Projects");
+}
+
+wxString ProjectsPrefs::HelpPageName()
+{
+   return "Projects_Preferences";
 }
 
 /// Creates the dialog and its contents.
@@ -84,13 +97,9 @@ bool ProjectsPrefs::Commit()
    return true;
 }
 
-wxString ProjectsPrefs::HelpPageName()
-{
-   return "Projects_Preferences";
-}
-
-PrefsPanel *ProjectsPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
+PrefsPanel::Factory
+ProjectsPrefsFactory = [](wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
    return safenew ProjectsPrefs(parent, winid);
-}
+};

@@ -20,29 +20,30 @@ Licensed under the GNU General Public License v2 or later
 
 *//*******************************************************************/
 
-#include "../Audacity.h"    // needed before FFmpeg.h
-#include "ImportFFmpeg.h"
+#include "../Audacity.h"    // needed before FFmpeg.h // for USE_* macros
+
+#include "../Experimental.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
 
 #include "../FFmpeg.h"      // which brings in avcodec.h, avformat.h
+#include "../WaveClip.h"
+#include "../blockfile/ODDecodeBlockFile.h"
 #include "../ondemand/ODManager.h"
 #ifndef WX_PRECOMP
 // Include your minimal set of headers here, or wx.h
 #include <wx/window.h>
 #endif
 
-#include "../Experimental.h"
-#include "../MemoryX.h"
+#include "../widgets/ProgressDialog.h"
 
 
 #define DESC _("FFmpeg-compatible files")
 
 //TODO: remove non-audio extensions
 #if defined(USE_FFMPEG)
-static const wxChar *exts[] =
-{
+static const auto exts = {
    wxT("4xm"),
    wxT("MTV"),
    wxT("roq"),
@@ -154,7 +155,6 @@ static const wxChar *exts[] =
 // all the includes live here by default
 #include "Import.h"
 #include "../Tags.h"
-#include "../Internat.h"
 #include "../WaveTrack.h"
 #include "ImportPlugin.h"
 
@@ -173,10 +173,9 @@ class FFmpegImportPlugin final : public ImportPlugin
 {
 public:
    FFmpegImportPlugin():
-      ImportPlugin(wxArrayString(WXSIZEOF(exts),exts))
-      {
-
-      }
+      ImportPlugin( FileExtensions( exts.begin(), exts.end() ) )
+   {
+   }
 
    ~FFmpegImportPlugin() { }
 
@@ -184,7 +183,9 @@ public:
    wxString GetPluginFormatDescription() override;
 
    ///! Probes the file and opens it if appropriate
-   std::unique_ptr<ImportFileHandle> Open(const wxString &Filename) override;
+   std::unique_ptr<ImportFileHandle> Open(const FilePath &Filename) override;
+   
+   unsigned SequenceNumber() const override;
 };
 
 ///! Does acual import, returned by FFmpegImportPlugin::Open
@@ -192,7 +193,7 @@ class FFmpegImportFileHandle final : public ImportFileHandle
 {
 
 public:
-   FFmpegImportFileHandle(const wxString & name);
+   FFmpegImportFileHandle(const FilePath & name);
    ~FFmpegImportFileHandle();
 
    ///! Format initialization
@@ -273,7 +274,7 @@ private:
 
    bool                  mCancelled;     //!< True if importing was canceled by user
    bool                  mStopped;       //!< True if importing was stopped by user
-   wxString              mName;
+   FilePath              mName;
    TrackHolders mChannels;               //!< 2-dimensional array of WaveTrack's.
                                          //!< First dimension - streams,
                                          //!< second - channels of a stream.
@@ -285,19 +286,12 @@ private:
 };
 
 
-void GetFFmpegImportPlugin(ImportPluginList &importPluginList,
-                           UnusableImportPluginList &WXUNUSED(unusableImportPluginList))
-{
-   importPluginList.push_back( std::make_unique<FFmpegImportPlugin>() );
-}
-
-
 wxString FFmpegImportPlugin::GetPluginFormatDescription()
 {
    return DESC;
 }
 
-std::unique_ptr<ImportFileHandle> FFmpegImportPlugin::Open(const wxString &filename)
+std::unique_ptr<ImportFileHandle> FFmpegImportPlugin::Open(const FilePath &filename)
 {
    auto handle = std::make_unique<FFmpegImportFileHandle>(filename);
 
@@ -339,8 +333,17 @@ std::unique_ptr<ImportFileHandle> FFmpegImportPlugin::Open(const wxString &filen
    return std::move(handle);
 }
 
+unsigned FFmpegImportPlugin::SequenceNumber() const
+{
+   return 60;
+}
 
-FFmpegImportFileHandle::FFmpegImportFileHandle(const wxString & name)
+static Importer::RegisteredImportPlugin registered{
+   std::make_unique< FFmpegImportPlugin >()
+};
+
+
+FFmpegImportFileHandle::FFmpegImportFileHandle(const FilePath & name)
 :  ImportFileHandle(name)
 {
    PickFFmpegLibs();
@@ -439,7 +442,7 @@ bool FFmpegImportFileHandle::InitCodecs()
             duration = sc->m_stream->duration * sc->m_stream->time_base.num / sc->m_stream->time_base.den;
          else
             duration = mFormatContext->duration / AV_TIME_BASE;
-         wxString bitrate = wxT("");
+         wxString bitrate;
          if (sc->m_codecCtx->bit_rate > 0)
             bitrate.Printf(wxT("%d"),(int)sc->m_codecCtx->bit_rate);
          else
@@ -453,7 +456,7 @@ bool FFmpegImportFileHandle::InitCodecs()
          }
          strinfo.Printf(_("Index[%02x] Codec[%s], Language[%s], Bitrate[%s], Channels[%d], Duration[%d]"),
                         sc->m_stream->id,codec->name,lang,bitrate,(int)sc->m_stream->codec->channels,(int)duration);
-         mStreamInfo.Add(strinfo);
+         mStreamInfo.push_back(strinfo);
          mScs->get()[mNumStreams++] = std::move(sc);
       }
       //for video and unknown streams do nothing
@@ -585,7 +588,7 @@ ProgressResult FFmpegImportFileHandle::Import(TrackFactory *trackFactory,
 
          //for each wavetrack within the stream add coded blockfiles
          for (int c = 0; c < sc->m_stream->codec->channels; c++) {
-            WaveTrack *t = stream[c].get();
+            auto t = stream[c];
             odTask->AddWaveTrack(t);
 
             auto maxBlockSize = t->GetMaxBlockSize();
@@ -595,7 +598,14 @@ ProgressResult FFmpegImportFileHandle::Import(TrackFactory *trackFactory,
                const auto blockLen =
                   limitSampleBufferSize( maxBlockSize, sampleDuration - i );
 
-               t->AppendCoded(mFilename, i, blockLen, c, ODTask::eODFFMPEG);
+               t->RightmostOrNewClip()->AppendBlockFile(
+                  [&]( wxFileNameWrapper filePath, size_t len ) {
+                     return make_blockfile<ODDecodeBlockFile>(
+                        std::move(filePath), wxFileNameWrapper{ mFilename },
+                        i, len, c, ODTask::eODFFMPEG);
+                  },
+                  blockLen
+               );
 
                // This only works well for single streams since we assume
                // each stream is of the same duration and channels

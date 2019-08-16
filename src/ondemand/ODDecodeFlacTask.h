@@ -29,11 +29,12 @@ robust enough to allow all the user changes such as copy/paste, DELETE, and so o
 #define __AUDACITY_ODDecodeFLACTask__
 
 #include <vector>
+#include <wx/ffile.h> // data member
 #include "ODDecodeTask.h"
-#include "ODTaskThread.h"
 
 #include "FLAC++/decoder.h"
 
+class wxArrayString;
 class ODDecodeBlockFile;
 class WaveTrack;
 class ODFileDecoder;
@@ -89,6 +90,7 @@ class ODFLACFile final : public FLAC::Decoder::File
    void error_callback(FLAC__StreamDecoderErrorStatus status) override;
 };
 
+#include "../blockfile/ODDecodeBlockFile.h" // to inherit
 
 ///class to decode a particular file (one per file).  Saves info such as filename and length (after the header is read.)
 class ODFlacDecoder final : public ODFileDecoder

@@ -17,6 +17,8 @@ It \TODO: description
 *//*******************************************************************/
 
 #include "../Audacity.h"
+#include "ScoreAlignDialog.h"
+
 #include "../Experimental.h"
 
 #ifdef EXPERIMENTAL_SCOREALIGN
@@ -50,7 +52,6 @@ It \TODO: description
 #include "audioreader.h"
 #include "scorealign.h"
 #include "scorealign-glue.h"
-#include "ScoreAlignDialog.h"
 
 static std::unique_ptr<ScoreAlignDialog> gScoreAlignDialog{};
 
@@ -82,7 +83,7 @@ ScoreAlignDialog::ScoreAlignDialog(ScoreAlignParams &params)
 
    //wxButton *ok = safenew wxButton(this, wxID_OK, _("OK"));
    //wxButton *cancel = safenew wxButton(this, wxID_CANCEL, _("Cancel"));
-   //wxSlider *sl = safenew wxSlider(this, ID_SLIDER, 0, 0, 100,
+   //wxSlider *sl = safenew wxSliderWrapper(this, ID_SLIDER, 0, 0, 100,
    //                     wxDefaultPosition, wxSize(20, 124),
    //                     wxSL_HORIZONTAL);
 
@@ -116,11 +117,11 @@ ScoreAlignDialog::ScoreAlignDialog(ScoreAlignParams &params)
 
    mForceFinalAlignmentCheckBox = S.Id(ID_FORCEFINALALIGNMENT).AddCheckBox(
                 wxT("Force Final Alignment"),
-                (p.mForceFinalAlignment ? wxT("true") : wxT("false")));
+                p.mForceFinalAlignment);
    mForceFinalAlignmentCheckBox->SetName(_("Force Final Alignment"));
    mIgnoreSilenceCheckBox = S.Id(ID_IGNORESILENCE).AddCheckBox(
                               wxT("Ignore Silence at Beginnings and Endings"),
-                              (p.mIgnoreSilence ? wxT("true") : wxT("false")));
+                              p.mIgnoreSilence);
    mIgnoreSilenceCheckBox->SetName(
                      _("Ignore Silence at Beginnings and Endings"));
    // need a third column after checkboxes:

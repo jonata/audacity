@@ -17,12 +17,7 @@
 #ifndef __COMMAND__
 #define __COMMAND__
 
-#include <wx/app.h>
-#include "../MemoryX.h"
-
-#include "CommandMisc.h"
 #include "CommandSignature.h"
-#include "CommandTargets.h"
 #include "../commands/AudacityCommand.h"
 
 class AudacityApp;
@@ -33,9 +28,11 @@ class CommandOutputTargets;
 class OldStyleCommand /* not final */
 {
 public:
-   OldStyleCommand() {};
+   AudacityProject &mProject;
+
+   OldStyleCommand(AudacityProject &project) : mProject{ project } {};
    virtual ~OldStyleCommand() { }
-   virtual IdentInterfaceSymbol GetSymbol() = 0;
+   virtual ComponentInterfaceSymbol GetSymbol() = 0;
    virtual CommandSignature &GetSignature() = 0;
    virtual bool SetParameter(const wxString &paramName, const wxVariant &paramValue);
    virtual bool Apply()=0;
@@ -52,12 +49,12 @@ protected:
    OldStyleCommandPointer mCommand;
 public:
    DecoratedCommand(const OldStyleCommandPointer &cmd)
-      : mCommand(cmd)
+      : OldStyleCommand{ cmd->mProject }, mCommand(cmd)
    {
       wxASSERT(cmd != NULL);
    }
    virtual ~DecoratedCommand();
-   IdentInterfaceSymbol GetSymbol() override;
+   ComponentInterfaceSymbol GetSymbol() override;
    CommandSignature &GetSignature() override;
    bool SetParameter(const wxString &paramName, const wxVariant &paramValue) override;
 };
@@ -67,10 +64,11 @@ public:
 class ApplyAndSendResponse : public DecoratedCommand
 {
 public:
-   ApplyAndSendResponse(const OldStyleCommandPointer &cmd, std::unique_ptr<CommandOutputTargets> &target);
+   ApplyAndSendResponse(
+      const OldStyleCommandPointer &cmd, std::unique_ptr<CommandOutputTargets> &target);
    bool Apply() override;
    bool Apply(const CommandContext &context) override;// Error to use this.
-   std::unique_ptr<CommandContext> mCtx;
+   std::unique_ptr<const CommandContext> mCtx;
 
 };
 
@@ -100,12 +98,12 @@ protected:
 public:
    /// Constructor should not be called directly; only by a factory which
    /// ensures name and params are set appropriately for the command.
-   CommandImplementation(OldStyleCommandType &type);
+   CommandImplementation(AudacityProject &project, OldStyleCommandType &type);
 
    virtual ~CommandImplementation();
 
    /// An instance method for getting the command name (for consistency)
-   IdentInterfaceSymbol GetSymbol() override;
+   ComponentInterfaceSymbol GetSymbol() override;
 
    /// Get the signature of the command
    CommandSignature &GetSignature() override;

@@ -29,14 +29,16 @@ Provides:
 *//********************************************************************/
 
 #include "../Audacity.h"
+#include "ThemePrefs.h"
 
+#include <wx/app.h>
 #include <wx/wxprec.h>
 #include "../Prefs.h"
 #include "../Theme.h"
-#include "../Project.h"
 #include "../ShuttleGui.h"
-#include "ThemePrefs.h"
 #include "../AColor.h"
+
+wxDEFINE_EVENT(EVT_THEME_CHANGE, wxCommandEvent);
 
 enum eThemePrefsIds {
    idLoadThemeCache=7000,
@@ -70,6 +72,21 @@ ThemePrefs::~ThemePrefs(void)
 {
 }
 
+ComponentInterfaceSymbol ThemePrefs::GetSymbol()
+{
+   return THEME_PREFS_PLUGIN_SYMBOL;
+}
+
+wxString ThemePrefs::GetDescription()
+{
+   return _("Preferences for Theme");
+}
+
+wxString ThemePrefs::HelpPageName()
+{
+   return "Theme_Preferences";
+}
+
 /// Creates the dialog and its contents.
 void ThemePrefs::Populate()
 {
@@ -98,7 +115,7 @@ void ThemePrefs::PopulateOrExchange(ShuttleGui & S)
 
 #ifdef __WXDEBUG__
       S.AddFixedText(
-         _("This is a debug version of Audacity, with an extra button, 'Output Sourcery'.  This will save a\nC version of the image cache that can be compiled in as a default.")
+         _("This is a debug version of Audacity, with an extra button, 'Output Sourcery'. This will save a\nC version of the image cache that can be compiled in as a default.")
          );
 #endif
 
@@ -155,7 +172,7 @@ void ThemePrefs::PopulateOrExchange(ShuttleGui & S)
 void ThemePrefs::OnLoadThemeComponents(wxCommandEvent & WXUNUSED(event))
 {
    theTheme.LoadComponents();
-   theTheme.ApplyUpdatedImages();
+   ApplyUpdatedImages();
 }
 
 /// Save Theme to multiple png files.
@@ -168,7 +185,7 @@ void ThemePrefs::OnSaveThemeComponents(wxCommandEvent & WXUNUSED(event))
 void ThemePrefs::OnLoadThemeCache(wxCommandEvent & WXUNUSED(event))
 {
    theTheme.ReadImageCache();
-   theTheme.ApplyUpdatedImages();
+   ApplyUpdatedImages();
 }
 
 /// Save Theme to single png file.
@@ -182,7 +199,7 @@ void ThemePrefs::OnSaveThemeCache(wxCommandEvent & WXUNUSED(event))
 void ThemePrefs::OnReadThemeInternal(wxCommandEvent & WXUNUSED(event))
 {
    theTheme.ReadImageCache( theTheme.GetFallbackThemeType() );
-   theTheme.ApplyUpdatedImages();
+   ApplyUpdatedImages();
 }
 
 /// Save Theme as C source code.
@@ -190,6 +207,14 @@ void ThemePrefs::OnSaveThemeAsCode(wxCommandEvent & WXUNUSED(event))
 {
    theTheme.SaveThemeAsCode();
    theTheme.WriteImageDefs();// bonus - give them the Defs too.
+}
+
+void ThemePrefs::ApplyUpdatedImages()
+{
+   AColor::ReInit();
+
+   wxCommandEvent e{ EVT_THEME_CHANGE };
+   wxTheApp->SafelyProcessEvent( e );
 }
 
 /// Update the preferences stored on disk.
@@ -201,8 +226,9 @@ bool ThemePrefs::Commit()
    return true;
 }
 
-PrefsPanel *ThemePrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
+PrefsPanel::Factory
+ThemePrefsFactory = [](wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
    return safenew ThemePrefs(parent, winid);
-}
+};

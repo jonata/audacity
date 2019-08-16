@@ -11,33 +11,15 @@
 #ifndef __AUDACITY_AUTORECOVERY__
 #define __AUDACITY_AUTORECOVERY__
 
-#include "Project.h"
-
 #include "xml/XMLTagHandler.h"
-#include "xml/XMLWriter.h"
 
-#include <wx/debug.h>
-#include <wx/ffile.h>
-#include <wx/hashmap.h>
-#include <wx/mstream.h>
+#include <wx/mstream.h> // member variables
 
 #include <unordered_map>
+#include "audacity/Types.h"
 
-//
-// Show auto recovery dialog if there are projects to recover. Should be
-// called once at Audacity startup.
-//
-// This function possibly opens NEW project windows while it recovers all
-// projects. If so, it will re-use *pproj, if != NULL and set it to NULL.
-//
-// Returns: True, if the start of Audacity should continue as normal
-//          False if Audacity should be quit immediately
-//
-// The didRecoverAnything param is strictly for a return value.
-// Any value passed in is ignored.
-//
-bool ShowAutoRecoveryDialogIfNeeded(AudacityProject** pproj,
-                                    bool *didRecoverAnything);
+class wxFFile;
+class AudacityProject;
 
 //
 // XML Handler for a <recordingrecovery> tag
@@ -77,6 +59,8 @@ class AUDACITY_DLL_API AutoSaveFile final : public XMLWriter
 {
 public:
 
+   static wxString FailureMessage( const FilePath &filePath );
+
    AutoSaveFile(size_t allocSize = 1024 * 1024);
    virtual ~AutoSaveFile();
 
@@ -105,7 +89,7 @@ public:
 
    bool IsEmpty() const;
 
-   bool Decode(const wxString & fileName);
+   bool Decode(const FilePath & fileName);
 
 private:
    void WriteName(const wxString & name);

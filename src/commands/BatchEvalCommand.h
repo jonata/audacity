@@ -26,10 +26,12 @@ to that system.
 #include "CommandType.h"
 #include "../BatchCommands.h"
 
+class AudacityProject;
+
 class BatchEvalCommandType final : public OldStyleCommandType
 {
 public:
-   IdentInterfaceSymbol BuildName() override;
+   ComponentInterfaceSymbol BuildName() override;
    void BuildSignature(CommandSignature &signature) override;
    OldStyleCommandPointer Create(std::unique_ptr<CommandOutputTargets> &&target) override;
 };
@@ -37,8 +39,8 @@ public:
 class BatchEvalCommand final : public CommandImplementation
 {
 public:
-   BatchEvalCommand(OldStyleCommandType &type)
-      : CommandImplementation(type)
+   BatchEvalCommand(AudacityProject &project, OldStyleCommandType &type)
+      : CommandImplementation(project, type)
    { }
 
    virtual ~BatchEvalCommand();

@@ -7,7 +7,7 @@ https://forum.audacityteam.org/ .
 We welcome feedback on Audacity, suggestions for new or improved features, 
 and bug reports. Please visit https://forum.audacityteam.org/viewforum.php?f=25 .
 
-Audacity is copyright (c) 1999-2018 by Audacity Team. This copyright 
+Audacity is copyright (c) 1999-2019 by Audacity Team. This copyright 
 notice applies to all documents in the Audacity source code archive, 
 except as otherwise noted (mostly in the lib-src subdirectories). 
 "Audacity" is a registered trademark of Dominic Mazzoni. 
@@ -28,12 +28,12 @@ pull request on https://github.com/audacity/audacity/pulls . It's usually
 best to discuss functional code changes with us first on audacity-devel: 
 https://lists.sourceforge.net/lists/listinfo/audacity-devel . 
 
-Version 2.3.0
+Version 2.3.2
 
 Contents of this README:
 
 1.  Licensing
-2.  Changes since version 2.2.2
+2.  Changes since version 2.3.1
 3.  Known Issues at Release
 4.  Source Code, Libraries and Additional Copyright Information
 
@@ -63,55 +63,41 @@ to https://www.gnu.org/licenses/old-licenses/gpl-2.0.html or write to
 
 -------------------------------------------------------------------------------
 
-2. Changes since version 2.2.2: 
+2. Changes since version 2.3.1: 
 
 Improvements
 
- * New feature - "Punch and Roll Recording".
- * Pinned-play-head can now be repositioned by dragging
- * Play-at-Speed now can be adjusted whilst playing.
- * Toolbars controlling volume and speed can now be resized for greater precision
- * Macros (formerly 'Chains') substantially extended
-   * New Macro palette
-   * Macros can be bound to keyboard keys
- * New commands
-   * New 'Tools' menu
-   * New 'Scriptables' commands 
- * Nyquist gains AUD-DO command
- * Nyquist effects are now translatable and translated
- * More dialogs have help buttons now
- * Increased legibility of trackname display
- * Half-wave option for collapsed tracks
- * Sliding Stretch
- * Dialog (option) for entering labels
+ * Audacity now includes the LAME mp3 encoder. Previously, due to now expired
+   patents, you had to download it separately.
+ * There is a new 'Select' button in the track panel to select the whole 
+   track.
+ * Audacity mod-script-pipe for driving Audacity from Python now comes with
+   Audacity and can be enabled via preferences.
+ * Options and preferences:
+   * Type to Create a Label is now off by default.
+ * A plug-in installer for Nyquist now provides a file browser for 
+   selecting '.NY' files to install.
 
-See also: https://wiki.audacityteam.org/wiki/New_features_in_Audacity_2.3.0
 
+See also: https://wiki.audacityteam.org/wiki/New_features_in_Audacity_2.3.1
 
 
 Bug Fixes
 
- Over 90 bugs in 2.2.2 fixed, including:
+ Over 20 bugs in 2.3.1 fixed, including:
 
- * Windows: Queen Mary 1.7.1 Vamp plug-ins crash Audacity on opening Plug-in Manager - bug #1244
- * Inconsistent behavior when recording with a selection defined - bug #1839
- * Ctrl + M does not open label for editing - bug #1852
- * Vertical Zoom in by clicking in the vertical Scale, or context menu, in waveform views is inconsistent - bug #1810
- * Deletion of all tracks cannot be undone - bug #1845
- * Timer Record with a selection present can get a truncated recording with data loss - bug #1851
- * Duplicate shortcuts can be created - bug #1786
- * Labels longer than 260 characters are now supported - bug #1905
- * Using Spectrogram Settings in TCP or using Preferences causes Audacity to reset Project Rate to default rate in Quality Preferences - bug #1977
- * Cut Preview should play all selected/sync-locked tracks, respecting Mute/Solo during preview - bug #231
+ * Audacity 2.3.1 would crash if append-recording to a collapsed track.
+ * Many accessibility bugs on macOS fixed
 
-See also: https://wiki.audacityteam.org/wiki/Release_Notes_2.3.0
+See also: https://wiki.audacityteam.org/wiki/Release_Notes_2.3.2
+
 
 -------------------------------------------------------------------------------
 
-3. Known Issues in 2.3.0:
+3. Known Issues in 2.3.2:
 
-For known issues in 2.3.0 please see:
-  https://wiki.audacityteam.org/wiki/Release_Notes_2.3.0/Issues 
+For known issues in 2.3.2 please see:
+  https://wiki.audacityteam.org/wiki/Release_Notes_2.3.2/Issues 
 
 
 -------------------------------------------------------------------------------

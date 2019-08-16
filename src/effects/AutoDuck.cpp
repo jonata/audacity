@@ -28,14 +28,13 @@
 
 #include "../AColor.h"
 #include "../AllThemeResources.h"
-#include "../Internat.h"
 #include "../Prefs.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
-#include "../Theme.h"
 #include "../widgets/valnum.h"
 
 #include "../WaveTrack.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 
 // Define keys, defaults, minimums, and maximums for the effect parameters
 //
@@ -100,9 +99,9 @@ EffectAutoDuck::~EffectAutoDuck()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectAutoDuck::GetSymbol()
+ComponentInterfaceSymbol EffectAutoDuck::GetSymbol()
 {
    return AUTODUCK_PLUGIN_SYMBOL;
 }
@@ -715,7 +714,7 @@ void EffectAutoDuckPanel::OnPaint(wxPaintEvent & WXUNUSED(evt))
       points[5].x = clientWidth - 10;
       points[5].y = DUCK_AMOUNT_START;
 
-      dc.DrawLines(6, points);
+      AColor::Lines(dc, 6, points);
 
       dc.SetPen(wxPen(*wxBLACK, 1, wxPENSTYLE_DOT));
 

@@ -16,18 +16,20 @@
 
 #include "Audacity.h"
 
-#include "MemoryX.h"
-#include <wx/event.h>
-#include <wx/log.h>
-#include <wx/frame.h>
-#include <wx/textctrl.h>
-#include <wx/string.h>
-
 #include "Experimental.h"
+
+#include "MemoryX.h"
+#include <wx/log.h> // to inherit
+#include <wx/event.h> // to inherit wxEvtHandler
+
+class wxFrame;
+class wxTextCtrl;
 
 class AudacityLogger final : public wxEvtHandler, public wxLog {
  public:
-   AudacityLogger();
+ 
+   // Get the singleton instance or null
+   static AudacityLogger *Get();
 
    void Show(bool show = true);
 
@@ -40,6 +42,8 @@ class AudacityLogger final : public wxEvtHandler, public wxLog {
    void DoLogText(const wxString & msg) override;
 
  private:
+   AudacityLogger();
+
    void OnCloseWindow(wxCloseEvent & e);
    void OnClose(wxCommandEvent & e);
    void OnClear(wxCommandEvent & e);

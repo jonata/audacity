@@ -13,20 +13,14 @@
 
 #include <wx/file.h>
 #include <wx/utils.h>
-#include <wx/wxchar.h>
+#include <wx/wxcrtvararg.h>
 #include <wx/log.h>
 
 #include <sndfile.h>
 
-#include "../AudacityApp.h"
 #include "../FileFormats.h"
-#include "../Internat.h"
-#include "../MemoryX.h"
 
-#include "../ondemand/ODManager.h"
-#include "../AudioIO.h"
-
-extern AudioIO *gAudioIO;
+#include "../DirManager.h"
 
 PCMAliasBlockFile::PCMAliasBlockFile(
       wxFileNameWrapper &&fileName,
@@ -120,7 +114,7 @@ void PCMAliasBlockFile::SaveXML(XMLWriter &xmlFile)
 
 // BuildFromXML methods should always return a BlockFile, not NULL,
 // even if the result is flawed (e.g., refers to nonexistent file),
-// as testing will be done in DirManager::ProjectFSCK().
+// as testing will be done in ProjectFSCK().
 BlockFilePtr PCMAliasBlockFile::BuildFromXML(DirManager &dm, const wxChar **attrs)
 {
    wxFileNameWrapper summaryFileName;
@@ -142,7 +136,7 @@ BlockFilePtr PCMAliasBlockFile::BuildFromXML(DirManager &dm, const wxChar **attr
       if (!wxStricmp(attr, wxT("summaryfile")) &&
             // Can't use XMLValueChecker::IsGoodFileName here, but do part of its test.
             XMLValueChecker::IsGoodFileString(strValue) &&
-            (strValue.Length() + 1 + dm.GetProjectDataDir().Length() <= PLATFORM_MAX_PATH))
+            (strValue.length() + 1 + dm.GetProjectDataDir().length() <= PLATFORM_MAX_PATH))
       {
          if (!dm.AssignFile(summaryFileName, strValue, false))
             // Make sure summaryFileName is back to uninitialized state so we can detect problem later.
@@ -206,3 +200,9 @@ void PCMAliasBlockFile::Recover(void)
    WriteSummary();
 }
 
+static DirManager::RegisteredBlockFileDeserializer sRegistration {
+   "pcmaliasblockfile",
+   []( DirManager &dm, const wxChar **attrs ){
+      return PCMAliasBlockFile::BuildFromXML( dm, attrs );
+   }
+};

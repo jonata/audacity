@@ -28,6 +28,11 @@ Track classes.
 
 
 #include "WaveTrack.h"
+
+#include "Experimental.h"
+
+#include "WaveClip.h"
+
 #include <wx/defs.h>
 #include <wx/intl.h>
 #include <wx/debug.h>
@@ -35,7 +40,6 @@ Track classes.
 #include <float.h>
 #include <math.h>
 #include <algorithm>
-#include "MemoryX.h"
 
 #include "float_cast.h"
 
@@ -44,62 +48,53 @@ Track classes.
 #include "Spectrum.h"
 
 #include "Project.h"
-#include "Internat.h"
+#include "ProjectFileIORegistry.h"
+#include "ProjectSettings.h"
 
-#include "AudioIO.h"
 #include "Prefs.h"
 
-#include "ondemand/ODManager.h"
-
 #include "effects/TimeWarper.h"
-#include "prefs/SpectrumPrefs.h"
+#include "prefs/SpectrogramSettings.h"
 #include "prefs/TracksPrefs.h"
-#include "prefs/WaveformPrefs.h"
+#include "prefs/WaveformSettings.h"
 
 #include "InconsistencyException.h"
 
-#include "Experimental.h"
-
-#include "TrackPanel.h" // for TrackInfo
-// Assumptions in objects separation were wrong.  We need to activate
-// VZooming (that lives in WaveTrackVRulerHandle) from an action on the
-// TCP collapse/expand.  So we need visibility here.
-#include "tracks/playabletrack/wavetrack/ui/WaveTrackVRulerControls.h"
-
 using std::max;
+
+static ProjectFileIORegistry::Entry registerFactory{
+   wxT( "wavetrack" ),
+   []( AudacityProject &project ){
+      auto &trackFactory = TrackFactory::Get( project );
+      auto &tracks = TrackList::Get( project );
+      return tracks.Add(trackFactory.NewWaveTrack());
+   }
+};
 
 WaveTrack::Holder TrackFactory::DuplicateWaveTrack(const WaveTrack &orig)
 {
-   return std::unique_ptr<WaveTrack>
-   { static_cast<WaveTrack*>(orig.Duplicate().release()) };
+   return std::static_pointer_cast<WaveTrack>( orig.Duplicate() );
 }
 
 
 WaveTrack::Holder TrackFactory::NewWaveTrack(sampleFormat format, double rate)
 {
-   return std::unique_ptr<WaveTrack>
-   { safenew WaveTrack(mDirManager, format, rate) };
+   return std::make_shared<WaveTrack> ( mDirManager, format, rate );
 }
 
 WaveTrack::WaveTrack(const std::shared_ptr<DirManager> &projDirManager, sampleFormat format, double rate) :
    PlayableTrack(projDirManager)
 {
-   if (format == (sampleFormat)0)
    {
-      format = GetActiveProject()->GetDefaultFormat();
-   }
-   if (rate == 0)
-   {
-      rate = GetActiveProject()->GetRate();
-   }
-
-   // Force creation always:
-   WaveformSettings &settings = GetIndependentWaveformSettings();
-
-   mDisplay = TracksPrefs::ViewModeChoice();
-   if (mDisplay == obsoleteWaveformDBDisplay) {
-      mDisplay = Waveform;
-      settings.scaleType = WaveformSettings::stLogarithmic;
+      const auto &settings = ProjectSettings::Get( *GetActiveProject() );
+      if (format == (sampleFormat)0)
+      {
+         format = settings.GetDefaultFormat();
+      }
+      if (rate == 0)
+      {
+         rate = settings.GetRate();
+      }
    }
 
    mLegacyProjectFileOffset = 0;
@@ -119,8 +114,6 @@ WaveTrack::WaveTrack(const std::shared_ptr<DirManager> &projDirManager, sampleFo
    mLastScaleType = -1;
    mLastdBRange = -1;
    mAutoSaveIdent = 0;
-
-   SetHeight( TrackInfo::DefaultWaveTrackHeight() );
 }
 
 WaveTrack::WaveTrack(const WaveTrack &orig):
@@ -159,7 +152,6 @@ void WaveTrack::Init(const WaveTrack &orig)
    mOldGain[1] = 0.0;
    SetDefaultName(orig.GetDefaultName());
    SetName(orig.GetName());
-   mDisplay = orig.mDisplay;
    mDisplayMin = orig.mDisplayMin;
    mDisplayMax = orig.mDisplayMax;
    mSpectrumMin = orig.mSpectrumMin;
@@ -194,7 +186,6 @@ void WaveTrack::Merge(const Track &orig)
 {
    orig.TypeSwitch( [&](const WaveTrack *pwt) {
       const WaveTrack &wt = *pwt;
-      mDisplay = wt.mDisplay;
       mGain    = wt.mGain;
       mPan     = wt.mPan;
       mDisplayMin = wt.mDisplayMin;
@@ -209,10 +200,6 @@ void WaveTrack::Merge(const Track &orig)
 
 WaveTrack::~WaveTrack()
 {
-   //Let the ODManager know this WaveTrack is disappearing.
-   //Deschedules tasks associated with this track.
-   if(ODManager::IsInstanceCreated())
-      ODManager::Instance()->RemoveWaveTrack(this);
 }
 
 double WaveTrack::GetOffset() const
@@ -255,65 +242,6 @@ void WaveTrack::SetPanFromChannelType()
    else if( mChannel == Track::RightChannel )
       SetPan( 1.0f );
 };
-
-
-// static
-WaveTrack::WaveTrackDisplay
-WaveTrack::ConvertLegacyDisplayValue(int oldValue)
-{
-   // Remap old values.
-   enum OldValues {
-      Waveform,
-      WaveformDB,
-      Spectrogram,
-      SpectrogramLogF,
-      Pitch,
-   };
-
-   WaveTrackDisplay newValue;
-   switch (oldValue) {
-   default:
-   case Waveform:
-      newValue = WaveTrack::Waveform; break;
-   case WaveformDB:
-      newValue = WaveTrack::obsoleteWaveformDBDisplay; break;
-   case Spectrogram:
-   case SpectrogramLogF:
-   case Pitch:
-      newValue = WaveTrack::Spectrum; break;
-      /*
-   case SpectrogramLogF:
-      newValue = WaveTrack::SpectrumLogDisplay; break;
-   case Pitch:
-      newValue = WaveTrack::PitchDisplay; break;
-      */
-   }
-   return newValue;
-}
-
-// static
-WaveTrack::WaveTrackDisplay
-WaveTrack::ValidateWaveTrackDisplay(WaveTrackDisplay display)
-{
-   switch (display) {
-      // non-obsolete codes
-   case Waveform:
-   case obsoleteWaveformDBDisplay:
-   case Spectrum:
-      return display;
-
-      // obsolete codes
-   case obsolete1: // was SpectrumLogDisplay
-   case obsolete2: // was SpectralSelectionDisplay
-   case obsolete3: // was SpectralSelectionLogDisplay
-   case obsolete4: // was PitchDisplay
-      return Spectrum;
-
-      // codes out of bounds (from future prefs files?)
-   default:
-      return MinDisplay;
-   }
-}
 
 void WaveTrack::SetLastScaleType() const
 {
@@ -393,9 +321,9 @@ int WaveTrack::ZeroLevelYCoordinate(wxRect rect) const
       (int)((mDisplayMax / (mDisplayMax - mDisplayMin)) * rect.height);
 }
 
-Track::Holder WaveTrack::Duplicate() const
+Track::Holder WaveTrack::Clone() const
 {
-   return Track::Holder{ safenew WaveTrack{ *this } };
+   return std::make_shared<WaveTrack>( *this );
 }
 
 double WaveTrack::GetRate() const
@@ -422,7 +350,10 @@ float WaveTrack::GetGain() const
 
 void WaveTrack::SetGain(float newGain)
 {
-   mGain = newGain;
+   if (mGain != newGain) {
+      mGain = newGain;
+      Notify();
+   }
 }
 
 float WaveTrack::GetPan() const
@@ -433,11 +364,14 @@ float WaveTrack::GetPan() const
 void WaveTrack::SetPan(float newPan)
 {
    if (newPan > 1.0)
-      mPan = 1.0;
+      newPan = 1.0;
    else if (newPan < -1.0)
-      mPan = -1.0;
-   else
+      newPan = -1.0;
+
+   if ( mPan != newPan ) {
       mPan = newPan;
+      Notify();
+   }
 }
 
 float WaveTrack::GetChannelGain(int channel) const
@@ -468,28 +402,6 @@ void WaveTrack::SetOldChannelGain(int channel, float gain)
 
 
 
-void WaveTrack::DoSetMinimized(bool isMinimized){
-
-#ifdef EXPERIMENTAL_HALF_WAVE
-   bool bHalfWave;
-   gPrefs->Read(wxT("/GUI/CollapseToHalfWave"), &bHalfWave, false);
-   if( bHalfWave )
-   {
-      // Show half wave on collapse, full on restore.
-      std::shared_ptr<TrackVRulerControls> pTvc = GetVRulerControls();
-
-      // An awkward workaround for a function that lives 'in the wrong place'.
-      // We use magic numbers, 0 and 1, to tell it to zoom reset or zoom half-wave.
-      WaveTrackVRulerControls * pWtvc =
-         static_cast<WaveTrackVRulerControls*>(pTvc.get());
-      if( pWtvc )
-         pWtvc->DoZoomPreset( isMinimized ? 1:0);
-   }
-#endif
-
-   PlayableTrack::DoSetMinimized( isMinimized );
-}
-
 void WaveTrack::SetWaveColorIndex(int colorIndex)
 // STRONG-GUARANTEE
 {
@@ -501,7 +413,7 @@ void WaveTrack::SetWaveColorIndex(int colorIndex)
 
 void WaveTrack::ConvertToSampleFormat(sampleFormat format)
 // WEAK-GUARANTEE
-// might complete on only some tracks
+// might complete on only some clips
 {
    for (const auto &clip : mClips)
       clip->ConvertToSampleFormat(format);
@@ -623,9 +535,8 @@ Track::Holder WaveTrack::Copy(double t0, double t1, bool forClipboard) const
    if (t1 < t0)
       THROW_INCONSISTENCY_EXCEPTION;
 
-   WaveTrack *newTrack;
-   Track::Holder result
-   { newTrack = safenew WaveTrack{ mDirManager } };
+   auto result = std::make_shared<WaveTrack>( mDirManager );
+   WaveTrack *newTrack = result.get();
 
    newTrack->Init(*this);
 
@@ -1190,10 +1101,8 @@ void WaveTrack::SyncLockAdjust(double oldT1, double newT1)
          AudacityProject *p = GetActiveProject();
          if (!p)
             THROW_INCONSISTENCY_EXCEPTION;
-         TrackFactory *f = p->GetTrackFactory();
-         if (!f)
-            THROW_INCONSISTENCY_EXCEPTION;
-         auto tmp = f->NewWaveTrack(GetSampleFormat(), GetRate());
+         auto &factory = TrackFactory::Get( *p );
+         auto tmp = factory.NewWaveTrack( GetSampleFormat(), GetRate() );
 
          tmp->InsertSilence(0.0, newT1 - oldT1);
          tmp->Flush();
@@ -1580,32 +1489,6 @@ void WaveTrack::Append(samplePtr buffer, sampleFormat format,
                                         blockFileLog);
 }
 
-void WaveTrack::AppendAlias(const wxString &fName, sampleCount start,
-                            size_t len, int channel,bool useOD)
-// STRONG-GUARANTEE
-{
-   RightmostOrNewClip()->AppendAlias(fName, start, len, channel, useOD);
-}
-
-void WaveTrack::AppendCoded(const wxString &fName, sampleCount start,
-                            size_t len, int channel, int decodeType)
-// STRONG-GUARANTEE
-{
-   RightmostOrNewClip()->AppendCoded(fName, start, len, channel, decodeType);
-}
-
-///gets an int with OD flags so that we can determine which ODTasks should be run on this track after save/open, etc.
-unsigned int WaveTrack::GetODFlags() const
-{
-   unsigned int ret = 0;
-   for (const auto &clip : mClips)
-   {
-      ret = ret | clip->GetSequence()->GetODFlags();
-   }
-   return ret;
-}
-
-
 sampleCount WaveTrack::GetBlockStart(sampleCount s) const
 {
    for (const auto &clip : mClips)
@@ -1705,15 +1588,8 @@ bool WaveTrack::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
          }
          else if (this->PlayableTrack::HandleXMLAttribute(attr, value))
          {}
-         else if (!wxStrcmp(attr, wxT("height")) &&
-                  XMLValueChecker::IsGoodInt(strValue) && strValue.ToLong(&nValue))
-            mHeight = nValue;
-         else if (!wxStrcmp(attr, wxT("minimized")) &&
-                  XMLValueChecker::IsGoodInt(strValue) && strValue.ToLong(&nValue))
-            mMinimized = (nValue != 0);
-         else if (!wxStrcmp(attr, wxT("isSelected")) &&
-                  XMLValueChecker::IsGoodInt(strValue) && strValue.ToLong(&nValue))
-            this->SetSelected(nValue != 0);
+         else if (this->Track::HandleCommonXMLAttribute(attr, strValue))
+            ;
          else if (!wxStrcmp(attr, wxT("gain")) &&
                   XMLValueChecker::IsGoodString(strValue) &&
                   Internat::CompatibleToDouble(strValue, &dblValue))
@@ -1723,8 +1599,6 @@ bool WaveTrack::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
                   Internat::CompatibleToDouble(strValue, &dblValue) &&
                   (dblValue >= -1.0) && (dblValue <= 1.0))
             mPan = dblValue;
-         else if (!wxStrcmp(attr, wxT("name")) && XMLValueChecker::IsGoodString(strValue))
-            mName = strValue;
          else if (!wxStrcmp(attr, wxT("channel")))
          {
             if (!XMLValueChecker::IsGoodInt(strValue) || !strValue.ToLong(&nValue) ||
@@ -1801,13 +1675,10 @@ void WaveTrack::WriteXML(XMLWriter &xmlFile) const
    {
       xmlFile.WriteAttr(wxT("autosaveid"), mAutoSaveIdent);
    }
-   xmlFile.WriteAttr(wxT("name"), mName);
+   this->Track::WriteCommonXMLAttributes( xmlFile );
    xmlFile.WriteAttr(wxT("channel"), mChannel);
    xmlFile.WriteAttr(wxT("linked"), mLinked);
    this->PlayableTrack::WriteXMLAttributes(xmlFile);
-   xmlFile.WriteAttr(wxT("height"), this->GetActualHeight());
-   xmlFile.WriteAttr(wxT("minimized"), this->GetMinimized());
-   xmlFile.WriteAttr(wxT("isSelected"), this->GetSelected());
    xmlFile.WriteAttr(wxT("rate"), mRate);
    xmlFile.WriteAttr(wxT("gain"), (double)mGain);
    xmlFile.WriteAttr(wxT("pan"), (double)mPan);
@@ -2612,7 +2483,7 @@ void WaveTrack::AddInvalidRegion(sampleCount startSample, sampleCount endSample)
       clip->AddInvalidRegion(startSample, endSample);
 }
 
-int WaveTrack::GetAutoSaveIdent()
+int WaveTrack::GetAutoSaveIdent() const
 {
    return mAutoSaveIdent;
 }
@@ -2820,4 +2691,30 @@ void WaveTrackCache::Free()
    mBuffers[1].Free();
    mOverlapBuffer.Free();
    mNValidBuffers = 0;
+}
+
+auto WaveTrack::AllClipsIterator::operator ++ () -> AllClipsIterator &
+{
+   // The unspecified sequence is a post-order, but there is no
+   // promise whether sister nodes are ordered in time.
+   if ( !mStack.empty() ) {
+      auto &pair =  mStack.back();
+      if ( ++pair.first == pair.second ) {
+         mStack.pop_back();
+      }
+      else
+         push( (*pair.first)->GetCutLines() );
+   }
+
+   return *this;
+}
+
+void WaveTrack::AllClipsIterator::push( WaveClipHolders &clips )
+{
+   auto pClips = &clips;
+   while (!pClips->empty()) {
+      auto first = pClips->begin();
+      mStack.push_back( Pair( first, pClips->end() ) );
+      pClips = &(*first)->GetCutLines();
+   }
 }

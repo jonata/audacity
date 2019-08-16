@@ -20,6 +20,7 @@
 
 #include "../ShuttleGui.h"
 #include "../WaveTrack.h"
+#include "../widgets/NumericTextCtrl.h"
 
 EffectSilence::EffectSilence()
 {
@@ -30,9 +31,9 @@ EffectSilence::~EffectSilence()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectSilence::GetSymbol()
+ComponentInterfaceSymbol EffectSilence::GetSymbol()
 {
    return SILENCE_PLUGIN_SYMBOL;
 }

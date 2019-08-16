@@ -26,13 +26,13 @@
 
 #include <wx/intl.h>
 
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "../widgets/valnum.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 
 #include "../LabelTrack.h"
 #include "../WaveTrack.h"
-#include "../MemoryX.h"
 
 // Define keys, defaults, minimums, and maximums for the effect parameters
 //
@@ -50,9 +50,9 @@ EffectFindClipping::~EffectFindClipping()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectFindClipping::GetSymbol()
+ComponentInterfaceSymbol EffectFindClipping::GetSymbol()
 {
    return FINDCLIPPING_PLUGIN_SYMBOL;
 }
@@ -216,8 +216,7 @@ bool EffectFindClipping::ProcessOne(LabelTrack * lt,
             if (stoprun >= mStop) {
                lt->AddLabel(SelectedRegion(startTime,
                                           wt->LongSamplesToTime(start + s - mStop)),
-                           wxString::Format(wxT("%lld of %lld"), startrun.as_long_long(), (samps - mStop).as_long_long()),
-                           -2);
+                           wxString::Format(wxT("%lld of %lld"), startrun.as_long_long(), (samps - mStop).as_long_long()));
                startrun = 0;
                stoprun = 0;
                samps = 0;

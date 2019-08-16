@@ -15,43 +15,59 @@
 
 #include <wx/defs.h>
 
-#include <wx/arrstr.h>
-#include <wx/window.h>
-
 #include "PrefsPanel.h"
 
 class ShuttleGui;
+class wxArrayStringEx;
+
+#define GUI_PREFS_PLUGIN_SYMBOL ComponentInterfaceSymbol{ XO("GUI") }
 
 class GUIPrefs final : public PrefsPanel
 {
  public:
    GUIPrefs(wxWindow * parent, wxWindowID winid);
    ~GUIPrefs();
+   ComponentInterfaceSymbol GetSymbol() override;
+   wxString GetDescription() override;
+
    bool Commit() override;
    wxString HelpPageName() override;
    void PopulateOrExchange(ShuttleGui & S) override;
 
-   static void GetRangeChoices(wxArrayString *pChoices, wxArrayString *pCodes);
+   static void GetRangeChoices(
+      wxArrayStringEx *pChoices, wxArrayStringEx *pCodes);
+
+   // If no input language given, defaults first to choice in preferences, then
+   // to system language.
+   // Returns the language actually used which is not lang if lang cannot be found.
+   static wxString InitLang( wxString lang = {} );
+
+   // If no input language given, defaults to system language.
+   // Returns the language actually used which is not lang if lang cannot be found.
+   static wxString SetLang( const wxString & lang );
+
+   // Returns the last language code that was set
+   static wxString GetLang();
 
  private:
    void Populate();
 
-   wxArrayString mLangCodes;
-   wxArrayString mLangNames;
+   wxArrayStringEx mLangCodes;
+   wxArrayStringEx mLangNames;
 
-   wxArrayString mHtmlHelpCodes;
-   wxArrayString mHtmlHelpChoices;
+   wxArrayStringEx mHtmlHelpCodes;
+   wxArrayStringEx mHtmlHelpChoices;
 
-   wxArrayString mThemeCodes;
-   wxArrayString mThemeChoices;
+   wxArrayStringEx mThemeCodes;
+   wxArrayStringEx mThemeChoices;
 
-   wxArrayString mRangeCodes;
-   wxArrayString mRangeChoices;
+   wxArrayStringEx mRangeCodes;
+   wxArrayStringEx mRangeChoices;
 };
 
-class GUIPrefsFactory final : public PrefsPanelFactory
-{
-public:
-   PrefsPanel *operator () (wxWindow *parent, wxWindowID winid) override;
-};
+/// A PrefsPanel::Factory that creates one GUIPrefs panel.
+extern PrefsPanel::Factory GUIPrefsFactory;
+
+int ShowClippingPrefsID();
+
 #endif

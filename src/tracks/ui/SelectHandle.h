@@ -15,15 +15,13 @@ Paul Licameli split from TrackPanel.cpp
 #include "../../SelectedRegion.h"
 #include "../../Snap.h"
 
-#include "../../MemoryX.h"
 #include <vector>
-
-#include <wx/gdicmn.h>
 
 class SelectionStateChanger;
 class SnapManager;
 class SpectrumAnalyst;
 class Track;
+class TrackView;
 class TrackList;
 class ViewInfo;
 class WaveTrack;
@@ -35,7 +33,7 @@ class SelectHandle : public UIHandle
 
 public:
    explicit SelectHandle
-      (const std::shared_ptr<Track> &pTrack, bool useSnap,
+      (const std::shared_ptr<TrackView> &pTrackView, bool useSnap,
        const TrackList &trackList,
        const TrackPanelMouseState &st, const ViewInfo &viewInfo);
 
@@ -44,7 +42,7 @@ public:
    static UIHandlePtr HitTest
       (std::weak_ptr<SelectHandle> &holder,
        const TrackPanelMouseState &state, const AudacityProject *pProject,
-       const std::shared_ptr<Track> &pTrack);
+       const std::shared_ptr<TrackView> &pTrackView);
 
    SelectHandle &operator=(const SelectHandle&) = default;
    
@@ -76,16 +74,13 @@ public:
 
    Result Cancel(AudacityProject*) override;
 
-   void DrawExtras
-      (DrawingPass pass,
-      wxDC * dc, const wxRegion &updateRegion, const wxRect &panelRect)
-      override;
-
    static UIHandle::Result NeedChangeHighlight
       (const SelectHandle &oldState,
        const SelectHandle &newState);
 
 private:
+   std::weak_ptr<Track> FindTrack();
+
    void Connect(AudacityProject *pProject);
 
    void StartSelection(AudacityProject *pProject);
@@ -97,7 +92,7 @@ private:
 
    void StartFreqSelection
       (ViewInfo &viewInfo, int mouseYCoordinate, int trackTopEdge,
-      int trackHeight, Track *pTrack);
+      int trackHeight, TrackView *pTrackView);
    void AdjustFreqSelection
       (const WaveTrack *wt,
        ViewInfo &viewInfo, int mouseYCoordinate, int trackTopEdge,
@@ -112,18 +107,27 @@ private:
    void MoveSnappingFreqSelection
       (AudacityProject *pProject, ViewInfo &viewInfo, int mouseYCoordinate,
        int trackTopEdge,
-       int trackHeight, Track *pTrack);
+       int trackHeight, TrackView *pTrackView);
 public:
    // This is needed to implement a command assignable to keystrokes
    static void SnapCenterOnce
       (SpectrumAnalyst &analyst,
        ViewInfo &viewInfo, const WaveTrack *pTrack, bool up);
 private:
+
+   // TrackPanelDrawable implementation
+   void Draw(
+      TrackPanelDrawingContext &context,
+      const wxRect &rect, unsigned iPass ) override;
+
+   wxRect DrawingArea(
+      const wxRect &rect, const wxRect &panelRect, unsigned iPass ) override;
+
    //void ResetFreqSelectionPin
    //   (const ViewInfo &viewInfo, double hintFrequency, bool logF);
 
 
-   std::weak_ptr<Track> mpTrack;
+   std::weak_ptr<TrackView> mpView;
    wxRect mRect{};
    SelectedRegion mInitialSelection{};
 

@@ -3,7 +3,7 @@
 
 #include "MemoryX.h"
 
-#define fft_type float
+using fft_type = float;
 
 int SmallRB(int bits, int numberBits);
 
@@ -14,6 +14,8 @@ enum {
    FFT_FastMathBR16,
    FFT_FastMathBR24
 };
+
+struct FFTParam;
 
 /* wrapper funcitons. If passed -1 function choice will be made locally */
 void RealFFTf1x(fft_type *, FFTParam*, int functionType=-1);

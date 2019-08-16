@@ -15,8 +15,6 @@
 
 #include "../Audacity.h"
 #include "CommandSignature.h"
-#include "CommandMisc.h"
-#include "Validators.h"
 
 CommandSignature::~CommandSignature()
 {

@@ -29,18 +29,20 @@
 
 #include "../Prefs.h"
 #include "../Project.h"
+#include "../ProjectSettings.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "../WaveTrack.h"
 #include "../widgets/valnum.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 
 class Enums {
 public:
    static const size_t    NumDbChoices;
-   static const IdentInterfaceSymbol DbChoices[];
+   static const EnumValueSymbol DbChoices[];
 };
 
-const IdentInterfaceSymbol Enums::DbChoices[] = {
+const EnumValueSymbol Enums::DbChoices[] = {
    // Table of text values, only for reading what was stored in legacy config
    // files.
    // It was inappropriate to make this a discrete choice control.
@@ -74,7 +76,7 @@ enum kActions
    nActions
 };
 
-static const IdentInterfaceSymbol kActionStrings[nActions] =
+static const EnumValueSymbol kActionStrings[nActions] =
 {
    { XO("Truncate Detected Silence") },
    { XO("Compress Excess Silence") }
@@ -148,9 +150,9 @@ EffectTruncSilence::~EffectTruncSilence()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectTruncSilence::GetSymbol()
+ComponentInterfaceSymbol EffectTruncSilence::GetSymbol()
 {
    return TRUNCATESILENCE_PLUGIN_SYMBOL;
 }
@@ -327,7 +329,8 @@ bool EffectTruncSilence::ProcessIndependently()
 {
    unsigned nGroups = 0;
 
-   const bool syncLock = ::GetActiveProject()->IsSyncLocked();
+   const auto &settings = ProjectSettings::Get( *::GetActiveProject() );
+   const bool syncLock = settings.IsSyncLocked();
 
    // Check if it's permissible
    {
@@ -775,7 +778,7 @@ void EffectTruncSilence::PopulateOrExchange(ShuttleGui & S)
       {
          // Action choices
          auto actionChoices = LocalizedStrings(kActionStrings, nActions);
-         mActionChoice = S.AddChoice( {}, wxT(""), &actionChoices);
+         mActionChoice = S.AddChoice( {}, actionChoices );
          mActionChoice->SetValidator(wxGenericValidator(&mActionIndex));
          S.SetSizeHints(-1, -1);
       }
@@ -801,7 +804,7 @@ void EffectTruncSilence::PopulateOrExchange(ShuttleGui & S)
       S.StartMultiColumn(2, wxALIGN_CENTER_HORIZONTAL);
       {
          mIndependent = S.AddCheckBox(_("Truncate tracks independently"),
-            mbIndependent ? wxT("true") : wxT("false"));
+            mbIndependent);
       }
    S.EndMultiColumn();
 }

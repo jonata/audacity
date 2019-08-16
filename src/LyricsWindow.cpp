@@ -11,10 +11,11 @@
 
 #include "LyricsWindow.h"
 #include "Lyrics.h"
-#include "AudioIO.h"
+#include "AudioIOBase.h"
 #include "Prefs.h" // for RTL_WORKAROUND
 #include "Project.h"
-#include "TrackPanel.h" // for EVT_TRACK_PANEL_TIMER
+#include "ProjectAudioIO.h"
+#include "ViewInfo.h"
 
 #include <wx/radiobut.h>
 #include <wx/toolbar.h>
@@ -43,14 +44,14 @@ END_EVENT_TABLE()
 
 const wxSize gSize = wxSize(LYRICS_DEFAULT_WIDTH, LYRICS_DEFAULT_HEIGHT);
 
-LyricsWindow::LyricsWindow(AudacityProject *parent):
-   wxFrame(parent, -1,
+LyricsWindow::LyricsWindow(AudacityProject *parent)
+   : wxFrame( &GetProjectFrame( *parent ), -1,
             wxString::Format(_("Audacity Karaoke%s"),
-                              ((parent->GetName() == wxEmptyString) ?
+                              ((parent->GetProjectName().empty()) ?
                                  wxT("") :
                                  wxString::Format(
                                    wxT(" - %s"),
-                                   parent->GetName()))),
+                                   parent->GetProjectName()))),
             wxPoint(100, 300), gSize,
             //v Bug in wxFRAME_FLOAT_ON_PARENT:
             // If both the project frame and LyricsWindow are minimized and you restore LyricsWindow,
@@ -114,9 +115,8 @@ LyricsWindow::LyricsWindow(AudacityProject *parent):
    //
    //pToolBar->Realize();
 
-   mLyricsPanel = safenew LyricsPanel(this, -1, panelPos, panelSize);
+   mLyricsPanel = safenew LyricsPanel(this, -1, parent, panelPos, panelSize);
    RTL_WORKAROUND(mLyricsPanel);
-
 
    //vvv Highlight style is broken in ported version.
    //switch (mLyricsPanel->GetLyricsStyle())
@@ -152,14 +152,16 @@ void LyricsWindow::OnStyle_Highlight(wxCommandEvent & WXUNUSED(event))
 
 void LyricsWindow::OnTimer(wxCommandEvent &event)
 {
-   if (mProject->IsAudioActive())
+   if (ProjectAudioIO::Get( *mProject ).IsAudioActive())
    {
+      auto gAudioIO = AudioIOBase::Get();
       GetLyricsPanel()->Update(gAudioIO->GetStreamTime());
    }
    else
    {
       // Reset lyrics display.
-      GetLyricsPanel()->Update(mProject->GetSel0());
+      const auto &selectedRegion = ViewInfo::Get( *mProject ).selectedRegion;
+      GetLyricsPanel()->Update(selectedRegion.t0());
    }
 
    // Let other listeners get the notification

@@ -22,12 +22,12 @@ channel.  This collection of functions fills that gap.
 *//*********************************************************************/
 
 
+#include "Audacity.h" // for USE_* macros
+#include "ImageManipulation.h"
+
 #include <wx/image.h>
 
-#include "Audacity.h"
-#include "ImageManipulation.h"
 #include "AllThemeResources.h"
-#include "Theme.h"
 
 /// This looks at the first pixel in the image, and shifts
 /// the entire image by the vector difference between that

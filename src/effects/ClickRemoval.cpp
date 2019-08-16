@@ -30,11 +30,13 @@
 #include <math.h>
 
 #include <wx/intl.h>
+#include <wx/slider.h>
 #include <wx/valgen.h>
 
 #include "../Prefs.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 #include "../widgets/valnum.h"
 
 #include "../WaveTrack.h"
@@ -73,9 +75,9 @@ EffectClickRemoval::~EffectClickRemoval()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectClickRemoval::GetSymbol()
+ComponentInterfaceSymbol EffectClickRemoval::GetSymbol()
 {
    return CLICKREMOVAL_PLUGIN_SYMBOL;
 }

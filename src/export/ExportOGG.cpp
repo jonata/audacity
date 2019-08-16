@@ -15,11 +15,11 @@
 
 **********************************************************************/
 
-#include "../Audacity.h"
+#include "../Audacity.h" // for USE_* macros
 
 #ifdef USE_LIBVORBIS
-
 #include "ExportOGG.h"
+
 #include "Export.h"
 
 #include <wx/log.h>
@@ -28,15 +28,15 @@
 #include <vorbis/vorbisenc.h>
 
 #include "../FileIO.h"
-#include "../Project.h"
+#include "../ProjectSettings.h"
 #include "../Mix.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
 
-#include "../Internat.h"
 #include "../Tags.h"
 #include "../Track.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
+#include "../widgets/ProgressDialog.h"
 
 //----------------------------------------------------------------------------
 // ExportOGGOptions
@@ -170,8 +170,8 @@ ProgressResult ExportOGG::Export(AudacityProject *project,
                        const Tags *metadata,
                        int WXUNUSED(subformat))
 {
-   double    rate    = project->GetRate();
-   const TrackList *tracks = project->GetTracks();
+   double    rate    = ProjectSettings::Get( *project ).GetRate();
+   const auto &tracks = TrackList::Get( *project );
    double    quality = (gPrefs->Read(wxT("/FileFormats/OggExportQuality"), 50)/(float)100.0);
 
    wxLogNull logNo;            // temporarily disable wxWidgets error messages
@@ -274,11 +274,8 @@ ProgressResult ExportOGG::Export(AudacityProject *project,
       }
    }
 
-   const WaveTrackConstArray waveTracks =
-      tracks->GetWaveTrackConstArray(selectionOnly, false);
    {
-      auto mixer = CreateMixer(waveTracks,
-         tracks->GetTimeTrack(),
+      auto mixer = CreateMixer(tracks, selectionOnly,
          t0, t1,
          numChannels, SAMPLES_PER_RUN, false,
          rate, floatSample, true, mixerSpec);
@@ -381,7 +378,7 @@ bool ExportOGG::FillComment(AudacityProject *project, vorbis_comment *comment, c
 {
    // Retrieve tags from project if not over-ridden
    if (metadata == NULL)
-      metadata = project->GetTags();
+      metadata = &Tags::Get( *project );
 
    vorbis_comment_init(comment);
 

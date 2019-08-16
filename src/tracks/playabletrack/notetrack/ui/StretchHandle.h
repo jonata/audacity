@@ -13,13 +13,10 @@ Paul Licameli split from TrackPanel.cpp
 
 #include "../../../../UIHandle.h"
 
-#include "../../../../MemoryX.h"
-
 class Alg_seq;
 class NoteTrack;
 class Track;
 class ViewInfo;
-class wxCursor;
 
 class StretchHandle : public UIHandle
 {

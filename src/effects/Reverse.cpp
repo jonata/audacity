@@ -22,6 +22,7 @@
 #include <wx/intl.h>
 
 #include "../LabelTrack.h"
+#include "../WaveClip.h"
 #include "../WaveTrack.h"
 
 //
@@ -36,9 +37,9 @@ EffectReverse::~EffectReverse()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectReverse::GetSymbol()
+ComponentInterfaceSymbol EffectReverse::GetSymbol()
 {
    return REVERSE_PLUGIN_SYMBOL;
 }

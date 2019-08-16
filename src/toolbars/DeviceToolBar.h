@@ -11,27 +11,30 @@
 #ifndef __AUDACITY_DEVICE_TOOLBAR__
 #define __AUDACITY_DEVICE_TOOLBAR__
 
-#include "../MemoryX.h"
 #include <vector>
 #include "ToolBar.h"
 
-class wxImage;
 class wxSize;
 class wxPoint;
 class wxChoice;
-class wxStaticText;
 struct DeviceSourceMap;
+
+class AudacityProject;
 
 class DeviceToolBar final : public ToolBar {
 
  public:
 
-   DeviceToolBar();
+   DeviceToolBar( AudacityProject &project );
    virtual ~DeviceToolBar();
+
+   static DeviceToolBar &Get( AudacityProject &project );
+   static const DeviceToolBar &Get( const AudacityProject &project );
 
    void Create(wxWindow * parent) override;
 
    void UpdatePrefs() override;
+   void UpdateSelectedPrefs( int ) override;
 
    void DeinitChildren();
    void Populate() override;
@@ -56,6 +59,8 @@ class DeviceToolBar final : public ToolBar {
    void RefillCombos();
 
  private:
+   void OnRescannedDevices( wxCommandEvent& );
+
    int  ChangeHost();
    void ChangeDevice(bool isInput);
    void FillHosts();

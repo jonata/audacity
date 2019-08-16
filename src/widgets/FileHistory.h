@@ -14,11 +14,13 @@
 #include <vector>
 #include <algorithm>
 #include <wx/defs.h>
-#include <wx/choice.h>
-#include <wx/event.h>
-#include <wx/grid.h>
-#include <wx/string.h>
-#include <wx/window.h>
+#include <wx/weakref.h> // member variable
+
+#include "audacity/Types.h"
+#include "../MemoryX.h"
+
+class wxConfigBase;
+class wxMenu;
 
 class AUDACITY_DLL_API FileHistory
 {
@@ -26,11 +28,19 @@ class AUDACITY_DLL_API FileHistory
    FileHistory(size_t maxfiles = 12, wxWindowID idbase = wxID_FILE);
    virtual ~FileHistory();
 
-   void AddFileToHistory(const wxString & file, bool update = true);
+   // These constants define the range of IDs reserved by the global file history
+   enum {
+      ID_RECENT_CLEAR = 6100,
+      ID_RECENT_FIRST = 6101,
+      ID_RECENT_LAST  = 6112
+   };
+
+   static FileHistory &Global();
+
+   void AddFileToHistory(const FilePath & file, bool update = true);
    void RemoveFileFromHistory(size_t i, bool update = true);
    void Clear();
    void UseMenu(wxMenu *menu);
-   void RemoveMenu(wxMenu *menu);
    void Load(wxConfigBase& config, const wxString & group);
    void Save(wxConfigBase& config, const wxString & group);
 
@@ -38,14 +48,16 @@ class AUDACITY_DLL_API FileHistory
    void AddFilesToMenu(wxMenu *menu);
 
    size_t GetCount();
-   const wxString &GetHistoryFile(size_t i) const;
+   const FilePath &GetHistoryFile(size_t i) const;
 
  private:
+   void Compress();
+
    size_t mMaxFiles;
    wxWindowID mIDBase;
 
-   std::vector<wxMenu*> mMenus;
-   wxArrayString mHistory;
+   std::vector< wxWeakRef< wxMenu > > mMenus;
+   FilePaths mHistory;
 
 };
 

@@ -20,9 +20,12 @@
 #include "../Audacity.h"
 #include "GUIPrefs.h"
 
+#include "../Experimental.h"
+
+#include <wx/app.h>
 #include <wx/defs.h>
 
-#include "../AudacityApp.h"
+#include "../FileNames.h"
 #include "../Languages.h"
 #include "../Theme.h"
 #include "../Prefs.h"
@@ -30,11 +33,12 @@
 
 #include "GUISettings.h"
 
-#include "../Experimental.h"
-
 #include "ThemePrefs.h"
 #include "../AColor.h"
-#include "../Internat.h"
+#include "../TranslatableStringArray.h"
+#include "../widgets/AudacityMessageBox.h"
+
+wxDEFINE_EVENT(EVT_LANGUAGE_CHANGE, wxCommandEvent);
 
 GUIPrefs::GUIPrefs(wxWindow * parent, wxWindowID winid)
 /* i18n-hint: refers to Audacity's user interface settings */
@@ -47,32 +51,52 @@ GUIPrefs::~GUIPrefs()
 {
 }
 
-void GUIPrefs::GetRangeChoices(wxArrayString *pChoices, wxArrayString *pCodes)
+ComponentInterfaceSymbol GUIPrefs::GetSymbol()
+{
+   return GUI_PREFS_PLUGIN_SYMBOL;
+}
+
+wxString GUIPrefs::GetDescription()
+{
+   return _("Preferences for GUI");
+}
+
+wxString GUIPrefs::HelpPageName()
+{
+   return "Interface_Preferences";
+}
+
+void GUIPrefs::GetRangeChoices(
+   wxArrayStringEx *pChoices, wxArrayStringEx *pCodes)
 {
    if (pCodes) {
-      wxArrayString &codes = *pCodes;
-      codes.Clear();
-      codes.Add(wxT("36"));
-      codes.Add(wxT("48"));
-      codes.Add(wxT("60"));
-      codes.Add(wxT("72"));
-      codes.Add(wxT("84"));
-      codes.Add(wxT("96"));
-      codes.Add(wxT("120"));
-      codes.Add(wxT("145"));
+      auto &codes = *pCodes;
+      codes.clear();
+      codes.insert( codes.end(), {
+         wxT("36") ,
+         wxT("48") ,
+         wxT("60") ,
+         wxT("72") ,
+         wxT("84") ,
+         wxT("96") ,
+         wxT("120") ,
+         wxT("145") ,
+      } );
    }
 
    if (pChoices) {
-      wxArrayString &choices = *pChoices;
-      choices.Clear();
-      choices.Add(_("-36 dB (shallow range for high-amplitude editing)"));
-      choices.Add(_("-48 dB (PCM range of 8 bit samples)"));
-      choices.Add(_("-60 dB (PCM range of 10 bit samples)"));
-      choices.Add(_("-72 dB (PCM range of 12 bit samples)"));
-      choices.Add(_("-84 dB (PCM range of 14 bit samples)"));
-      choices.Add(_("-96 dB (PCM range of 16 bit samples)"));
-      choices.Add(_("-120 dB (approximate limit of human hearing)"));
-      choices.Add(_("-145 dB (PCM range of 24 bit samples)"));
+      auto &choices = *pChoices;
+      choices.clear();
+      choices.insert( choices.end(), {
+         _("-36 dB (shallow range for high-amplitude editing)") ,
+         _("-48 dB (PCM range of 8 bit samples)") ,
+         _("-60 dB (PCM range of 10 bit samples)") ,
+         _("-72 dB (PCM range of 12 bit samples)") ,
+         _("-84 dB (PCM range of 14 bit samples)") ,
+         _("-96 dB (PCM range of 16 bit samples)") ,
+         _("-120 dB (approximate limit of human hearing)") ,
+         _("-145 dB (PCM range of 24 bit samples)") ,
+      } );
    }
 }
 
@@ -81,36 +105,57 @@ void GUIPrefs::Populate()
    // First any pre-processing for constructing the GUI.
    GetLanguages(mLangCodes, mLangNames);
 
-   mHtmlHelpCodes.Add(wxT("Local"));
-   mHtmlHelpCodes.Add(wxT("FromInternet"));
+   mHtmlHelpCodes.clear();
+   auto values = {
+      wxT("Local") ,
+      wxT("FromInternet") ,
+   };
+   mHtmlHelpCodes.insert( mHtmlHelpCodes.end(), values );
 
-   mHtmlHelpChoices.Add(_("Local"));
-   mHtmlHelpChoices.Add(_("From Internet"));
+   mHtmlHelpChoices.clear();
+   auto values2 = {
+      _("Local") ,
+      _("From Internet") ,
+   };
+   mHtmlHelpChoices.insert( mHtmlHelpChoices.end(), values2 );
 
-   mThemeCodes.Add( wxT("classic") );
-   mThemeCodes.Add( wxT("light") );
-   mThemeCodes.Add( wxT("dark") );
-   mThemeCodes.Add( wxT("high-contrast") );
-   mThemeCodes.Add( wxT("protools") );
-   mThemeCodes.Add( wxT("custom") );
+   mThemeCodes.clear();
+   mThemeCodes.insert( mThemeCodes.end(), {
+       wxT("classic")  ,
+       wxT("light")  ,
+       wxT("dark")  ,
+       wxT("high-contrast")  ,
+       wxT("protools")  ,
+       wxT("custom")  ,
+   } );
 
-   /* i18n-hint: describing the "classic" or traditional appearance of older versions of Audacity */
-   mThemeChoices.Add( _("Classic") );
-   /* i18n-hint: Light meaning opposite of dark */
-   mThemeChoices.Add( _("Light") );
-   mThemeChoices.Add( _("Dark") );
-   /* i18n-hint: greater difference between foreground and background colors */
-   mThemeChoices.Add( _("High Contrast") );
-   mThemeChoices.Add( _("Pro Tools") );
-   /* i18n-hint: user defined */
-   mThemeChoices.Add( _("Custom") );
+   mThemeChoices.clear();
+   mThemeChoices.insert( mThemeChoices.end(), {
+      /* i18n-hint: describing the "classic" or traditional appearance of older versions of Audacity */
+       _("Classic")  ,
+      /* i18n-hint: Light meaning opposite of dark */
+       _("Light")  ,
+       _("Dark")  ,
+      /* i18n-hint: greater difference between foreground and background colors */
+       _("High Contrast")  ,
+       _("Pro Tools")  ,
+      /* i18n-hint: user defined */
+       _("Custom")  ,
+   } );
 
    GetRangeChoices(&mRangeChoices, &mRangeCodes);
 
 #if 0
-   // only for testing...
-   mLangCodes.Add("kg");   mLangNames.Add("Klingon");
-   mLangCodes.Add("ep");   mLangNames.Add("Esperanto");
+   mLangCodes.insert( mLangCodes.end(), {
+      // only for testing...
+      "kg" ,
+      "ep" ,
+   } );
+
+   mLangNames.insert( mLangNames.end(), {
+      "Klingon" ,
+      "Esperanto" ,
+   } );
 #endif
 
    //------------------------- Main section --------------------
@@ -218,7 +263,7 @@ bool GUIPrefs::Commit()
 
    // If language has changed, we want to change it now, not on the next reboot.
    wxString lang = gPrefs->Read(wxT("/Locale/Language"), wxT(""));
-   wxString usedLang = wxGetApp().InitLang(lang);
+   wxString usedLang = SetLang(lang);
    // Bug 1523: Previously didn't check no-language (=System Language)
    if (!(lang.empty()) && (lang != usedLang)) {
       // lang was not usable and is not system language.  We got overridden.
@@ -226,16 +271,116 @@ bool GUIPrefs::Commit()
       gPrefs->Flush();
    }
 
+   // Reads preference /GUI/Theme
+   theTheme.LoadPreferredTheme();
+   ThemePrefs::ApplyUpdatedImages();
+
    return true;
 }
 
-wxString GUIPrefs::HelpPageName()
+wxString GUIPrefs::InitLang( wxString langCode )
 {
-   return "Interface_Preferences";
+   if ( langCode.empty() )
+      langCode = gPrefs->Read(wxT("/Locale/Language"), wxEmptyString);
+
+   // Use the system default language if one wasn't specified or if the user selected System.
+   if (langCode.empty())
+   {
+      langCode = GetSystemLanguageCode();
+   }
+
+   // Initialize the language
+   return SetLang(langCode);
 }
 
-PrefsPanel *GUIPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
+#define IPC_APPL wxT("audacity")
+static std::unique_ptr<wxLocale> sLocale;
+
+wxString GUIPrefs::SetLang( const wxString & lang )
+{
+   wxString result = lang;
+
+   sLocale.reset();
+
+#if defined(__WXMAC__)
+   // This should be reviewed again during the wx3 conversion.
+
+   // On OSX, if the LANG environment variable isn't set when
+   // using a language like Japanese, an assertion will trigger
+   // because conversion to Japanese from "?" doesn't return a
+   // valid length, so make OSX happy by defining/overriding
+   // the LANG environment variable with U.S. English for now.
+   wxSetEnv(wxT("LANG"), wxT("en_US.UTF-8"));
+#endif
+
+   const wxLanguageInfo *info = NULL;
+   if (!lang.empty()) {
+      info = wxLocale::FindLanguageInfo(lang);
+      if (!info)
+         ::AudacityMessageBox(wxString::Format(_("Language \"%s\" is unknown"), lang));
+   }
+   if (!info)
+   {
+      result = GetSystemLanguageCode();
+      info = wxLocale::FindLanguageInfo(result);
+      if (!info)
+         return result;
+   }
+   sLocale = std::make_unique<wxLocale>(info->Language);
+
+   for( const auto &path : FileNames::AudacityPathList() )
+      sLocale->AddCatalogLookupPathPrefix( path );
+
+   // LL:  Must add the wxWidgets catalog manually since the search
+   //      paths were not set up when mLocale was created.  The
+   //      catalogs are search in LIFO order, so add wxstd first.
+   sLocale->AddCatalog(wxT("wxstd"));
+
+// AUDACITY_NAME is legitimately used on some *nix configurations.
+#ifdef AUDACITY_NAME
+   sLocale->AddCatalog(wxT(AUDACITY_NAME));
+#else
+   sLocale->AddCatalog(IPC_APPL);
+#endif
+
+   // Initialize internationalisation (number formats etc.)
+   //
+   // This must go _after_ creating the wxLocale instance because
+   // creating the wxLocale instance sets the application-wide locale.
+
+   Internat::Init();
+
+   // Notify listeners of language changes
+   {
+      wxCommandEvent evt(EVT_LANGUAGE_CHANGE);
+      wxTheApp->ProcessEvent(evt);
+   }
+
+   // PRL: Moved this, do it only after language intialized
+   // Unused strings that we want to be translated, even though
+   // we're not using them yet...
+   wxString future1 = _("Master Gain Control");
+
+   return result;
+}
+
+wxString GUIPrefs::GetLang()
+{
+   if (sLocale)
+      return sLocale->GetSysName();
+   else
+      return {};
+}
+
+int ShowClippingPrefsID()
+{
+   static int value = wxNewId();
+   return value;
+}
+
+PrefsPanel::Factory
+GUIPrefsFactory = [](wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
    return safenew GUIPrefs(parent, winid);
-}
+};

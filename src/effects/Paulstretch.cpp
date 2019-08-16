@@ -25,10 +25,11 @@
 #include <wx/intl.h>
 #include <wx/valgen.h>
 
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "../FFT.h"
 #include "../widgets/valnum.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 #include "../Prefs.h"
 
 #include "../WaveTrack.h"
@@ -39,6 +40,8 @@
 Param( Amount, float,   wxT("Stretch Factor"),   10.0,    1.0,     FLT_MAX, 1   );
 Param( Time,   float,   wxT("Time Resolution"),  0.25f,   0.00099f,  FLT_MAX, 1   );
 
+/// \brief Class that helps EffectPaulStretch.  It does the FFTs and inner loop 
+/// of the effect.
 class PaulStretch
 {
 public:
@@ -96,9 +99,9 @@ EffectPaulstretch::~EffectPaulstretch()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectPaulstretch::GetSymbol()
+ComponentInterfaceSymbol EffectPaulstretch::GetSymbol()
 {
    return PAULSTRETCH_PLUGIN_SYMBOL;
 }

@@ -15,9 +15,16 @@
 
 #include "../Audacity.h"
 #include "BatchEvalCommand.h"
-#include "CommandContext.h"
 
-IdentInterfaceSymbol BatchEvalCommandType::BuildName()
+#include "CommandContext.h"
+#include "CommandDirectory.h"
+#include "../Project.h"
+
+static CommandDirectory::RegisterType sRegisterType{
+   std::make_unique<BatchEvalCommandType>()
+};
+
+ComponentInterfaceSymbol BatchEvalCommandType::BuildName()
 {
    return { wxT("BatchCommand"), XO("Batch Command") };
 }
@@ -34,7 +41,7 @@ void BatchEvalCommandType::BuildSignature(CommandSignature &signature)
 
 OldStyleCommandPointer BatchEvalCommandType::Create(std::unique_ptr<CommandOutputTargets> && WXUNUSED(target))
 {
-   return std::make_shared<BatchEvalCommand>(*this);
+   return std::make_shared<BatchEvalCommand>(*GetActiveProject(), *this);
 }
 
 bool BatchEvalCommand::Apply(const CommandContext & context)
@@ -45,7 +52,7 @@ bool BatchEvalCommand::Apply(const CommandContext & context)
    MacroCommandsCatalog catalog(&context.project);
 
    wxString macroName = GetString(wxT("MacroName"));
-   if (macroName != wxT(""))
+   if (!macroName.empty())
    {
       MacroCommands batch;
       batch.ReadMacro(macroName);
@@ -64,7 +71,7 @@ bool BatchEvalCommand::Apply(const CommandContext & context)
    bool bResult = Batch.ApplyCommandInBatchMode(friendly, cmdName, cmdParams, &context);
    // Relay messages, if any.
    wxString Message = Batch.GetMessage();
-   if( !Message.IsEmpty() )
+   if( !Message.empty() )
       context.Status( Message );
    return bResult;
 }

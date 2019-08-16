@@ -12,72 +12,112 @@ Paul Licameli split from TrackPanel.cpp
 #define __AUDACITY_WAVE_TRACK_VZOOM_HANDLE__
 
 class wxMouseState;
+class PopupMenuTable;
 class WaveTrack;
-#include <wx/gdicmn.h>
-#include "../../../../MemoryX.h"
+#include "WaveTrackViewConstants.h"
 #include "../../../../UIHandle.h"
 
 
-// Note that these can be with or without spectrum view which
-// adds a constant.
-const int kZoom1to1 = 1;
-const int kZoomTimes2 = 2;
-const int kZoomDiv2 = 3;
-const int kZoomHalfWave = 4;
-const int kZoomInByDrag = 5;
-const int kZoomIn = 6;
-const int kZoomOut = 7;
-const int kZoomReset = 8;
-
-class WaveTrackVZoomHandle : public UIHandle
+namespace WaveTrackVZoomHandle
 {
-   WaveTrackVZoomHandle(const WaveTrackVZoomHandle&);
-   static HitTestPreview HitPreview(const wxMouseState &state);
+   // See RefreshCode.h for bit flags:
+   using Result = unsigned;
 
+   HitTestPreview HitPreview(const wxMouseState &state);
+
+   bool IsDragZooming(int zoomStart, int zoomEnd);
+
+   using DoZoomFunction = void (*)( AudacityProject *pProject,
+       WaveTrack *pTrack,
+       WaveTrackViewConstants::ZoomActions ZoomKind,
+       const wxRect &rect, int zoomStart, int zoomEnd,
+       bool fixedMousePoint);
+
+   Result DoDrag(
+      const TrackPanelMouseEvent &event, AudacityProject *pProject,
+      int zoomStart, int &zoomEnd );
+
+   Result DoRelease(
+      const TrackPanelMouseEvent &event, AudacityProject *pProject,
+      wxWindow *pParent, WaveTrack *pTrack, const wxRect &mRect,
+      DoZoomFunction doZoom, PopupMenuTable &table,
+      int zoomStart, int zoomEnd );
+
+   void DoDraw(
+      TrackPanelDrawingContext &context,
+      const wxRect &rect, unsigned iPass, int zoomStart, int zoomEnd );
+
+   wxRect DoDrawingArea(
+      const wxRect &rect, const wxRect &panelRect, unsigned iPass );
+};
+
+#include "../../../../widgets/PopupMenuTable.h" // to inherit
+
+class WaveTrackVRulerMenuTable : public PopupMenuTable
+{
 public:
-   explicit WaveTrackVZoomHandle
-      (const std::shared_ptr<WaveTrack> &pTrack, const wxRect &rect, int y);
+   struct InitMenuData
+   {
+   public:
+      WaveTrack *pTrack;
+      wxRect rect;
+      unsigned result;
+      int yy;
+      WaveTrackVZoomHandle::DoZoomFunction doZoom;
+   };
 
-   WaveTrackVZoomHandle &operator=(const WaveTrackVZoomHandle&) = default;
+protected:
+   WaveTrackVRulerMenuTable() {}
 
-   static void DoZoom
-   (AudacityProject *pProject,
-    WaveTrack *pTrack, bool allChannels, int ZoomKind,
-    const wxRect &rect, int zoomStart, int zoomEnd,
-    bool fixedMousePoint);
-
-   virtual ~WaveTrackVZoomHandle();
-
-   std::shared_ptr<WaveTrack> GetTrack() const { return mpTrack.lock(); }
-
-   void Enter(bool forward) override;
-
-   Result Click
-      (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
-
-   Result Drag
-      (const TrackPanelMouseEvent &event, AudacityProject *pProject) override;
-
-   HitTestPreview Preview
-      (const TrackPanelMouseState &state, const AudacityProject *pProject)
-      override;
-
-   Result Release
-      (const TrackPanelMouseEvent &event, AudacityProject *pProject,
-       wxWindow *pParent) override;
-
-   Result Cancel(AudacityProject *pProject) override;
-
-   void DrawExtras
-      (DrawingPass pass,
-       wxDC * dc, const wxRegion &updateRegion, const wxRect &panelRect)
-      override;
+   void InitMenu(Menu *pMenu, void *pUserData) override;
 
 private:
-   std::weak_ptr<WaveTrack> mpTrack;
+   void DestroyMenu() override
+   {
+      mpData = nullptr;
+   }
 
-   int mZoomStart{}, mZoomEnd{};
-   wxRect mRect{};
+protected:
+   InitMenuData *mpData {};
+
+   void OnZoom( WaveTrackViewConstants::ZoomActions iZoomCode );
+   void OnZoomFitVertical(wxCommandEvent&)
+      { OnZoom( WaveTrackViewConstants::kZoom1to1 );};
+   void OnZoomReset(wxCommandEvent&)
+      { OnZoom( WaveTrackViewConstants::kZoomReset );};
+   void OnZoomDiv2Vertical(wxCommandEvent&)
+      { OnZoom( WaveTrackViewConstants::kZoomDiv2 );};
+   void OnZoomTimes2Vertical(wxCommandEvent&)
+      { OnZoom( WaveTrackViewConstants::kZoomTimes2 );};
+   void OnZoomHalfWave(wxCommandEvent&)
+      { OnZoom( WaveTrackViewConstants::kZoomHalfWave );};
+   void OnZoomInVertical(wxCommandEvent&)
+      { OnZoom( WaveTrackViewConstants::kZoomIn );};
+   void OnZoomOutVertical(wxCommandEvent&)
+      { OnZoom( WaveTrackViewConstants::kZoomOut );};
+};
+
+enum {
+   OnZoomFitVerticalID = 20000,
+   OnZoomResetID,
+   OnZoomDiv2ID,
+   OnZoomTimes2ID,
+   OnZoomHalfWaveID,
+   OnZoomInVerticalID,
+   OnZoomOutVerticalID,
+
+   // Reserve an ample block of ids for waveform scale types
+   OnFirstWaveformScaleID,
+   OnLastWaveformScaleID = OnFirstWaveformScaleID + 9,
+
+   // Reserve an ample block of ids for spectrum scale types
+   OnFirstSpectrumScaleID,
+   OnLastSpectrumScaleID = OnFirstSpectrumScaleID + 19,
+
+   OnZoomMaxID,
+
+   OnUpOctaveID,
+   OnDownOctaveID,
 };
 
 #endif

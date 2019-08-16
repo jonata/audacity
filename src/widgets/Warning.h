@@ -12,8 +12,9 @@
 #define __AUDACITY_WARNING__
 
 #include "../Audacity.h"
+
 #include <wx/defs.h>
-#include <wx/window.h>
+class wxString;
 
 // "Don't show this warning again"
  const wxString &DefaultWarningFooter();
@@ -28,10 +29,5 @@ int ShowWarningDialog(wxWindow *parent,
                       bool showCancelButton = false,
                       // This message appears by the checkbox:
                       const wxString &footer = DefaultWarningFooter());
-
-/// Return the config file key associated with a warning dialog identified
-/// by internalDialogName.  When the box is checked, the value at the key
-/// becomes false.
-wxString WarningDialogKey(const wxString &internalDialogName);
 
 #endif // __AUDACITY_WARNING__

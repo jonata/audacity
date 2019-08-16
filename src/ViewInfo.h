@@ -11,140 +11,181 @@
 #ifndef __AUDACITY_VIEWINFO__
 #define __AUDACITY_VIEWINFO__
 
+#include <utility>
 #include <vector>
-#include <wx/event.h>
+#include <wx/event.h> // inherit wxEvtHandler
+#include <wx/weakref.h> // member variable
 #include "SelectedRegion.h"
 #include "MemoryX.h"
+#include "ZoomInfo.h" // to inherit
 
 
-class Track;
+class NotifyingSelectedRegion;
 
-#ifdef __GNUC__
-#define CONST
-#else
-#define CONST const
-#endif
+struct SelectedRegionEvent : public wxEvent
+{
+   SelectedRegionEvent( wxEventType commandType,
+                       NotifyingSelectedRegion *pRegion );
 
-// The subset of ViewInfo information (other than selection)
-// that is sufficient for purposes of TrackArtist,
-// and for computing conversions between track times and pixel positions.
-class AUDACITY_DLL_API ZoomInfo /* not final */
-   // Note that ViewInfo inherits from ZoomInfo but there are no virtual functions.
-   // That's okay if we pass always by reference and never copy, suffering "slicing."
+   wxEvent *Clone() const override;
+
+   wxWeakRef< NotifyingSelectedRegion > pRegion;
+};
+
+// To do:  distinguish time changes from frequency changes perhaps?
+wxDECLARE_EXPORTED_EVENT( AUDACITY_DLL_API,
+                          EVT_SELECTED_REGION_CHANGE, SelectedRegionEvent );
+
+// This heavyweight wrapper of the SelectedRegion structure emits events
+// on mutating operations, that other classes can listen for.
+class NotifyingSelectedRegion : public wxEvtHandler
 {
 public:
-   ZoomInfo(double start, double pixelsPerSecond);
-   ~ZoomInfo();
+   // Expose SelectedRegion's const accessors
+   double t0 () const { return mRegion.t0(); }
+   double t1 () const { return mRegion.t1(); }
+   double f0 () const { return mRegion.f0(); }
+   double f1 () const { return mRegion.f1(); }
+   double fc () const { return mRegion.fc(); }
+   bool isPoint() const { return mRegion.isPoint(); }
+   double duration() const { return mRegion.duration(); }
 
-   // Be sure we don't slice
-   ZoomInfo(const ZoomInfo&) PROHIBITED;
-   ZoomInfo& operator= (const ZoomInfo&) PROHIBITED;
+   // Writing and reading of persistent fields -- the read is mutating but
+   // does not emit events
+   void WriteXMLAttributes
+      (XMLWriter &xmlFile,
+       const wxChar *legacyT0Name, const wxChar *legacyT1Name) const
+   { mRegion.WriteXMLAttributes(xmlFile, legacyT0Name, legacyT1Name); }
 
-   void UpdatePrefs();
+   bool HandleXMLAttribute
+      (const wxChar *attr, const wxChar *value,
+       const wxChar *legacyT0Name, const wxChar *legacyT1Name)
+   { return mRegion.HandleXMLAttribute(
+      attr, value, legacyT0Name, legacyT1Name ); }
 
-   int vpos;                    // vertical scroll pos
+   // const-only access allows assignment from this into a SelectedRegion
+   // or otherwise passing it into a function taking const SelectedRegion&
+   operator const SelectedRegion & () const { return mRegion; }
 
-   double h;                    // h pos in secs
+   // These are the event-emitting operations
+   NotifyingSelectedRegion& operator = ( const SelectedRegion &other );
+   
+   // Returns true iff the bounds got swapped
+   bool setTimes(double t0, double t1);
 
-protected:
-   double zoom;                 // pixels per second
+   // Returns true iff the bounds got swapped
+   bool setT0(double t, bool maySwap = true);
 
+   // Returns true iff the bounds got swapped
+   bool setT1(double t, bool maySwap = true);
+
+   void collapseToT0();
+
+   void collapseToT1();
+
+   void move(double delta);
+
+   // Returns true iff the bounds got swapped
+   bool setFrequencies(double f0, double f1);
+
+   // Returns true iff the bounds got swapped
+   bool setF0(double f, bool maySwap = true);
+
+   // Returns true iff the bounds got swapped
+   bool setF1(double f, bool maySwap = true);
+
+private:
+   void Notify();
+
+   SelectedRegion mRegion;
+};
+
+// See big pictorial comment in TrackPanel.cpp for explanation of these numbers
+enum : int {
+   // constants related to y coordinates in the track panel
+   kTopInset = 4,
+   kTopMargin = kTopInset + kBorderThickness,
+   kBottomMargin = kShadowThickness + kBorderThickness,
+   kSeparatorThickness = kBottomMargin + kTopMargin,
+};
+
+enum : int {
+   kTrackInfoBtnSize = 18, // widely used dimension, usually height
+   kTrackInfoSliderHeight = 25,
+   kTrackInfoSliderWidth = 84,
+   kTrackInfoSliderAllowance = 5,
+   kTrackInfoSliderExtra = 5,
+};
+
+class PlayRegion
+{
 public:
-   float dBr;                   // decibel scale range
+   PlayRegion() = default;
 
-   // do NOT use this once to convert a pixel width to a duration!
-   // Instead, call twice to convert start and end times,
-   // and take the difference.
-   // origin specifies the pixel corresponding to time h
-   double PositionToTime(wxInt64 position,
-      wxInt64 origin = 0
-      , bool ignoreFisheye = false
-   ) const;
-
-   // do NOT use this once to convert a duration to a pixel width!
-   // Instead, call twice to convert start and end positions,
-   // and take the difference.
-   // origin specifies the pixel corresponding to time h
-   wxInt64 TimeToPosition(double time,
-      wxInt64 origin = 0
-      , bool ignoreFisheye = false
-   ) const;
-
-   // This always ignores the fisheye.  Use with caution!
-   // You should prefer to call TimeToPosition twice, for endpoints, and take the difference!
-   double TimeRangeToPixelWidth(double timeRange) const;
-
-   double OffsetTimeByPixels(double time, wxInt64 offset, bool ignoreFisheye = false) const
+   PlayRegion( const PlayRegion& ) = delete;
+   PlayRegion &operator= ( const PlayRegion &that )
    {
-      return PositionToTime(offset + TimeToPosition(time, ignoreFisheye), ignoreFisheye);
+      mLocked = that.mLocked;
+      // Guarantee the equivalent un-swapped order of endpoints
+      mStart = that.GetStart();
+      mEnd = that.GetEnd();
+      return *this;
    }
 
-   bool ZoomInAvailable() const;
-   bool ZoomOutAvailable() const;
+   bool Locked() const { return mLocked; }
+   void SetLocked( bool locked ) { mLocked = locked; }
 
-   static double GetDefaultZoom()
-   { return 44100.0 / 512.0; }
+   bool Empty() const { return GetStart() == GetEnd(); }
+   double GetStart() const
+   {
+      if ( mEnd < 0 )
+         return mStart;
+      else
+         return std::min( mStart, mEnd );
+   }
+   double GetEnd() const
+   {
+      if ( mStart < 0 )
+         return mEnd;
+      else
+         return std::max( mStart, mEnd );
+   }
 
-   // There is NO GetZoom()!
-   // Use TimeToPosition and PositionToTime and OffsetTimeByPixels!
+   void SetStart( double start ) { mStart = start; }
+   void SetEnd( double end ) { mEnd = end; }
+   void SetTimes( double start, double end ) { mStart = start, mEnd = end; }
 
-   // Limits zoom to certain bounds
-   void SetZoom(double pixelsPerSecond);
-   double GetZoom();
-   static double GetMaxZoom( );
-   static double GetMinZoom( );
+   void Order()
+   {
+      if ( mStart >= 0 && mEnd >= 0 && mStart > mEnd)
+         std::swap( mStart, mEnd );
+   }
 
-   // Limits zoom to certain bounds
-   // multipliers above 1.0 zoom in, below out
-   void ZoomBy(double multiplier);
+private:
+   // Times:
+   double mStart{ -1.0 };
+   double mEnd{ -1.0 };
 
-   struct Interval {
-      CONST wxInt64 position; CONST double averageZoom; CONST bool inFisheye;
-      Interval(wxInt64 p, double z, bool i)
-         : position(p), averageZoom(z), inFisheye(i) {}
-   };
-   typedef std::vector<Interval> Intervals;
-
-   // Find an increasing sequence of pixel positions.  Each is the start
-   // of an interval, or is the end position.
-   // Each of the disjoint intervals should be drawn
-   // separately.
-   // It is guaranteed that there is at least one entry and the position of the
-   // first entry equals origin.
-   // @param origin specifies the pixel position corresponding to time ViewInfo::h.
-   void FindIntervals
-      (double rate, Intervals &results, wxInt64 width, wxInt64 origin = 0) const;
-
-   enum FisheyeState {
-      HIDDEN,
-      PINNED,
-
-      NUM_STATES,
-   };
-   FisheyeState GetFisheyeState() const
-   { return HIDDEN; } // stub
-
-   // Return true if the mouse position is anywhere in the fisheye
-   // origin specifies the pixel corresponding to time h
-   bool InFisheye(wxInt64 /*position*/, wxInt64 WXUNUSED(origin = 0)) const
-   {return false;} // stub
-
-   // These accessors ignore the fisheye hiding state.
-   // Inclusive:
-   wxInt64 GetFisheyeLeftBoundary(wxInt64 WXUNUSED(origin = 0)) const
-   {return 0;} // stub
-   // Exclusive:
-   wxInt64 GetFisheyeRightBoundary(wxInt64 WXUNUSED(origin = 0)) const
-   {return 0;} // stub
+   bool mLocked{ false };
 };
 
 class AUDACITY_DLL_API ViewInfo final
    : public wxEvtHandler, public ZoomInfo
 {
 public:
-   ViewInfo(double start, double screenDuration, double pixelsPerSecond);
+   static ViewInfo &Get( AudacityProject &project );
+   static const ViewInfo &Get( const AudacityProject &project );
 
-   void UpdatePrefs();
+   ViewInfo(double start, double screenDuration, double pixelsPerSecond);
+   ViewInfo( const ViewInfo & ) PROHIBITED;
+   ViewInfo &operator=( const ViewInfo & ) PROHIBITED;
+
+   int GetHeight() const { return mHeight; }
+   void SetHeight( int height ) { mHeight = height; }
+
+   static int UpdateScrollPrefsID();
+   void UpdatePrefs() override;
+   void UpdateSelectedPrefs( int id ) override;
 
    double GetBeforeScreenWidth() const
    {
@@ -157,7 +198,8 @@ public:
 
    // Current selection
 
-   SelectedRegion selectedRegion;
+   NotifyingSelectedRegion selectedRegion;
+   PlayRegion playRegion;
 
    // Scroll info
 
@@ -193,6 +235,9 @@ public:
 
    // Receive track panel timer notifications
    void OnTimer(wxCommandEvent &event);
+
+private:
+   int mHeight{ 0 };
 };
 
 #endif

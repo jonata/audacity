@@ -21,22 +21,28 @@ UndoManager
 
 
 #include "Audacity.h"
+#include "UndoManager.h"
 
 #include <wx/hashset.h>
 
 #include "BlockFile.h"
+#include "Clipboard.h"
 #include "Diags.h"
-#include "Internat.h"
 #include "Project.h"
 #include "Sequence.h"
+#include "WaveClip.h"
 #include "WaveTrack.h"          // temp
 #include "NoteTrack.h"  // for Sonify* function declarations
 #include "Diags.h"
 #include "Tags.h"
 
-#include "UndoManager.h"
 
 #include <unordered_set>
+
+wxDEFINE_EVENT(EVT_UNDO_PUSHED, wxCommandEvent);
+wxDEFINE_EVENT(EVT_UNDO_MODIFIED, wxCommandEvent);
+wxDEFINE_EVENT(EVT_UNDO_OR_REDO, wxCommandEvent);
+wxDEFINE_EVENT(EVT_UNDO_RESET, wxCommandEvent);
 
 using ConstBlockFilePtr = const BlockFile*;
 using Set = std::unordered_set<ConstBlockFilePtr>;
@@ -59,7 +65,23 @@ struct UndoStackElem {
    wxString shortDescription;
 };
 
-UndoManager::UndoManager()
+static const AudacityProject::AttachedObjects::RegisteredFactory key{
+   [](AudacityProject &project)
+      { return std::make_unique<UndoManager>( project ); }
+};
+
+UndoManager &UndoManager::Get( AudacityProject &project )
+{
+   return project.AttachedObjects::Get< UndoManager >( key );
+}
+
+const UndoManager &UndoManager::Get( const AudacityProject &project )
+{
+   return Get( const_cast< AudacityProject & >( project ) );
+}
+
+UndoManager::UndoManager( AudacityProject &project )
+   : mProject{ project }
 {
    current = -1;
    saved = -1;
@@ -73,18 +95,18 @@ UndoManager::~UndoManager()
 
 namespace {
    SpaceArray::value_type
-   CalculateUsage(TrackList *tracks, Set *seen)
+   CalculateUsage(const TrackList &tracks, Set *seen)
    {
       SpaceArray::value_type result = 0;
 
       //TIMER_START( "CalculateSpaceUsage", space_calc );
-      for (auto wt : tracks->Any< WaveTrack >())
+      for (auto wt : tracks.Any< const WaveTrack >())
       {
          // Scan all clips within current track
          for(const auto &clip : wt->GetAllClips())
          {
             // Scan all blockfiles within current clip
-            BlockArray *blocks = clip->GetSequenceBlockArray();
+            auto blocks = clip->GetSequenceBlockArray();
             for (const auto &block : *blocks)
             {
                const auto &file = block.f;
@@ -132,12 +154,12 @@ void UndoManager::CalculateSpaceUsage()
    for (size_t nn = stack.size(); nn--;)
    {
       // Scan all tracks at current level
-      auto tracks = stack[nn]->state.tracks.get();
+      auto &tracks = *stack[nn]->state.tracks;
       space[nn] = CalculateUsage(tracks, &seen);
    }
 
-   mClipboardSpaceUsage = CalculateUsage
-      (AudacityProject::GetClipboardTracks(), nullptr);
+   mClipboardSpaceUsage = CalculateUsage(
+      Clipboard::Get().GetTracks(), nullptr);
 
    //TIMER_STOP( space_calc );
 }
@@ -245,6 +267,9 @@ void UndoManager::ModifyState(const TrackList * l,
 
    stack[current]->state.selectedRegion = selectedRegion;
    SonifyEndModifyState();
+
+   // wxWidgets will own the event object
+   mProject.QueueEvent( safenew wxCommandEvent{ EVT_UNDO_MODIFIED } );
 }
 
 void UndoManager::PushState(const TrackList * l,
@@ -298,10 +323,12 @@ void UndoManager::PushState(const TrackList * l,
    }
 
    lastAction = longDescription;
+
+   // wxWidgets will own the event object
+   mProject.QueueEvent( safenew wxCommandEvent{ EVT_UNDO_PUSHED } );
 }
 
-const UndoState &UndoManager::SetStateTo
-   (unsigned int n, SelectedRegion *selectedRegion)
+void UndoManager::SetStateTo(unsigned int n, const Consumer &consumer)
 {
    n -= 1;
 
@@ -309,35 +336,35 @@ const UndoState &UndoManager::SetStateTo
 
    current = n;
 
-   *selectedRegion = stack[current]->state.selectedRegion;
-
    lastAction = wxT("");
    mayConsolidate = false;
 
-   return stack[current]->state;
+   consumer( stack[current]->state );
+
+   // wxWidgets will own the event object
+   mProject.QueueEvent( safenew wxCommandEvent{ EVT_UNDO_RESET } );
 }
 
-const UndoState &UndoManager::Undo(SelectedRegion *selectedRegion)
+void UndoManager::Undo(const Consumer &consumer)
 {
    wxASSERT(UndoAvailable());
 
    current--;
 
-   *selectedRegion = stack[current]->state.selectedRegion;
-
    lastAction = wxT("");
    mayConsolidate = false;
 
-   return stack[current]->state;
+   consumer( stack[current]->state );
+
+   // wxWidgets will own the event object
+   mProject.QueueEvent( safenew wxCommandEvent{ EVT_UNDO_OR_REDO } );
 }
 
-const UndoState &UndoManager::Redo(SelectedRegion *selectedRegion)
+void UndoManager::Redo(const Consumer &consumer)
 {
    wxASSERT(RedoAvailable());
 
    current++;
-
-   *selectedRegion = stack[current]->state.selectedRegion;
 
    /*
    if (!RedoAvailable()) {
@@ -355,10 +382,13 @@ const UndoState &UndoManager::Redo(SelectedRegion *selectedRegion)
    lastAction = wxT("");
    mayConsolidate = false;
 
-   return stack[current]->state;
+   consumer( stack[current]->state );
+
+   // wxWidgets will own the event object
+   mProject.QueueEvent( safenew wxCommandEvent{ EVT_UNDO_OR_REDO } );
 }
 
-bool UndoManager::UnsavedChanges()
+bool UndoManager::UnsavedChanges() const
 {
    return (saved != current) || HasODChangesFlag();
 }
@@ -372,7 +402,7 @@ void UndoManager::StateSaved()
 // currently unused
 //void UndoManager::Debug()
 //{
-//   for (unsigned int i = 0; i < stack.Count(); i++) {
+//   for (unsigned int i = 0; i < stack.size(); i++) {
 //      for (auto t : stack[i]->tracks->Any())
 //         wxPrintf(wxT("*%d* %s %f\n"),
 //                  i, (i == (unsigned int)current) ? wxT("-->") : wxT("   "),
@@ -388,7 +418,7 @@ void UndoManager::SetODChangesFlag()
    mODChangesMutex.Unlock();
 }
 
-bool UndoManager::HasODChangesFlag()
+bool UndoManager::HasODChangesFlag() const
 {
    bool ret;
    mODChangesMutex.Lock();

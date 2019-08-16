@@ -60,27 +60,24 @@ can't be.
 *//*****************************************************************/
 
 #include "Audacity.h"
+#include "Theme.h"
+
+#include "Experimental.h"
 
 #include <wx/wxprec.h>
+#include <wx/dcclient.h>
 #include <wx/image.h>
 #include <wx/file.h>
 #include <wx/ffile.h>
 #include <wx/mstream.h>
 #include <wx/settings.h>
 
-#include "Project.h"
-#include "toolbars/ToolBar.h"
-#include "toolbars/ToolManager.h"
-#include "widgets/Ruler.h"
-#include "ImageManipulation.h"
-#include "Theme.h"
-#include "Experimental.h"
 #include "AllThemeResources.h"  // can remove this later, only needed for 'XPMS_RETIRED'.
 #include "FileNames.h"
 #include "Prefs.h"
-#include "AColor.h"
 #include "ImageManipulation.h"
-#include "widgets/ErrorDialog.h"
+#include "Internat.h"
+#include "widgets/AudacityMessageBox.h"
 
 // JKC: First get the MAC specific images.
 // As we've disabled USE_AQUA_THEME, we need to name each file we use.
@@ -248,23 +245,6 @@ bool ThemeBase::LoadPreferredTheme()
 
    theTheme.LoadTheme( theTheme.ThemeTypeOfTypeName( theme ) );
    return true;
-}
-
-void Theme::ApplyUpdatedImages()
-{
-   AColor::ReInit();
-
-   for (size_t i = 0; i < gAudacityProjects.size(); i++) {
-      AudacityProject *p = gAudacityProjects[i].get();
-      p->ApplyUpdatedTheme();
-      for( int ii = 0; ii < ToolBarCount; ++ii )
-      {
-         ToolBar *pToolBar = p->GetToolManager()->GetToolBar(ii);
-         if( pToolBar )
-            pToolBar->ReCreateButtons();
-      }
-      p->GetRulerPanel()->ReCreateButtons();
-   }
 }
 
 void Theme::RegisterImages()
@@ -489,7 +469,7 @@ void ThemeBase::RegisterImage( int &iIndex, const wxImage &Image, const wxString
    mBitmaps.push_back( wxBitmap( Image ) );
 #endif
 
-   mBitmapNames.Add( Name );
+   mBitmapNames.push_back( Name );
    mBitmapFlags.push_back( mFlow.mFlags );
    mFlow.mFlags &= ~resFlagSkip;
    iIndex = mBitmaps.size() - 1;
@@ -499,7 +479,7 @@ void ThemeBase::RegisterColour( int &iIndex, const wxColour &Clr, const wxString
 {
    wxASSERT( iIndex == -1 ); // Don't initialise same colour twice!
    mColours.push_back( Clr );
-   mColourNames.Add( Name );
+   mColourNames.push_back( Name );
    iIndex = mColours.size() - 1;
 }
 
@@ -596,7 +576,7 @@ class SourceOutputStream final : public wxOutputStream
 {
 public:
    SourceOutputStream(){;};
-   int OpenFile(const wxString & Filename);
+   int OpenFile(const FilePath & Filename);
    virtual ~SourceOutputStream();
 
 protected:
@@ -606,7 +586,7 @@ protected:
 };
 
 /// Opens the file and also adds a standard comment at the start of it.
-int SourceOutputStream::OpenFile(const wxString & Filename)
+int SourceOutputStream::OpenFile(const FilePath & Filename)
 {
    nBytes = 0;
    bool bOk;
@@ -758,7 +738,7 @@ void ThemeBase::CreateImageCache( bool bBinarySave )
    // IF bBinarySave, THEN saving to a normal PNG file.
    if( bBinarySave )
    {
-      const wxString &FileName = FileNames::ThemeCachePng();
+      const auto &FileName = FileNames::ThemeCachePng();
 
       // Perhaps we should prompt the user if they are overwriting
       // an existing theme cache?
@@ -802,7 +782,7 @@ void ThemeBase::CreateImageCache( bool bBinarySave )
    else
    {
       SourceOutputStream OutStream;
-      const wxString &FileName = FileNames::ThemeCacheAsCee( );
+      const auto &FileName = FileNames::ThemeCacheAsCee( );
       if( !OutStream.OpenFile( FileName ))
       {
          AudacityMessageBox(
@@ -934,14 +914,15 @@ teThemeType ThemeBase::GetFallbackThemeType(){
 
 teThemeType ThemeBase::ThemeTypeOfTypeName( const wxString & Name )
 {
-   wxArrayString aThemes;
-   aThemes.Add( "classic" );
-   aThemes.Add( "dark" );
-   aThemes.Add( "light" );
-   aThemes.Add( "high-contrast" );
-   aThemes.Add( "protools" );
-   aThemes.Add( "custom" );
-   int themeIx = aThemes.Index( Name );
+   static const wxArrayStringEx aThemes{
+      "classic" ,
+      "dark" ,
+      "light" ,
+      "high-contrast" ,
+      "protools",
+      "custom" ,
+   };
+   int themeIx = make_iterator_range( aThemes ).index( Name );
    if( themeIx < 0 )
       return GetFallbackThemeType();
    return (teThemeType)themeIx;
@@ -970,7 +951,7 @@ bool ThemeBase::ReadImageCache( teThemeType type, bool bOkIfNotFound)
 
    if(  type == themeFromFile )
    {
-      const wxString &FileName = FileNames::ThemeCachePng();
+      const auto &FileName = FileNames::ThemeCachePng();
       if( !wxFileExists( FileName ))
       {
          if( bOkIfNotFound )
@@ -1100,7 +1081,7 @@ void ThemeBase::LoadComponents( bool bOkIfNotFound )
    wxBusyCursor busy;
    int i;
    int n=0;
-   wxString FileName;
+   FilePath FileName;
    for(i = 0; i < (int)mImages.size(); i++)
    {
 
@@ -1169,7 +1150,7 @@ void ThemeBase::SaveComponents()
    wxBusyCursor busy;
    int i;
    int n=0;
-   wxString FileName;
+   FilePath FileName;
    for(i = 0; i < (int)mImages.size(); i++)
    {
       if( (mBitmapFlags[i] & resFlagInternal)==0)
@@ -1188,7 +1169,7 @@ void ThemeBase::SaveComponents()
       auto result =
          AudacityMessageBox(
             wxString::Format(
-               _("Some required files in:\n  %s\nwere already present.  Overwrite?"),
+               _("Some required files in:\n  %s\nwere already present. Overwrite?"),
                FileNames::ThemeComponentsDir()),
                AudacityMessageBoxCaptionStr(),
                wxYES_NO | wxNO_DEFAULT);
@@ -1331,17 +1312,12 @@ auStaticText::auStaticText(wxWindow* parent, wxString textIn) :
    SetName(textIn);
    SetLabel(textIn);
 }
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
->>>>>>> 5d38ecf9a... Added Pro Tools theme
 =======
 >>>>>>> 73053762addec71933899d47a7fa4a9ffe520e93
 
 void auStaticText::OnPaint(wxPaintEvent & evt)
 =======
- 
+
 void auStaticText::OnPaint(wxPaintEvent & WXUNUSED(evt))
 >>>>>>> upstream/master
 {

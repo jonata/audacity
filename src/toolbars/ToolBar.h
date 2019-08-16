@@ -15,13 +15,16 @@
 
 #include "../Experimental.h"
 
+#include <functional>
 #include <vector>
 #include <wx/defs.h>
-#include <wx/sizer.h>
 
+#include "../Prefs.h"
 #include "../Theme.h"
-#include "../widgets/wxPanelWrapper.h"
+#include "../widgets/wxPanelWrapper.h" // to inherit
+#include <wx/windowptr.h>
 
+class wxBoxSizer;
 class wxDC;
 class wxEraseEvent;
 class wxMouseEvent;
@@ -84,14 +87,20 @@ enum
 // How may pixels padding each side of a floating toolbar
 enum { ToolBarFloatMargin = 1 };
 
-class ToolBar /* not final */ : public wxPanelWrapper
+class AudacityProject;
+
+class ToolBar /* not final */
+: public wxPanelWrapper
+, protected PrefsListener
 {
 
  public:
 
-   using Holder = Destroy_ptr<ToolBar>;
+   using Holder = wxWindowPtr<ToolBar>;
 
-   ToolBar(int type, const wxString & label, const wxString & section, bool resizable = false);
+   ToolBar( AudacityProject &project,
+      int type, const wxString & label, const wxString & section,
+      bool resizable = false);
    virtual ~ToolBar();
 
    bool AcceptsFocus() const override { return false; };
@@ -101,7 +110,7 @@ class ToolBar /* not final */ : public wxPanelWrapper
    virtual void Create(wxWindow *parent);
    virtual void EnableDisableButtons() = 0;
    virtual void ReCreateButtons();
-   virtual void UpdatePrefs();
+   void UpdatePrefs() override;
    virtual void RegenerateTooltips() = 0;
 
    int GetType();
@@ -157,18 +166,19 @@ class ToolBar /* not final */ : public wxPanelWrapper
 
    static
    void SetButtonToolTip
-      (AButton &button,
+      (AudacityProject &project, AButton &button,
        // If a shortcut key is defined for the command, then it is appended,
        // parenthesized, after the translated name.
        const TranslatedInternalString commands[], size_t nCommands);
 
+   static void MakeButtonBackgroundsSmall();
+   static void MakeButtonBackgroundsLarge();
+
  protected:
    void SetButton(bool down, AButton *button);
 
-   void MakeMacRecoloredImage(teBmps eBmpOut, teBmps eBmpIn);
-   void MakeRecoloredImage(teBmps eBmpOut, teBmps eBmpIn);
-   void MakeButtonBackgroundsLarge();
-   void MakeButtonBackgroundsSmall();
+   static void MakeMacRecoloredImage(teBmps eBmpOut, teBmps eBmpIn);
+   static void MakeRecoloredImage(teBmps eBmpOut, teBmps eBmpIn);
 
    wxBoxSizer *GetSizer();
 
@@ -211,6 +221,7 @@ class ToolBar /* not final */ : public wxPanelWrapper
    void OnMouseEvents(wxMouseEvent &event);
 
  protected:
+   AudacityProject &mProject;
    wxString mLabel;
    wxString mSection;
    int mType;
@@ -234,6 +245,15 @@ class ToolBar /* not final */ : public wxPanelWrapper
    DECLARE_EVENT_TABLE()
 
    friend class ToolBarResizer;
+};
+
+struct RegisteredToolbarFactory {
+   using Function = std::function< ToolBar::Holder( AudacityProject & ) >;
+   using Functions = std::vector< Function >;
+
+   RegisteredToolbarFactory( int id, const Function &function );
+
+   static const Functions &GetFactories();
 };
 
 #endif

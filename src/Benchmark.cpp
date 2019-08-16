@@ -34,14 +34,18 @@ of the BlockFile system.
 #include <wx/valtext.h>
 #include <wx/intl.h>
 
+#include "DirManager.h"
 #include "ShuttleGui.h"
 #include "Project.h"
+#include "WaveClip.h"
 #include "WaveTrack.h"
 #include "Sequence.h"
 #include "Prefs.h"
+#include "ViewInfo.h"
 
 #include "FileNames.h"
-#include "widgets/ErrorDialog.h"
+#include "widgets/AudacityMessageBox.h"
+#include "widgets/wxPanelWrapper.h"
 
 class BenchmarkDialog final : public wxDialogWrapper
 {
@@ -91,7 +95,8 @@ _("This will close all project windows (without saving)\nand open the Audacity B
    if (action != wxYES)
       return;
 
-   CloseAllProjects();
+   for ( auto pProject : AllProjects{} )
+      GetProjectFrame( *pProject ).Close();
    */
 
    BenchmarkDialog dlog(parent);
@@ -200,12 +205,12 @@ void BenchmarkDialog::MakeBenchmarkDialog()
 
       //
       item = S.AddCheckBox(_("Show detailed info about each block file"),
-                           wxT("false"));
+                           false);
       item->SetValidator(wxGenericValidator(&mBlockDetail));
 
       //
       item = S.AddCheckBox(_("Show detailed info about each editing operation"),
-                           wxT("false"));
+                           false);
       item->SetValidator(wxGenericValidator(&mEditDetail));
 
       //
@@ -263,7 +268,7 @@ void BenchmarkDialog::OnSave( wxCommandEvent & WXUNUSED(event))
                         wxFD_SAVE | wxRESIZE_BORDER,
                         this);
 
-   if (fName == wxT(""))
+   if (fName.empty())
       return;
 
    mText->SaveFile(fName);
@@ -297,11 +302,11 @@ void BenchmarkDialog::HoldPrint(bool hold)
 
 void BenchmarkDialog::FlushPrint()
 {
-   while(mToPrint.Length() > 100) {
+   while(mToPrint.length() > 100) {
       mText->AppendText(mToPrint.Left(100));
-      mToPrint = mToPrint.Right(mToPrint.Length() - 100);
+      mToPrint = mToPrint.Right(mToPrint.length() - 100);
    }
-   if (mToPrint.Length() > 0)
+   if (mToPrint.length() > 0)
       mText->AppendText(mToPrint);
    mToPrint = wxT("");
 }
@@ -357,7 +362,7 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
    HoldPrint(true);
 
    ZoomInfo zoomInfo(0.0, ZoomInfo::GetDefaultZoom());
-   auto dd = std::make_shared<DirManager>();
+   auto dd = DirManager::Create();
    const auto t = TrackFactory{ dd, &zoomInfo }.NewWaveTrack(int16Sample);
 
    t->SetRate(1);
@@ -491,7 +496,7 @@ void BenchmarkDialog::OnRun( wxCommandEvent & WXUNUSED(event))
 
 #if 0
    Printf(_("Checking file pointer leaks:\n"));
-   Printf(_("Track # blocks: %d\n"), t->GetBlockArray()->Count());
+   Printf(_("Track # blocks: %d\n"), t->GetBlockArray()->size());
    Printf(_("Disk # blocks: \n"));
    system("ls .audacity_temp/* | wc --lines");
 #endif

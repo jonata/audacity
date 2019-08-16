@@ -29,7 +29,7 @@
   but if it were, there would be a significant delay.
 
   The gain controls are applied to the complex FFT of the signal,
-  and then the inverse FFT is applied.  A Hanning window may be
+  and then the inverse FFT is applied.  A Hann window may be
   applied (depending on the advanced window types setting), and then
   the output signal is then pieced together using overlap/add.
 
@@ -37,16 +37,19 @@
 */
 
 #include "../Audacity.h"
-#include "../Experimental.h"
 #include "NoiseReduction.h"
+
+#include "../Experimental.h"
+
 #include "EffectManager.h"
 
 #include "../ShuttleGui.h"
 #include "../widgets/HelpSystem.h"
 #include "../Prefs.h"
+#include "../RealFFTf.h"
 
 #include "../WaveTrack.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 #include "../widgets/valnum.h"
 
 #include <algorithm>
@@ -427,9 +430,9 @@ EffectNoiseReduction::~EffectNoiseReduction()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectNoiseReduction::GetSymbol()
+ComponentInterfaceSymbol EffectNoiseReduction::GetSymbol()
 {
    return NOISEREDUCTION_PLUGIN_SYMBOL;
 }
@@ -1749,58 +1752,60 @@ void EffectNoiseReduction::Dialog::PopulateOrExchange(ShuttleGui & S)
       S.StartMultiColumn(2);
       {
          {
-            wxArrayString windowTypeChoices;
+            wxArrayStringEx windowTypeChoices;
             for (int ii = 0; ii < WT_N_WINDOW_TYPES; ++ii)
-               windowTypeChoices.Add(windowTypesInfo[ii].name);
+               windowTypeChoices.push_back(windowTypesInfo[ii].name);
             S.TieChoice(_("&Window types") + wxString(wxT(":")),
                mTempSettings.mWindowTypes,
-               &windowTypeChoices);
+               windowTypeChoices);
          }
 
          {
-            wxArrayString windowSizeChoices;
-            windowSizeChoices.Add(_("8"));
-            windowSizeChoices.Add(_("16"));
-            windowSizeChoices.Add(_("32"));
-            windowSizeChoices.Add(_("64"));
-            windowSizeChoices.Add(_("128"));
-            windowSizeChoices.Add(_("256"));
-            windowSizeChoices.Add(_("512"));
-            windowSizeChoices.Add(_("1024"));
-            windowSizeChoices.Add(_("2048 (default)"));
-            windowSizeChoices.Add(_("4096"));
-            windowSizeChoices.Add(_("8192"));
-            windowSizeChoices.Add(_("16384"));
             S.TieChoice(_("Window si&ze") + wxString(wxT(":")),
                mTempSettings.mWindowSizeChoice,
-               &windowSizeChoices);
+               {
+                  _("8") ,
+                  _("16") ,
+                  _("32") ,
+                  _("64") ,
+                  _("128") ,
+                  _("256") ,
+                  _("512") ,
+                  _("1024") ,
+                  _("2048 (default)") ,
+                  _("4096") ,
+                  _("8192") ,
+                  _("16384") ,
+               }
+            );
          }
 
          {
-            wxArrayString stepsPerWindowChoices;
-            stepsPerWindowChoices.Add(_("2"));
-            stepsPerWindowChoices.Add(_("4 (default)"));
-            stepsPerWindowChoices.Add(_("8"));
-            stepsPerWindowChoices.Add(_("16"));
-            stepsPerWindowChoices.Add(_("32"));
-            stepsPerWindowChoices.Add(_("64"));
             S.TieChoice(_("S&teps per window") + wxString(wxT(":")),
                mTempSettings.mStepsPerWindowChoice,
-               &stepsPerWindowChoices);
+               {
+                  _("2") ,
+                  _("4 (default)") ,
+                  _("8") ,
+                  _("16") ,
+                  _("32") ,
+                  _("64") ,
+               }
+            );
          }
 
          S.Id(ID_CHOICE_METHOD);
          {
-            wxArrayString methodChoices;
+            wxArrayStringEx methodChoices;
             int nn = DM_N_METHODS;
 #ifndef OLD_METHOD_AVAILABLE
             --nn;
 #endif
             for (int ii = 0; ii < nn; ++ii)
-               methodChoices.Add(discriminationMethodInfo[ii].name);
+               methodChoices.push_back(discriminationMethodInfo[ii].name);
             S.TieChoice(_("Discrimination &method") + wxString(wxT(":")),
                mTempSettings.mMethod,
-               &methodChoices);
+               methodChoices);
          }
       }
       S.EndMultiColumn();
@@ -1809,7 +1814,7 @@ void EffectNoiseReduction::Dialog::PopulateOrExchange(ShuttleGui & S)
       S.SetStretchyCol(2);
       {
          for (int id = END_OF_BASIC_SLIDERS; id < END_OF_ADVANCED_SLIDERS; id += 2) {
-            const ControlInfo &info = controlInfo[(id - FIRST_SLIDER) / 2];
+            const ControlInfo &info = controlInfo()[(id - FIRST_SLIDER) / 2];
             info.CreateControls(id, S);
          }
       }

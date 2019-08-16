@@ -11,33 +11,38 @@ Paul Licameli split from TrackPanel.cpp
 #include "../../Audacity.h"
 #include "SelectHandle.h"
 
+#include "../../Experimental.h"
+
 #include "Scrubbing.h"
-#include "TrackControls.h"
+#include "TrackView.h"
 
 #include "../../AColor.h"
 #include "../../FreqWindow.h"
-#include "../../HitTestResult.h"
-#include "../../MixerBoard.h"
 #include "../../NumberScale.h"
 #include "../../Project.h"
+#include "../../ProjectAudioIO.h"
+#include "../../ProjectHistory.h"
+#include "../../ProjectSettings.h"
+#include "../../ProjectWindow.h"
 #include "../../RefreshCode.h"
-#include "../../Snap.h"
+#include "../../SelectUtilities.h"
+#include "../../SelectionState.h"
+#include "../../TrackArtist.h"
+#include "../../TrackPanelAx.h"
 #include "../../TrackPanel.h"
+#include "../../TrackPanelDrawingContext.h"
 #include "../../TrackPanelMouseEvent.h"
 #include "../../ViewInfo.h"
+#include "../../WaveClip.h"
 #include "../../WaveTrack.h"
-#include "../../commands/Keyboard.h"
 #include "../../ondemand/ODManager.h"
 #include "../../prefs/SpectrogramSettings.h"
-#include "../../toolbars/ToolsToolBar.h"
 #include "../../../images/Cursors.h"
 
 #include <wx/event.h>
 
 // Only for definition of SonifyBeginModifyState:
 //#include "../../NoteTrack.h"
-
-#include "../../Experimental.h"
 
 enum {
    //This constant determines the size of the horizontal region (in pixels) around
@@ -123,13 +128,16 @@ namespace
    }
 
    // This returns true if we're a spectral editing track.
-   inline bool isSpectralSelectionTrack(const Track *pTrack) {
-      return pTrack && pTrack->TypeSwitch< bool >( [&](const WaveTrack *wt) {
-         const SpectrogramSettings &settings = wt->GetSpectrogramSettings();
-         const int display = wt->GetDisplay();
-         return (display == WaveTrack::Spectrum) &&
-            settings.SpectralSelectionEnabled();
-      });
+   inline bool isSpectralSelectionView(const TrackView *pTrackView) {
+      return
+        pTrackView &&
+        pTrackView->IsSpectral() &&
+        pTrackView->FindTrack() &&
+        pTrackView->FindTrack()->TypeSwitch< bool >(
+           [&](const WaveTrack *wt) {
+              const SpectrogramSettings &settings = wt->GetSpectrogramSettings();
+              return settings.SpectralSelectionEnabled();
+           });
    }
 
    enum SelectionBoundary {
@@ -182,7 +190,7 @@ namespace
 
    SelectionBoundary ChooseBoundary
       (const ViewInfo &viewInfo,
-       wxCoord xx, wxCoord yy, const Track *pTrack, const wxRect &rect,
+       wxCoord xx, wxCoord yy, const TrackView *pTrackView, const wxRect &rect,
        bool mayDragWidth, bool onlyWithinSnapDistance,
        double *pPinValue = NULL)
    {
@@ -215,9 +223,11 @@ namespace
       // within the time boundaries
       if (!viewInfo.selectedRegion.isPoint() &&
          t0 <= selend && selend < t1 &&
-         isSpectralSelectionTrack(pTrack)) {
+         isSpectralSelectionView(pTrackView)) {
          // Spectral selection track is always wave
-         const WaveTrack *const wt = static_cast<const WaveTrack*>(pTrack);
+         auto pTrack = pTrackView->FindTrack();
+         const WaveTrack *const wt =
+           static_cast<const WaveTrack*>(pTrack.get());
          const wxInt64 bottomSel = (f0 >= 0)
             ? FrequencyToPosition(wt, f0, rect.y, rect.height)
             : rect.y + rect.height;
@@ -369,7 +379,7 @@ namespace
 UIHandlePtr SelectHandle::HitTest
 (std::weak_ptr<SelectHandle> &holder,
  const TrackPanelMouseState &st, const AudacityProject *pProject,
- const std::shared_ptr<Track> &pTrack)
+ const std::shared_ptr<TrackView> &pTrackView)
 {
    // This handle is a little special because there may be some state to
    // preserve during movement before the click.
@@ -386,15 +396,16 @@ UIHandlePtr SelectHandle::HitTest
       oldUseSnap = old->mUseSnap;
    }
 
-   const ViewInfo &viewInfo = pProject->GetViewInfo();
+   const auto &viewInfo = ViewInfo::Get( *pProject );
    auto result = std::make_shared<SelectHandle>(
-      pTrack, oldUseSnap, *pProject->GetTracks(), st, viewInfo );
+      pTrackView, oldUseSnap, TrackList::Get( *pProject ), st, viewInfo );
 
    result = AssignUIHandlePtr(holder, result);
 
    //Make sure we are within the selected track
    // Adjusting the selection edges can be turned off in
    // the preferences...
+   auto pTrack = pTrackView->FindTrack();
    if (!pTrack->GetSelected() || !viewInfo.bAdjustSelectionEdges)
    {
       return result;
@@ -433,16 +444,17 @@ UIHandle::Result SelectHandle::NeedChangeHighlight
 }
 
 SelectHandle::SelectHandle
-( const std::shared_ptr<Track> &pTrack, bool useSnap,
+( const std::shared_ptr<TrackView> &pTrackView, bool useSnap,
   const TrackList &trackList,
   const TrackPanelMouseState &st, const ViewInfo &viewInfo )
-   : mpTrack{ pTrack }
+   : mpView{ pTrackView }
    , mSnapManager{ std::make_shared<SnapManager>(&trackList, &viewInfo) }
 {
    const wxMouseState &state = st.state;
    mRect = st.rect;
 
    auto time = std::max(0.0, viewInfo.PositionToTime(state.m_x, mRect.x));
+   auto pTrack = pTrackView->FindTrack();
    mSnapStart = mSnapManager->Snap(pTrack.get(), time, false);
    if (mSnapStart.snappedPoint)
       mSnapStart.outCoord += mRect.x;
@@ -492,10 +504,9 @@ void SelectHandle::SetUseSnap(bool use)
    if (IsClicked()) {
       // Readjust the moving selection end
       AssignSelection(
-         ::GetActiveProject()->GetViewInfo(),
+         ViewInfo::Get( *::GetActiveProject() ),
          mUseSnap ? mSnapEnd.outTime : mSnapEnd.timeSnappedTime,
          nullptr);
-      mChangeHighlight |= RefreshCode::UpdateSelection;
    }
 }
 
@@ -527,15 +538,18 @@ UIHandle::Result SelectHandle::Click
 
    using namespace RefreshCode;
 
+   const auto pView = mpView.lock();
+   if ( !pView )
+      return Cancelled;
+
    wxMouseEvent &event = evt.event;
-   const auto sTrack = pProject->GetTracks()->Lock(mpTrack);
+   const auto sTrack = TrackList::Get( *pProject ).Lock( FindTrack() );
    const auto pTrack = sTrack.get();
-   ViewInfo &viewInfo = pProject->GetViewInfo();
+   auto &trackPanel = TrackPanel::Get( *pProject );
+   auto &viewInfo = ViewInfo::Get( *pProject );
 
    mMostRecentX = event.m_x;
    mMostRecentY = event.m_y;
-
-   TrackPanel *const trackPanel = pProject->GetTrackPanel();
 
    bool selectChange = (
       event.LeftDown() &&
@@ -544,9 +558,9 @@ UIHandle::Result SelectHandle::Click
          // We should reach this, only in default of other hits on glyphs or
          // text boxes.
          bool bShift = event.ShiftDown();
-         bool unsafe = pProject->IsAudioActive();
-         GetMenuCommandHandler(*pProject)
-            .HandleListSelection(*pProject, pTrack, bShift, true, !unsafe);
+         bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
+         SelectUtilities::DoListSelection(
+            *pProject, pTrack, bShift, true, !unsafe);
          return true;
        } )
    );
@@ -554,19 +568,19 @@ UIHandle::Result SelectHandle::Click
       // Do not start a drag
       return RefreshAll | Cancelled;
    
-   auto &selectionState = pProject->GetSelectionState();
+   auto &selectionState = SelectionState::Get( *pProject );
+   const auto &settings = ProjectSettings::Get( *pProject );
    if (event.LeftDClick() && !event.ShiftDown()) {
-      TrackList *const trackList = pProject->GetTracks();
+      auto &trackList = TrackList::Get( *pProject );
 
       // Deselect all other tracks and select this one.
-      selectionState.SelectNone( *trackList, pProject->GetMixerBoard() );
+      selectionState.SelectNone( trackList );
 
-      selectionState.SelectTrack
-         ( *pTrack, true, true, pProject->GetMixerBoard() );
+      selectionState.SelectTrack( *pTrack, true, true );
 
       // Default behavior: select whole track
       SelectionState::SelectTrackLength
-         ( viewInfo, *pTrack, pProject->IsSyncLocked() );
+         ( viewInfo, *pTrack, settings.IsSyncLocked() );
 
       // Special case: if we're over a clip in a WaveTrack,
       // select just that clip
@@ -578,26 +592,24 @@ UIHandle::Result SelectHandle::Click
          }
       } );
 
-      pProject->ModifyState(false);
+      ProjectHistory::Get( *pProject ).ModifyState(false);
 
       // Do not start a drag
-      return RefreshAll | UpdateSelection | Cancelled;
+      return RefreshAll | Cancelled;
    }
    else if (!event.LeftDown())
       return Cancelled;
 
    mInitialSelection = viewInfo.selectedRegion;
 
-   TrackList *const trackList = pProject->GetTracks();
-   mSelectionStateChanger = std::make_shared< SelectionStateChanger >
-      ( selectionState, *trackList );
+   auto &trackList = TrackList::Get( *pProject );
+   mSelectionStateChanger =
+      std::make_shared< SelectionStateChanger >( selectionState, trackList );
 
    mSelectionBoundary = 0;
 
    bool bShiftDown = event.ShiftDown();
    bool bCtrlDown = event.ControlDown();
-
-   auto pMixerBoard = pProject->GetMixerBoard();
 
    mSelStart = mUseSnap ? mSnapStart.outTime : mSnapStart.timeSnappedTime;
    auto xx = viewInfo.TimeToPosition(mSelStart, mRect.x);
@@ -605,23 +617,22 @@ UIHandle::Result SelectHandle::Click
    // I. Shift-click adjusts an existing selection
    if (bShiftDown || bCtrlDown) {
       if (bShiftDown)
-         selectionState.ChangeSelectionOnShiftClick
-            ( *trackList, *pTrack, pMixerBoard );
+         selectionState.ChangeSelectionOnShiftClick( trackList, *pTrack );
       if( bCtrlDown ){
          //Commented out bIsSelected toggles, as in Track Control Panel.
          //bool bIsSelected = pTrack->GetSelected();
          //Actual bIsSelected will always add.
          bool bIsSelected = false;
          // Don't toggle away the last selected track.
-         if( !bIsSelected || trackPanel->GetSelectedTrackCount() > 1 )
-            selectionState.SelectTrack
-               ( *pTrack, !bIsSelected, true, pMixerBoard );
+         if( !bIsSelected || trackPanel.GetSelectedTrackCount() > 1 )
+            selectionState.SelectTrack( *pTrack, !bIsSelected, true );
       }
 
       double value;
       // Shift-click, choose closest boundary
       SelectionBoundary boundary =
-         ChooseBoundary(viewInfo, xx, event.m_y, pTrack, mRect, false, false, &value);
+         ChooseBoundary(viewInfo, xx, event.m_y,
+            pView.get(), mRect, false, false, &value);
       mSelectionBoundary = boundary;
       switch (boundary) {
          case SBLeft:
@@ -642,7 +653,7 @@ UIHandle::Result SelectHandle::Click
          case SBBottom:
          case SBTop:
          {
-            mFreqSelTrack = Track::Pointer<const WaveTrack>( pTrack );
+            mFreqSelTrack = pTrack->SharedPointer<const WaveTrack>();
             mFreqSelPin = value;
             mFreqSelMode =
                (boundary == SBBottom)
@@ -667,14 +678,14 @@ UIHandle::Result SelectHandle::Click
       };
 
       // For persistence of the selection change:
-      pProject->ModifyState(false);
+      ProjectHistory::Get( *pProject ).ModifyState(false);
 
       // Get timer events so we can auto-scroll
       Connect(pProject);
 
       // Full refresh since the label area may need to indicate
       // newly selected tracks.
-      return RefreshAll | UpdateSelection;
+      return RefreshAll;
    }
 
    // II. Unmodified click starts a NEW selection
@@ -687,7 +698,7 @@ UIHandle::Result SelectHandle::Click
       if (viewInfo.bAdjustSelectionEdges) {
 #ifdef EXPERIMENTAL_SPECTRAL_EDITING
          if (mFreqSelMode == FREQ_SEL_SNAPPING_CENTER &&
-            isSpectralSelectionTrack(pTrack)) {
+            isSpectralSelectionView(pView.get())) {
             // This code is no longer reachable, but it had a place in the
             // spectral selection prototype.  It used to be that you could be
             // in a center-frequency-snapping mode that was not a mouse drag
@@ -697,7 +708,7 @@ UIHandle::Result SelectHandle::Click
             // Ignore whether we are inside the time selection.
             // Exit center-snapping, start dragging the width.
             mFreqSelMode = FREQ_SEL_PINNED_CENTER;
-            mFreqSelTrack = Track::Pointer<const WaveTrack>( pTrack );
+            mFreqSelTrack = pTrack->SharedPointer<const WaveTrack>();
             mFreqSelPin = viewInfo.selectedRegion.fc();
             // Do not adjust time boundaries
             mSelStartValid = false;
@@ -705,9 +716,9 @@ UIHandle::Result SelectHandle::Click
                static_cast<WaveTrack*>(pTrack),
                viewInfo, event.m_y, mRect.y, mRect.height);
             // For persistence of the selection change:
-            pProject->ModifyState(false);
+            ProjectHistory::Get( *pProject ).ModifyState(false);
             mSelectionBoundary = SBWidth;
-            return UpdateSelection;
+            return RefreshNone;
          }
          else
 #endif
@@ -715,7 +726,8 @@ UIHandle::Result SelectHandle::Click
             // Not shift-down, choose boundary only within snapping
             double value;
             SelectionBoundary boundary =
-               ChooseBoundary(viewInfo, xx, event.m_y, pTrack, mRect, true, true, &value);
+               ChooseBoundary(viewInfo, xx, event.m_y,
+                  pView.get(), mRect, true, true, &value);
             mSelectionBoundary = boundary;
             switch (boundary) {
             case SBNone:
@@ -739,7 +751,7 @@ UIHandle::Result SelectHandle::Click
                startNewSelection = false;
                // Disable time selection
                mSelStartValid = false;
-               mFreqSelTrack = Track::Pointer<const WaveTrack>( pTrack );
+               mFreqSelTrack = pTrack->SharedPointer<const WaveTrack>();
                mFreqSelPin = value;
                mFreqSelMode =
                   (boundary == SBWidth) ? FREQ_SEL_PINNED_CENTER :
@@ -765,14 +777,14 @@ UIHandle::Result SelectHandle::Click
 
    if (startNewSelection) {
       // If we didn't move a selection boundary, start a NEW selection
-      selectionState.SelectNone( *trackList, pMixerBoard );
+      selectionState.SelectNone( trackList );
 #ifdef EXPERIMENTAL_SPECTRAL_EDITING
-      StartFreqSelection (viewInfo, event.m_y, mRect.y, mRect.height, pTrack);
+      StartFreqSelection (viewInfo, event.m_y, mRect.y, mRect.height,
+         pView.get());
 #endif
       StartSelection(pProject);
-      selectionState.SelectTrack
-         ( *pTrack, true, true, pMixerBoard );
-      trackPanel->SetFocusedTrack(pTrack);
+      selectionState.SelectTrack( *pTrack, true, true );
+      TrackFocus::Get( *pProject ).Set(pTrack);
       //On-Demand: check to see if there is an OD thing associated with this track.
       pTrack->TypeSwitch( [&](WaveTrack *wt) {
          if(ODManager::IsInstanceCreated())
@@ -780,7 +792,7 @@ UIHandle::Result SelectHandle::Click
       });
 
       Connect(pProject);
-      return RefreshAll | UpdateSelection;
+      return RefreshAll;
    }
    else {
       Connect(pProject);
@@ -793,7 +805,11 @@ UIHandle::Result SelectHandle::Drag
 {
    using namespace RefreshCode;
 
-   ViewInfo &viewInfo = pProject->GetViewInfo();
+   const auto pView = mpView.lock();
+   if ( !pView )
+      return Cancelled;
+
+   auto &viewInfo = ViewInfo::Get( *pProject );
    const wxMouseEvent &event = evt.event;
 
    int x = mAutoScrolling ? mMostRecentX : event.m_x;
@@ -816,7 +832,7 @@ UIHandle::Result SelectHandle::Drag
    }
 
    // Also fuhggeddaboudit if not in a track.
-   auto pTrack = pProject->GetTracks()->Lock(mpTrack);
+   auto pTrack = TrackList::Get( *pProject ).Lock( FindTrack() );
    if (!pTrack)
       return RefreshNone;
 
@@ -841,12 +857,10 @@ UIHandle::Result SelectHandle::Drag
          // Handle which tracks are selected
          Track *sTrack = pTrack.get();
          Track *eTrack = clickedTrack.get();
-         auto trackList = pProject->GetTracks();
-         auto pMixerBoard = pProject->GetMixerBoard();
+         auto &trackList = TrackList::Get( *pProject );
          if ( sTrack && eTrack && !event.ControlDown() ) {
-            auto &selectionState = pProject->GetSelectionState();
-            selectionState.SelectRangeOfTracks
-            ( *trackList, *sTrack, *eTrack, pMixerBoard );
+            auto &selectionState = SelectionState::Get( *pProject );
+            selectionState.SelectRangeOfTracks( trackList, *sTrack, *eTrack );
          }
 
    #ifdef EXPERIMENTAL_SPECTRAL_EDITING
@@ -854,10 +868,10 @@ UIHandle::Result SelectHandle::Drag
          if (mFreqSelMode == FREQ_SEL_SNAPPING_CENTER &&
              !viewInfo.selectedRegion.isPoint())
             MoveSnappingFreqSelection
-            (pProject, viewInfo, y, mRect.y, mRect.height, pTrack.get());
+            (pProject, viewInfo, y, mRect.y, mRect.height, pView.get());
          else
    #endif
-            if (pProject->GetTracks()->Lock(mFreqSelTrack) == pTrack)
+            if ( TrackList::Get( *pProject ).Lock(mFreqSelTrack) == pTrack )
                AdjustFreqSelection(
                   static_cast<WaveTrack*>(pTrack.get()),
                   viewInfo, y, mRect.y, mRect.height);
@@ -887,7 +901,11 @@ HitTestPreview SelectHandle::Preview
       // Moved out of snapping; revert to un-escaped state
       mUseSnap = true;
 
-   auto pTrack = mpTrack.lock();
+   const auto pView = mpView.lock();
+   if ( !pView )
+      return {};
+
+   auto pTrack = FindTrack().lock();
    if (!pTrack)
       return {};
 
@@ -902,21 +920,21 @@ HitTestPreview SelectHandle::Preview
    else {
       // Choose one of many cursors for mouse-over
 
-      const ViewInfo &viewInfo = pProject->GetViewInfo();
+      auto &viewInfo = ViewInfo::Get( *pProject );
 
       auto &state = st.state;
       auto time = mUseSnap ? mSnapStart.outTime : mSnapStart.timeSnappedTime;
       auto xx = viewInfo.TimeToPosition(time, mRect.x);
 
       const bool bMultiToolMode =
-         pProject->GetToolsToolBar()->IsDown(multiTool);
+         (ToolCodes::multiTool == ProjectSettings::Get( *pProject ).GetTool());
 
       //In Multi-tool mode, give multitool prompt if no-special-hit.
       if (bMultiToolMode) {
          // Look up the current key binding for Preferences.
          // (Don't assume it's the default!)
          auto keyStr =
-            pProject->GetCommandManager()->GetKeyFromName(wxT("Preferences"))
+            CommandManager::Get( *pProject ).GetKeyFromName(wxT("Preferences"))
             .Display( true );
          if (keyStr.empty())
             // No keyboard preference defined for opening Preferences dialog
@@ -941,7 +959,8 @@ HitTestPreview SelectHandle::Preview
             // choose boundaries only in snapping tolerance,
             // and may choose center.
             SelectionBoundary boundary =
-            ChooseBoundary(viewInfo, xx, state.m_y, pTrack.get(), rect, !bModifierDown, !bModifierDown);
+            ChooseBoundary(viewInfo, xx, state.m_y,
+               pView.get(), rect, !bModifierDown, !bModifierDown);
 
             SetTipAndCursorForBoundary(boundary, !bShiftDown, tip, pCursor);
          }
@@ -953,7 +972,7 @@ HitTestPreview SelectHandle::Preview
       // and drag width.
 #ifdef EXPERIMENTAL_SPECTRAL_EDITING
       if ((mFreqSelMode == FREQ_SEL_SNAPPING_CENTER) &&
-         isSpectralSelectionTrack(pTrack)) {
+         isSpectralSelectionView(pView)) {
          // Not shift-down, but center frequency snapping toggle is on
          tip = _("Click and drag to set frequency bandwidth.");
          pCursor = &*envelopeCursor;
@@ -970,13 +989,14 @@ HitTestPreview SelectHandle::Preview
          const bool bCtrlDown = state.ControlDown();
          const bool bModifierDown = bShiftDown || bCtrlDown;
          SelectionBoundary boundary = ChooseBoundary(
-            viewInfo, xx, state.m_y, pTrack.get(), rect, !bModifierDown, !bModifierDown);
+            viewInfo, xx, state.m_y,
+               pView.get(), rect, !bModifierDown, !bModifierDown);
          SetTipAndCursorForBoundary(boundary, !bShiftDown, tip, pCursor);
       }
 
       MaySetOnDemandTip(pTrack.get(), tip);
    }
-   if (tip == "") {
+   if (tip.empty()) {
       tip = _("Click and drag to select audio");
    }
    if (HasEscape() && mUseSnap) {
@@ -992,7 +1012,7 @@ UIHandle::Result SelectHandle::Release
  wxWindow *)
 {
    using namespace RefreshCode;
-   pProject->ModifyState(false);
+   ProjectHistory::Get( *pProject ).ModifyState(false);
    mFrequencySnapper.reset();
    mSnapManager.reset();
    if (mSelectionStateChanger) {
@@ -1009,26 +1029,42 @@ UIHandle::Result SelectHandle::Release
 UIHandle::Result SelectHandle::Cancel(AudacityProject *pProject)
 {
    mSelectionStateChanger.reset();
-   pProject->GetViewInfo().selectedRegion = mInitialSelection;
-
-   // Refresh mixer board for change of set of selected tracks
-   if (MixerBoard* pMixerBoard = pProject->GetMixerBoard())
-      pMixerBoard->Refresh();
+   ViewInfo::Get( *pProject ).selectedRegion = mInitialSelection;
 
    return RefreshCode::RefreshAll;
 }
 
-void SelectHandle::DrawExtras
-(DrawingPass pass, wxDC * dc, const wxRegion &, const wxRect &)
+void SelectHandle::Draw(
+   TrackPanelDrawingContext &context,
+   const wxRect &rect, unsigned iPass )
 {
-   if (pass == Panel) {
+   if ( iPass == TrackArtist::PassSnapping ) {
+      auto &dc = context.dc;
       // Draw snap guidelines if we have any
       if ( mSnapManager ) {
          auto coord1 = (mUseSnap || IsClicked()) ? mSnapStart.outCoord : -1;
          auto coord2 = (!mUseSnap || !IsClicked()) ? -1 : mSnapEnd.outCoord;
-         mSnapManager->Draw( dc, coord1, coord2 );
+         mSnapManager->Draw( &dc, coord1, coord2 );
       }
    }
+}
+
+wxRect SelectHandle::DrawingArea(
+   const wxRect &rect, const wxRect &panelRect, unsigned iPass )
+{
+   if ( iPass == TrackArtist::PassSnapping )
+      return MaximizeHeight( rect, panelRect );
+   else
+      return rect;
+}
+
+std::weak_ptr<Track> SelectHandle::FindTrack()
+{
+   auto pView = mpView.lock();
+   if (!pView)
+      return {};
+   else
+      return pView->FindTrack();
 }
 
 void SelectHandle::Connect(AudacityProject *pProject)
@@ -1079,14 +1115,15 @@ void SelectHandle::TimerHandler::OnTimer(wxCommandEvent &event)
    //  smoother on MacOS 9.
 
    const auto project = mConnectedProject;
-   const auto trackPanel = project->GetTrackPanel();
+   const auto &trackPanel = TrackPanel::Get( *project );
+   auto &window = ProjectWindow::Get( *project );
    if (mParent->mMostRecentX >= mParent->mRect.x + mParent->mRect.width) {
       mParent->mAutoScrolling = true;
-      project->TP_ScrollRight();
+      window.TP_ScrollRight();
    }
    else if (mParent->mMostRecentX < mParent->mRect.x) {
       mParent->mAutoScrolling = true;
-      project->TP_ScrollLeft();
+      window.TP_ScrollLeft();
    }
    else {
       // Bug1387:  enable autoscroll during drag, if the pointer is at either
@@ -1094,22 +1131,22 @@ void SelectHandle::TimerHandler::OnTimer(wxCommandEvent &event)
       // track area.
 
       int xx = mParent->mMostRecentX, yy = 0;
-      trackPanel->ClientToScreen(&xx, &yy);
+      trackPanel.ClientToScreen(&xx, &yy);
       if (xx == 0) {
          mParent->mAutoScrolling = true;
-         project->TP_ScrollLeft();
+         window.TP_ScrollLeft();
       }
       else {
          int width, height;
          ::wxDisplaySize(&width, &height);
          if (xx == width - 1) {
             mParent->mAutoScrolling = true;
-            project->TP_ScrollRight();
+            window.TP_ScrollRight();
          }
       }
    }
 
-   auto pTrack = mParent->mpTrack.lock(); // TrackList::Lock() ?
+   auto pTrack = mParent->FindTrack().lock(); // TrackList::Lock() ?
    if (mParent->mAutoScrolling && pTrack) {
       // AS: To keep the selection working properly as we scroll,
       //  we fake a mouse event (remember, this method is called
@@ -1117,17 +1154,22 @@ void SelectHandle::TimerHandler::OnTimer(wxCommandEvent &event)
 
       // AS: For some reason, GCC won't let us pass this directly.
       wxMouseEvent evt(wxEVT_MOTION);
-      const auto size = trackPanel->GetSize();
-      mParent->Drag(TrackPanelMouseEvent{ evt, mParent->mRect, size, pTrack }, project);
+      const auto size = trackPanel.GetSize();
+      mParent->Drag(
+         TrackPanelMouseEvent{
+            evt, mParent->mRect, size,
+            TrackView::Get( *pTrack ).shared_from_this() },
+         project
+      );
       mParent->mAutoScrolling = false;
-      mConnectedProject->GetTrackPanel()->Refresh(false);
+      TrackPanel::Get( *mConnectedProject ).Refresh(false);
    }
 }
 
 /// Reset our selection markers.
 void SelectHandle::StartSelection( AudacityProject *pProject )
 {
-   ViewInfo &viewInfo = pProject->GetViewInfo();
+   auto &viewInfo = ViewInfo::Get( *pProject );
    mSelStartValid = true;
 
    viewInfo.selectedRegion.setTimes(mSelStart, mSelStart);
@@ -1135,7 +1177,7 @@ void SelectHandle::StartSelection( AudacityProject *pProject )
    // PRL:  commented out the Sonify stuff with the TrackPanel refactor.
    // It was no-op anyway.
    //SonifyBeginModifyState();
-   pProject->ModifyState(false);
+   ProjectHistory::Get( *pProject ).ModifyState(false);
    //SonifyEndModifyState();
 }
 
@@ -1153,9 +1195,9 @@ void SelectHandle::AdjustSelection
       std::max(0.0, viewInfo.PositionToTime(mouseXCoordinate, trackLeftEdge));
    double origSelend = selend;
 
-   auto pTrack = Track::Pointer( track );
+   auto pTrack = Track::SharedPointer( track );
    if (!pTrack)
-      pTrack = pProject->GetTracks()->Lock(mpTrack);
+      pTrack = TrackList::Get( *pProject ).Lock( FindTrack() );
 
    if (pTrack && mSnapManager.get()) {
       bool rightEdge = (selend > mSelStart);
@@ -1207,15 +1249,15 @@ void SelectHandle::AssignSelection
 
 void SelectHandle::StartFreqSelection(ViewInfo &viewInfo,
    int mouseYCoordinate, int trackTopEdge,
-   int trackHeight, Track *pTrack)
+   int trackHeight, TrackView *pTrackView)
 {
    mFreqSelTrack.reset();
    mFreqSelMode = FREQ_SEL_INVALID;
    mFreqSelPin = SelectedRegion::UndefinedFrequency;
 
-   if (isSpectralSelectionTrack(pTrack)) {
+   if (isSpectralSelectionView(pTrackView)) {
       // Spectral selection track is always wave
-      auto shTrack = Track::Pointer<const WaveTrack>( pTrack );
+      auto shTrack = pTrackView->FindTrack()->SharedPointer<const WaveTrack>();
       mFreqSelTrack = shTrack;
       mFreqSelMode = FREQ_SEL_FREE;
       mFreqSelPin =
@@ -1314,7 +1356,7 @@ void SelectHandle::HandleCenterFrequencyClick
    if (shiftDown) {
       // Disable time selection
       mSelStartValid = false;
-      mFreqSelTrack = Track::Pointer<const WaveTrack>( pTrack );
+      mFreqSelTrack = pTrack->SharedPointer<const WaveTrack>();
       mFreqSelPin = value;
       mFreqSelMode = FREQ_SEL_DRAG_CENTER;
    }
@@ -1377,11 +1419,12 @@ void SelectHandle::StartSnappingFreqSelection
 void SelectHandle::MoveSnappingFreqSelection
    (AudacityProject *pProject, ViewInfo &viewInfo, int mouseYCoordinate,
     int trackTopEdge,
-    int trackHeight, Track *pTrack)
+    int trackHeight, TrackView *pTrackView)
 {
+   auto pTrack = pTrackView->FindTrack().get();
    if (pTrack &&
       pTrack->GetSelected() &&
-      isSpectralSelectionTrack(pTrack)) {
+      isSpectralSelectionView(pTrackView)) {
       // Spectral selection track is always wave
       WaveTrack *const wt = static_cast<WaveTrack*>(pTrack);
       // PRL:
@@ -1415,11 +1458,11 @@ void SelectHandle::MoveSnappingFreqSelection
       // A change here would affect what AdjustFreqSelection() does
       // in the prototype version where you switch from moving center to
       // dragging width with a click.  No effect now.
-      mFreqSelTrack = Track::Pointer<const WaveTrack>( wt );
+      mFreqSelTrack = wt->SharedPointer<const WaveTrack>();
 
       // SelectNone();
       // SelectTrack(pTrack, true);
-      pProject->GetTrackPanel()->SetFocusedTrack(pTrack);
+      TrackFocus::Get( *pProject ).Set(pTrack);
    }
 }
 

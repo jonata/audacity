@@ -51,6 +51,7 @@ preferences.
 *//*******************************************************************/
 
 #include "Audacity.h"
+#include "Shuttle.h"
 
 #include <wx/defs.h>
 #include <wx/checkbox.h>
@@ -66,10 +67,7 @@ preferences.
 
 #include "../include/audacity/EffectAutomationParameters.h" // for command automation
 
-//#include "Project.h"
-#include "Shuttle.h"
 #include "WrappedType.h"
-//#include "commands/CommandManager.h"
 //#include "effects/Effect.h"
 
 
@@ -84,7 +82,7 @@ bool Shuttle::TransferBool( const wxString & Name, bool & bValue, const bool & b
       bValue = bDefault;
       if( ExchangeWithMaster( Name ))
       {
-         if( !mValueString.IsEmpty() )
+         if( !mValueString.empty() )
             bValue = mValueString.GetChar(0) == wxT('y');
       }
    }
@@ -103,7 +101,7 @@ bool Shuttle::TransferFloat( const wxString & Name, float & fValue, const float 
       fValue = fDefault;
       if( ExchangeWithMaster( Name ))
       {
-         if( !mValueString.IsEmpty() )
+         if( !mValueString.empty() )
             fValue = wxAtof( mValueString );
       }
    }
@@ -122,7 +120,7 @@ bool Shuttle::TransferDouble( const wxString & Name, double & dValue, const doub
       dValue = dDefault;
       if( ExchangeWithMaster( Name ))
       {
-         if( !mValueString.IsEmpty() )
+         if( !mValueString.empty() )
             dValue = wxAtof( mValueString );
       }
    }
@@ -190,12 +188,12 @@ bool Shuttle::TransferEnum( const wxString & Name, int & iValue,
          wxString str = mValueString;
          if( str.Left( 1 ) == wxT('"') && str.Right( 1 ) == wxT('"') )
          {
-            str = str.Mid( 2, str.Length() - 2 );
+            str = str.Mid( 2, str.length() - 2 );
          }
 
          for( int i = 0; i < nChoices; i++ )
          {
-            if( str.IsSameAs( pFirstStr[i] ))
+            if( str == pFirstStr[i] )
             {
                iValue = i;
                break;
@@ -284,7 +282,7 @@ bool ShuttleCli::ExchangeWithMaster(const wxString & Name)
       i=mParams.Find( wxT(" ")+Name+wxT("=") );
       if( i>=0 )
       {
-         int j=i+2+Name.Length();
+         int j=i+2+Name.length();
          wxString terminator = wxT(' ');
          if(mParams.GetChar(j) == wxT('"')) //Strings are surrounded by quotes
          {
@@ -297,7 +295,7 @@ bool ShuttleCli::ExchangeWithMaster(const wxString & Name)
             j++;
          }         
          i=j;
-         while( j<(int)mParams.Length() && mParams.GetChar(j) != terminator )
+         while( j<(int)mParams.length() && mParams.GetChar(j) != terminator )
             j++;
          mValueString = mParams.Mid(i,j-i);
          return true;
@@ -343,12 +341,12 @@ void ShuttleParams::Define( float & var,    const wxChar * key, const float vdef
 void ShuttleParams::Define( double & var,   const wxChar * key, const float vdefault, const float vmin, const float vmax, const float vscl ){;};
 void ShuttleParams::Define( double & var,   const wxChar * key, const double vdefault, const double vmin, const double vmax, const double vscl ){;};
 void ShuttleParams::Define( wxString &var, const wxChar * key, const wxString vdefault, const wxString vmin, const wxString vmax, const wxString vscl ){;};
-void ShuttleParams::DefineEnum( int &var, const wxChar * key, const int vdefault, const IdentInterfaceSymbol strings[], size_t nStrings ){;};
+void ShuttleParams::DefineEnum( int &var, const wxChar * key, const int vdefault, const EnumValueSymbol strings[], size_t nStrings ){;};
 
 
 
 /*
-void ShuttleParams::DefineEnum( int &var, const wxChar * key, const int vdefault, const IdentInterfaceSymbol strings[], size_t nStrings )
+void ShuttleParams::DefineEnum( int &var, const wxChar * key, const int vdefault, const EnumValueSymbol strings[], size_t nStrings )
 {
 }
 */
@@ -403,7 +401,7 @@ void ShuttleGetAutomation::Define( wxString &var, const wxChar * key, const wxSt
 }
 
 
-void ShuttleGetAutomation::DefineEnum( int &var, const wxChar * key, const int vdefault, const IdentInterfaceSymbol strings[], size_t nStrings )
+void ShuttleGetAutomation::DefineEnum( int &var, const wxChar * key, const int vdefault, const EnumValueSymbol strings[], size_t nStrings )
 {
    if( !ShouldSet() ) return;
    mpEap->Write(key, strings[var].Internal());
@@ -513,7 +511,7 @@ void ShuttleSetAutomation::Define( wxString &var, const wxChar * key, const wxSt
 }
 
 
-void ShuttleSetAutomation::DefineEnum( int &var, const wxChar * key, const int vdefault, const IdentInterfaceSymbol strings[], size_t nStrings )
+void ShuttleSetAutomation::DefineEnum( int &var, const wxChar * key, const int vdefault, const EnumValueSymbol strings[], size_t nStrings )
 {
    CouldGet( key );
    if( !bOK )
@@ -524,129 +522,6 @@ void ShuttleSetAutomation::DefineEnum( int &var, const wxChar * key, const int v
       var = temp;
 }
 
-bool ShuttleGetDefinition::IsOptional(){
-   bool result = pOptionalFlag !=NULL;
-   pOptionalFlag = NULL;
-   return result;
-}
-
-// Definition distinguishes optional from not.
-ShuttleParams & ShuttleGetDefinition::Optional( bool & var ){ 
-   pOptionalFlag = &var;
-   return *this;
-};
-
-ShuttleGetDefinition::ShuttleGetDefinition( CommandMessageTarget & target ) : CommandMessageTargetDecorator( target )
-{
-}
-
-// JSON definitions.
-void ShuttleGetDefinition::Define( bool & var,     const wxChar * key, const bool vdefault, const bool vmin, const bool vmax, const bool vscl )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "bool", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( vdefault ? "True" : "False", "default" );
-   EndStruct();
-}
-
-void ShuttleGetDefinition::Define( int & var,      const wxChar * key, const int vdefault, const int vmin, const int vmax, const int vscl )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "int", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( (double)vdefault, "default"  );
-   EndStruct();
-}
-
-void ShuttleGetDefinition::Define( size_t & var,      const wxChar * key, const int vdefault, const int vmin, const int vmax, const int vscl )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "size_t", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( (double)vdefault, "default"  );
-   EndStruct();
-
-}
-
-void ShuttleGetDefinition::Define( float & var,   const wxChar * key, const float vdefault, const float vmin, const float vmax, const float vscl )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "float", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( (double)vdefault, "default"  );
-   EndStruct();
-}
-
-void ShuttleGetDefinition::Define( double & var,   const wxChar * key, const float vdefault, const float vmin, const float vmax, const float vscl )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "float", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( (double)vdefault, "default"  );
-   EndStruct();
-}
-
-void ShuttleGetDefinition::Define( double & var,   const wxChar * key, const double vdefault, const double vmin, const double vmax, const double vscl )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "double", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( (double)vdefault, "default"  );
-   EndStruct();
-}
-
-
-void ShuttleGetDefinition::Define( wxString &var, const wxChar * key, const wxString vdefault, const wxString vmin, const wxString vmax, const wxString vscl )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "string", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( vdefault, "default"  );
-   EndStruct();
-}
-
-
-void ShuttleGetDefinition::DefineEnum( int &var,
-   const wxChar * key, const int vdefault,
-   const IdentInterfaceSymbol strings[], size_t nStrings )
-{
-   StartStruct();
-   AddItem( wxString(key), "key" );
-   AddItem( "enum", "type" );
-   if( IsOptional() )
-      AddItem( "unchanged", "default" );
-   else
-      AddItem( strings[vdefault].Internal(), "default"  );
-   StartField( "enum" );
-   StartArray();
-   for( size_t i = 0; i < nStrings; i++ )
-      AddItem( strings[i].Internal() );
-   EndArray();
-   EndField();
-   EndStruct();
-}
 
 #ifdef _MSC_VER
 // If this is compiled with MSVC (Visual Studio)

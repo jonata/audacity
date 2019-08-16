@@ -20,18 +20,17 @@ code out of ModuleManager.
 *//*******************************************************************/
 
 #include "ScriptCommandRelay.h"
+
 #include "CommandTargets.h"
 #include "CommandBuilder.h"
 #include "AppCommandEvent.h"
-#include "ResponseQueue.h"
-#include "../Project.h"
-#include "../AudacityApp.h"
+#include <wx/app.h>
+#include <wx/window.h>
 #include <wx/string.h>
 
 // Declare static class members
 CommandHandler *ScriptCommandRelay::sCmdHandler;
 tpRegScriptServerFunc ScriptCommandRelay::sScriptFn;
-ResponseQueue ScriptCommandRelay::sResponseQueue;
 
 void ScriptCommandRelay::SetRegScriptServerFunc(tpRegScriptServerFunc scriptFn)
 {
@@ -52,13 +51,16 @@ void ScriptCommandRelay::Run()
 }
 
 /// Send a command to a project, to be applied in that context.
-void ScriptCommandRelay::PostCommand(AudacityProject *project, const OldStyleCommandPointer &cmd)
+void ScriptCommandRelay::PostCommand(
+   wxWindow *pWindow, const OldStyleCommandPointer &cmd)
 {
-   wxASSERT(project != NULL);
+   wxASSERT( pWindow );
    wxASSERT(cmd != NULL);
-   AppCommandEvent ev;
-   ev.SetCommand(cmd);
-   project->GetEventHandler()->AddPendingEvent(ev);
+   if ( pWindow ) {
+      AppCommandEvent ev;
+      ev.SetCommand(cmd);
+      pWindow->GetEventHandler()->AddPendingEvent(ev);
+   }
 }
 
 /// This is the function which actually obeys one command.  Rather than applying
@@ -71,9 +73,8 @@ int ExecCommand(wxString *pIn, wxString *pOut)
       CommandBuilder builder(*pIn);
       if (builder.WasValid())
       {
-         AudacityProject *project = GetActiveProject();
          OldStyleCommandPointer cmd = builder.GetCommand();
-         ScriptCommandRelay::PostCommand(project, cmd);
+         ScriptCommandRelay::PostCommand(wxTheApp->GetTopWindow(), cmd);
 
          *pOut = wxEmptyString;
       }
@@ -110,8 +111,10 @@ int ExecCommand2(wxString *pIn, wxString *pOut)
          OldStyleCommandPointer cmd = builder.GetCommand();
          AppCommandEvent ev;
          ev.SetCommand(cmd);
-         AudacityApp & App = wxGetApp();
-         App.OnReceiveCommand(ev);
+
+         // Use SafelyProcessEvent, which stops exceptions, because this is
+         // expected to be reached from within the XLisp runtime
+         wxTheApp->SafelyProcessEvent( ev );
 
          *pOut = wxEmptyString;
       }
@@ -158,22 +161,8 @@ void * ExecForLisp( char * pIn ){
 };
 
 
-/// Adds a response to the queue to be sent back to the script
-void ScriptCommandRelay::SendResponse(const wxString &response)
-{
-   sResponseQueue.AddResponse(response);
-}
-
 /// Gets a response from the queue (may block)
 Response ScriptCommandRelay::ReceiveResponse()
 {
-   return ScriptCommandRelay::sResponseQueue.WaitAndGetResponse();
-}
-
-/// Get a pointer to a message target which allows commands to send responses
-/// back to a script.
-std::shared_ptr<ResponseQueueTarget> ScriptCommandRelay::GetResponseTarget()
-{
-   // This should be deleted by a Command destructor
-   return std::make_shared<ResponseQueueTarget>(sResponseQueue);
+   return ResponseQueueTarget::sResponseQueue().WaitAndGetResponse();
 }

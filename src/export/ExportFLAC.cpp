@@ -18,11 +18,11 @@ and libvorbis examples, Monty <monty@xiph.org>
 
 **********************************************************************/
 
-#include "../Audacity.h"
+#include "../Audacity.h" // for USE_* macros
 
 #ifdef USE_LIBFLAC
-
 #include "ExportFLAC.h"
+
 #include "Export.h"
 
 #include <wx/progdlg.h>
@@ -32,16 +32,16 @@ and libvorbis examples, Monty <monty@xiph.org>
 #include "FLAC++/encoder.h"
 
 #include "../float_cast.h"
-#include "../Project.h"
+#include "../ProjectSettings.h"
 #include "../Mix.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
 
-#include "../Internat.h"
 #include "../Tags.h"
-
 #include "../Track.h"
-#include "../widgets/ErrorDialog.h"
+
+#include "../widgets/AudacityMessageBox.h"
+#include "../widgets/ProgressDialog.h"
 
 //----------------------------------------------------------------------------
 // ExportFLACOptions Class
@@ -81,20 +81,39 @@ ExportFLACOptions::~ExportFLACOptions()
 ///
 void ExportFLACOptions::PopulateOrExchange(ShuttleGui & S)
 {
-   wxArrayString flacLevelNames, flacLevelLabels;
-   flacLevelLabels.Add(wxT("0")); flacLevelNames.Add(_("0 (fastest)"));
-   flacLevelLabels.Add(wxT("1")); flacLevelNames.Add(_("1"));
-   flacLevelLabels.Add(wxT("2")); flacLevelNames.Add(_("2"));
-   flacLevelLabels.Add(wxT("3")); flacLevelNames.Add(_("3"));
-   flacLevelLabels.Add(wxT("4")); flacLevelNames.Add(_("4"));
-   flacLevelLabels.Add(wxT("5")); flacLevelNames.Add(_("5"));
-   flacLevelLabels.Add(wxT("6")); flacLevelNames.Add(_("6"));
-   flacLevelLabels.Add(wxT("7")); flacLevelNames.Add(_("7"));
-   flacLevelLabels.Add(wxT("8")); flacLevelNames.Add(_("8 (best)"));
+   wxArrayStringEx flacLevelLabels{
+      wxT("0") ,
+      wxT("1") ,
+      wxT("2") ,
+      wxT("3") ,
+      wxT("4") ,
+      wxT("5") ,
+      wxT("6") ,
+      wxT("7") ,
+      wxT("8") ,
+   };
 
-   wxArrayString flacBitDepthNames, flacBitDepthLabels;
-   flacBitDepthLabels.Add(wxT("16")); flacBitDepthNames.Add(_("16 bit"));
-   flacBitDepthLabels.Add(wxT("24")); flacBitDepthNames.Add(_("24 bit"));
+   wxArrayStringEx flacLevelNames{
+      _("0 (fastest)") ,
+      _("1") ,
+      _("2") ,
+      _("3") ,
+      _("4") ,
+      _("5") ,
+      _("6") ,
+      _("7") ,
+      _("8 (best)") ,
+   };
+
+   wxArrayStringEx flacBitDepthLabels{
+      wxT("16") ,
+      wxT("24") ,
+   };
+
+   wxArrayStringEx flacBitDepthNames{
+      _("16 bit") ,
+      _("24 bit") ,
+   };
 
    S.StartVerticalLay();
    {
@@ -233,8 +252,9 @@ ProgressResult ExportFLAC::Export(AudacityProject *project,
                         const Tags *metadata,
                         int WXUNUSED(subformat))
 {
-   double    rate    = project->GetRate();
-   const TrackList *tracks = project->GetTracks();
+   const auto &settings = ProjectSettings::Get( *project );
+   double    rate    = settings.GetRate();
+   const auto &tracks = TrackList::Get( *project );
 
    wxLogNull logNo;            // temporarily disable wxWidgets error messages
    auto updateResult = ProgressResult::Success;
@@ -346,10 +366,7 @@ ProgressResult ExportFLAC::Export(AudacityProject *project,
       }
    } );
 
-   const WaveTrackConstArray waveTracks =
-      tracks->GetWaveTrackConstArray(selectionOnly, false);
-   auto mixer = CreateMixer(waveTracks,
-                            tracks->GetTimeTrack(),
+   auto mixer = CreateMixer(tracks, selectionOnly,
                             t0, t1,
                             numChannels, SAMPLES_PER_RUN, false,
                             rate, format, true, mixerSpec);
@@ -428,7 +445,7 @@ bool ExportFLAC::GetMetadata(AudacityProject *project, const Tags *tags)
 {
    // Retrieve tags if needed
    if (tags == NULL)
-      tags = project->GetTags();
+      tags = &Tags::Get( *project );
 
    mMetadata.reset(::FLAC__metadata_object_new(FLAC__METADATA_TYPE_VORBIS_COMMENT));
 

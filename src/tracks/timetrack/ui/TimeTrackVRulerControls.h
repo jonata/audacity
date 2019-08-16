@@ -22,9 +22,20 @@ class TimeTrackVRulerControls final : public TrackVRulerControls
 
 public:
    explicit
-   TimeTrackVRulerControls( std::shared_ptr<Track> pTrack )
-      : TrackVRulerControls( pTrack ) {}
+   TimeTrackVRulerControls( const std::shared_ptr<TrackView> &pTrackView )
+      : TrackVRulerControls( pTrackView ) {}
    ~TimeTrackVRulerControls();
+
+private:
+
+   // TrackPanelDrawable implementation
+   void Draw(
+      TrackPanelDrawingContext &context,
+      const wxRect &rect, unsigned iPass ) override;
+
+   // TrackVRulerControls implementation
+   void UpdateRuler( const wxRect &rect ) override;
+
 };
 
 #endif

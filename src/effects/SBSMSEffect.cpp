@@ -11,18 +11,16 @@ effect that uses SBSMS to do its processing (TimeScale)
 
 **********************************************************************/
 
-#include "../Audacity.h"
+#include "../Audacity.h" // for USE_* macros
 
 #if USE_SBSMS
+#include "SBSMSEffect.h"
 
 #include <math.h>
 
-#include "SBSMSEffect.h"
 #include "../LabelTrack.h"
 #include "../WaveTrack.h"
-#include "../Project.h"
 #include "TimeWarper.h"
-#include "../FileException.h"
 
 enum {
   SBSMSOutBlockSize = 512
@@ -59,8 +57,8 @@ public:
    // Not required by callbacks, but makes for easier cleanup
    std::unique_ptr<Resampler> resampler;
    std::unique_ptr<SBSMSQuality> quality;
-   std::unique_ptr<WaveTrack> outputLeftTrack;
-   std::unique_ptr<WaveTrack> outputRightTrack;
+   std::shared_ptr<WaveTrack> outputLeftTrack;
+   std::shared_ptr<WaveTrack> outputRightTrack;
 
    std::exception_ptr mpException {};
 };
@@ -253,8 +251,10 @@ bool EffectSBSMS::Process()
             auto end = leftTrack->TimeToLongSamples(mCurT1);
 
             // TODO: more-than-two-channels
-            WaveTrack *rightTrack =
-               * ++ TrackList::Channels(leftTrack).begin();
+            auto channels = TrackList::Channels(leftTrack);
+            WaveTrack *rightTrack = (channels.size() > 1)
+               ? * ++ channels.first
+               : nullptr;
             if (rightTrack) {
                double t;
 

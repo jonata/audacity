@@ -9,29 +9,37 @@ Paul Licameli split from TrackPanel.cpp
 **********************************************************************/
 
 #include "../../../../Audacity.h"
-#include "../../../../Experimental.h"
 #include "WaveTrackControls.h"
+
+#include "../../../../Experimental.h"
+
 #include "../../ui/PlayableTrackButtonHandles.h"
 #include "WaveTrackSliderHandles.h"
 
-#include "../../../../AudioIO.h"
-#include "../../../../HitTestResult.h"
-#include "../../../../MixerBoard.h"
+#include "WaveTrackView.h"
+#include "../../../../AudioIOBase.h"
+#include "../../../../CellularPanel.h"
+#include "../../../../Menus.h"
 #include "../../../../Project.h"
+#include "../../../../ProjectAudioIO.h"
+#include "../../../../ProjectHistory.h"
 #include "../../../../RefreshCode.h"
-#include "../../../../WaveTrack.h"
 #include "../../../../ShuttleGui.h"
-#include "../../../../TrackPanel.h"
+#include "../../../../TrackPanelAx.h"
 #include "../../../../TrackPanelMouseEvent.h"
+#include "../../../../WaveTrack.h"
 #include "../../../../widgets/PopupMenuTable.h"
+#include "../../../../effects/RealtimeEffectManager.h"
 #include "../../../../ondemand/ODManager.h"
 #include "../../../../prefs/PrefsDialog.h"
 #include "../../../../prefs/SpectrumPrefs.h"
-#include "../../../../prefs/TracksBehaviorsPrefs.h"
+#include "../../../../prefs/ThemePrefs.h"
 #include "../../../../prefs/WaveformPrefs.h"
-#include "../../../../widgets/ErrorDialog.h"
+#include "../../../../widgets/AudacityMessageBox.h"
 
 #include <wx/combobox.h>
+#include <wx/frame.h>
+#include <wx/sizer.h>
 
 namespace
 {
@@ -90,7 +98,7 @@ std::vector<UIHandlePtr> WaveTrackControls::HitTest
       }
    }
 
-   return TrackControls::HitTest(st, pProject);
+   return PlayableTrackControls::HitTest(st, pProject);
 }
 
 enum {
@@ -154,7 +162,7 @@ private:
       mpData = NULL;
    }
 
-   TrackControls::InitMenuData *mpData;
+   PlayableTrackControls::InitMenuData *mpData;
 
    int IdOfWaveColor(int WaveColor);
    void OnWaveColorChange(wxCommandEvent & event);
@@ -168,13 +176,13 @@ WaveColorMenuTable &WaveColorMenuTable::Instance()
 
 void WaveColorMenuTable::InitMenu(Menu *pMenu, void *pUserData)
 {
-   mpData = static_cast<TrackControls::InitMenuData*>(pUserData);
+   mpData = static_cast<PlayableTrackControls::InitMenuData*>(pUserData);
    WaveTrack *const pTrack = static_cast<WaveTrack*>(mpData->pTrack);
    auto WaveColorId = IdOfWaveColor( pTrack->GetWaveColorIndex());
    SetMenuChecks(*pMenu, [=](int id){ return id == WaveColorId; });
 
    AudacityProject *const project = ::GetActiveProject();
-   bool unsafe = project->IsAudioActive();
+   bool unsafe = ProjectAudioIO::Get( *project ).IsAudioActive();
    for (int i = OnInstrument1ID; i <= OnInstrument4ID; i++) {
       pMenu->Enable(i, !unsafe);
    }
@@ -216,7 +224,8 @@ void WaveColorMenuTable::OnWaveColorChange(wxCommandEvent & event)
    for (auto channel : TrackList::Channels(pTrack))
       channel->SetWaveColorIndex(newWaveColor);
 
-   project->PushState(wxString::Format(_("Changed '%s' to %s"),
+   ProjectHistory::Get( *project )
+      .PushState(wxString::Format(_("Changed '%s' to %s"),
       pTrack->GetName(),
       GetWaveColorStr(newWaveColor)),
       _("WaveColor Change"));
@@ -246,7 +255,7 @@ private:
       mpData = NULL;
    }
 
-   TrackControls::InitMenuData *mpData;
+   PlayableTrackControls::InitMenuData *mpData;
 
    int IdOfFormat(int format);
 
@@ -261,13 +270,13 @@ FormatMenuTable &FormatMenuTable::Instance()
 
 void FormatMenuTable::InitMenu(Menu *pMenu, void *pUserData)
 {
-   mpData = static_cast<TrackControls::InitMenuData*>(pUserData);
+   mpData = static_cast<PlayableTrackControls::InitMenuData*>(pUserData);
    WaveTrack *const pTrack = static_cast<WaveTrack*>(mpData->pTrack);
    auto formatId = IdOfFormat(pTrack->GetSampleFormat());
    SetMenuChecks(*pMenu, [=](int id){ return id == formatId; });
 
    AudacityProject *const project = ::GetActiveProject();
-   bool unsafe = project->IsAudioActive();
+   bool unsafe = ProjectAudioIO::Get( *project ).IsAudioActive();
    for (int i = On16BitID; i <= OnFloatID; i++) {
       pMenu->Enable(i, !unsafe);
    }
@@ -334,7 +343,8 @@ void FormatMenuTable::OnFormatChange(wxCommandEvent & event)
       channel->ConvertToSampleFormat(newFormat);
 
    /* i18n-hint: The strings name a track and a format */
-   project->PushState(wxString::Format(_("Changed '%s' to %s"),
+   ProjectHistory::Get( *project )
+      .PushState(wxString::Format(_("Changed '%s' to %s"),
       pTrack->GetName(),
       GetSampleFormatStr(newFormat)),
       _("Format Change"));
@@ -362,7 +372,7 @@ private:
       mpData = NULL;
    }
 
-   TrackControls::InitMenuData *mpData;
+   PlayableTrackControls::InitMenuData *mpData;
 
    int IdOfRate(int rate);
    void SetRate(WaveTrack * pTrack, double rate);
@@ -379,32 +389,35 @@ RateMenuTable &RateMenuTable::Instance()
 
 void RateMenuTable::InitMenu(Menu *pMenu, void *pUserData)
 {
-   mpData = static_cast<TrackControls::InitMenuData*>(pUserData);
+   mpData = static_cast<PlayableTrackControls::InitMenuData*>(pUserData);
    WaveTrack *const pTrack = static_cast<WaveTrack*>(mpData->pTrack);
    const auto rateId = IdOfRate((int)pTrack->GetRate());
    SetMenuChecks(*pMenu, [=](int id){ return id == rateId; });
 
    AudacityProject *const project = ::GetActiveProject();
-   bool unsafe = project->IsAudioActive();
+   bool unsafe = ProjectAudioIO::Get( *project ).IsAudioActive();
    for (int i = OnRate8ID; i <= OnRateOtherID; i++) {
       pMenu->Enable(i, !unsafe);
    }
 }
 
+// Because of Bug 1780 we can't use POPUP_MENU_RADIO_ITEM
+// If we did, we'd get no message when clicking on Other...
+// when it is already selected.
 BEGIN_POPUP_MENU(RateMenuTable)
-   POPUP_MENU_RADIO_ITEM(OnRate8ID, _("8000 Hz"), OnRateChange)
-   POPUP_MENU_RADIO_ITEM(OnRate11ID, _("11025 Hz"), OnRateChange)
-   POPUP_MENU_RADIO_ITEM(OnRate16ID, _("16000 Hz"), OnRateChange)
-   POPUP_MENU_RADIO_ITEM(OnRate22ID, _("22050 Hz"), OnRateChange)
-   POPUP_MENU_RADIO_ITEM(OnRate44ID, _("44100 Hz"), OnRateChange)
-   POPUP_MENU_RADIO_ITEM(OnRate48ID, _("48000 Hz"), OnRateChange)
-   POPUP_MENU_RADIO_ITEM(OnRate88ID, _("88200 Hz"), OnRateChange)
-   POPUP_MENU_RADIO_ITEM(OnRate96ID, _("96000 Hz"), OnRateChange)
-   POPUP_MENU_RADIO_ITEM(OnRate176ID, _("176400 Hz"), OnRateChange)
-   POPUP_MENU_RADIO_ITEM(OnRate192ID, _("192000 Hz"), OnRateChange)
-   POPUP_MENU_RADIO_ITEM(OnRate352ID, _("352800 Hz"), OnRateChange)
-   POPUP_MENU_RADIO_ITEM(OnRate384ID, _("384000 Hz"), OnRateChange)
-   POPUP_MENU_RADIO_ITEM(OnRateOtherID, _("&Other..."), OnRateOther)
+   POPUP_MENU_CHECK_ITEM(OnRate8ID, _("8000 Hz"), OnRateChange)
+   POPUP_MENU_CHECK_ITEM(OnRate11ID, _("11025 Hz"), OnRateChange)
+   POPUP_MENU_CHECK_ITEM(OnRate16ID, _("16000 Hz"), OnRateChange)
+   POPUP_MENU_CHECK_ITEM(OnRate22ID, _("22050 Hz"), OnRateChange)
+   POPUP_MENU_CHECK_ITEM(OnRate44ID, _("44100 Hz"), OnRateChange)
+   POPUP_MENU_CHECK_ITEM(OnRate48ID, _("48000 Hz"), OnRateChange)
+   POPUP_MENU_CHECK_ITEM(OnRate88ID, _("88200 Hz"), OnRateChange)
+   POPUP_MENU_CHECK_ITEM(OnRate96ID, _("96000 Hz"), OnRateChange)
+   POPUP_MENU_CHECK_ITEM(OnRate176ID, _("176400 Hz"), OnRateChange)
+   POPUP_MENU_CHECK_ITEM(OnRate192ID, _("192000 Hz"), OnRateChange)
+   POPUP_MENU_CHECK_ITEM(OnRate352ID, _("352800 Hz"), OnRateChange)
+   POPUP_MENU_CHECK_ITEM(OnRate384ID, _("384000 Hz"), OnRateChange)
+   POPUP_MENU_CHECK_ITEM(OnRateOtherID, _("&Other..."), OnRateOther)
 END_POPUP_MENU()
 
 const int nRates = 12;
@@ -435,7 +448,8 @@ void RateMenuTable::SetRate(WaveTrack * pTrack, double rate)
    // Separate conversion of "rate" enables changing the decimals without affecting i18n
    wxString rateString = wxString::Format(wxT("%.3f"), rate);
    /* i18n-hint: The string names a track */
-   project->PushState(wxString::Format(_("Changed '%s' to %s Hz"),
+   ProjectHistory::Get( *project )
+      .PushState(wxString::Format(_("Changed '%s' to %s Hz"),
       pTrack->GetName(), rateString),
       _("Rate Change"));
 }
@@ -468,23 +482,24 @@ void RateMenuTable::OnRateOther(wxCommandEvent &)
       dlg.SetName(dlg.GetTitle());
       ShuttleGui S(&dlg, eIsCreating);
       wxString rate;
-      wxArrayString rates;
       wxComboBox *cb;
 
       rate.Printf(wxT("%ld"), lrint(pTrack->GetRate()));
 
-      rates.Add(wxT("8000"));
-      rates.Add(wxT("11025"));
-      rates.Add(wxT("16000"));
-      rates.Add(wxT("22050"));
-      rates.Add(wxT("44100"));
-      rates.Add(wxT("48000"));
-      rates.Add(wxT("88200"));
-      rates.Add(wxT("96000"));
-      rates.Add(wxT("176400"));
-      rates.Add(wxT("192000"));
-      rates.Add(wxT("352800"));
-      rates.Add(wxT("384000"));
+      wxArrayStringEx rates{
+         wxT("8000") ,
+         wxT("11025") ,
+         wxT("16000") ,
+         wxT("22050") ,
+         wxT("44100") ,
+         wxT("48000") ,
+         wxT("88200") ,
+         wxT("96000") ,
+         wxT("176400") ,
+         wxT("192000") ,
+         wxT("352800") ,
+         wxT("384000") ,
+      };
 
       S.StartVerticalLay(true);
       {
@@ -493,7 +508,7 @@ void RateMenuTable::OnRateOther(wxCommandEvent &)
          {
             cb = S.AddCombo(_("New sample rate (Hz):"),
                rate,
-               &rates);
+               rates);
 #if defined(__WXMAC__)
             // As of wxMac-2.8.12, setting manually is required
             // to handle rates not in the list.  See: Bug #427
@@ -550,7 +565,7 @@ protected:
 
    DECLARE_POPUP_MENU(WaveTrackMenuTable);
 
-   TrackControls::InitMenuData *mpData;
+   PlayableTrackControls::InitMenuData *mpData;
 
    void OnSetDisplay(wxCommandEvent & event);
    void OnSpectrogramSettings(wxCommandEvent & event);
@@ -573,7 +588,7 @@ WaveTrackMenuTable &WaveTrackMenuTable::Instance( Track * pTrack )
    wxCommandEvent evt;
    // Clear it out so we force a repopulate
    instance.Invalidate( evt );
-   // Ensure we know how to poulate.
+   // Ensure we know how to populate.
    // Messy, but the design does not seem to offer an alternative.
    // We won't use pTrack after populate.
    instance.mpTrack = pTrack;
@@ -582,28 +597,33 @@ WaveTrackMenuTable &WaveTrackMenuTable::Instance( Track * pTrack )
 
 void WaveTrackMenuTable::InitMenu(Menu *pMenu, void *pUserData)
 {
-   mpData = static_cast<TrackControls::InitMenuData*>(pUserData);
+   mpData = static_cast<PlayableTrackControls::InitMenuData*>(pUserData);
    WaveTrack *const pTrack = static_cast<WaveTrack*>(mpData->pTrack);
 
    std::vector<int> checkedIds;
 
-   const int display = pTrack->GetDisplay();
-   checkedIds.push_back(
-      display == WaveTrack::Waveform
-         ? (pTrack->GetWaveformSettings().isLinear()
-            ? OnWaveformID : OnWaveformDBID)
-         : OnSpectrumID);
+   const auto displays = WaveTrackView::Get( *pTrack ).GetDisplays();
+   for ( auto display : displays ) {
+      checkedIds.push_back(
+         display == WaveTrackViewConstants::Waveform
+            ? (pTrack->GetWaveformSettings().isLinear()
+               ? OnWaveformID : OnWaveformDBID)
+            : OnSpectrumID);
+   }
 
    // Bug 1253.  Shouldn't open preferences if audio is busy.
    // We can't change them on the fly yet anyway.
+   auto gAudioIO = AudioIOBase::Get();
    const bool bAudioBusy = gAudioIO->IsBusy();
-   pMenu->Enable(OnSpectrogramSettingsID,
-      (display == WaveTrack::Spectrum) && !bAudioBusy);
+   bool hasSpectrum =
+      make_iterator_range( displays.begin(), displays.end() )
+         .contains( WaveTrackViewConstants::Spectrum );
+   pMenu->Enable(OnSpectrogramSettingsID, hasSpectrum && !bAudioBusy);
 
    AudacityProject *const project = ::GetActiveProject();
-   TrackList *const tracks = project->GetTracks();
-   bool unsafe = EffectManager::Get().RealtimeIsActive() &&
-      project->IsAudioActive();
+   auto &tracks = TrackList::Get( *project );
+   bool unsafe = RealtimeEffectManager::Get().RealtimeIsActive() &&
+      ProjectAudioIO::Get( *project ).IsAudioActive();
 
    auto nChannels = TrackList::Channels(pTrack).size();
    const bool isMono = ( nChannels == 1 );
@@ -612,10 +632,10 @@ void WaveTrackMenuTable::InitMenu(Menu *pMenu, void *pUserData)
 
    if ( isMono )
    {
-      mpData = static_cast<TrackControls::InitMenuData*>(pUserData);
+      mpData = static_cast<PlayableTrackControls::InitMenuData*>(pUserData);
       WaveTrack *const pTrack2 = static_cast<WaveTrack*>(mpData->pTrack);
 
-      auto next = * ++ tracks->Find(pTrack2);
+      auto next = * ++ tracks.Find(pTrack2);
 
       if (isMono) {
          const bool canMakeStereo =
@@ -670,9 +690,11 @@ void WaveTrackMenuTable::InitMenu(Menu *pMenu, void *pUserData)
 BEGIN_POPUP_MENU(WaveTrackMenuTable)
    POPUP_MENU_SEPARATOR()
 
+   // These radio items may become non-exclusive check items
    POPUP_MENU_RADIO_ITEM(OnWaveformID, _("Wa&veform"), OnSetDisplay)
    POPUP_MENU_RADIO_ITEM(OnWaveformDBID, _("&Waveform (dB)"), OnSetDisplay)
    POPUP_MENU_RADIO_ITEM(OnSpectrumID, _("&Spectrogram"), OnSetDisplay)
+
    POPUP_MENU_ITEM(OnSpectrogramSettingsID, _("S&pectrogram Settings..."), OnSpectrogramSettings)
    POPUP_MENU_SEPARATOR()
 
@@ -689,9 +711,15 @@ BEGIN_POPUP_MENU(WaveTrackMenuTable)
 #endif
 
    WaveTrack *const pTrack = static_cast<WaveTrack*>(mpTrack);
-   if( pTrack && pTrack->GetDisplay() != WaveTrack::Spectrum  ){
-      POPUP_MENU_SEPARATOR()
-      POPUP_MENU_SUB_MENU(OnWaveColorID, _("&Wave Color"), WaveColorMenuTable)
+   if ( pTrack ) {
+      const auto displays = WaveTrackView::Get( *pTrack ).GetDisplays();
+      bool hasWaveform =
+         make_iterator_range( displays.begin(), displays.end() )
+            .contains( WaveTrackViewConstants::Waveform );
+      if( hasWaveform ){
+         POPUP_MENU_SEPARATOR()
+         POPUP_MENU_SUB_MENU(OnWaveColorID, _("&Wave Color"), WaveColorMenuTable)
+      }
    }
 
    POPUP_MENU_SEPARATOR()
@@ -704,30 +732,33 @@ END_POPUP_MENU()
 ///  Set the Display mode based on the menu choice in the Track Menu.
 void WaveTrackMenuTable::OnSetDisplay(wxCommandEvent & event)
 {
+   using namespace WaveTrackViewConstants;
    int idInt = event.GetId();
    wxASSERT(idInt >= OnWaveformID && idInt <= OnSpectrumID);
    const auto pTrack = static_cast<WaveTrack*>(mpData->pTrack);
 
    bool linear = false;
-   WaveTrack::WaveTrackDisplay id;
+   WaveTrackView::WaveTrackDisplay id;
    switch (idInt) {
    default:
    case OnWaveformID:
-      linear = true, id = WaveTrack::Waveform; break;
+      linear = true, id = Waveform; break;
    case OnWaveformDBID:
-      id = WaveTrack::Waveform; break;
+      id = Waveform; break;
    case OnSpectrumID:
-      id = WaveTrack::Spectrum; break;
+      id = Spectrum; break;
    }
 
-   const bool wrongType = pTrack->GetDisplay() != id;
+   const auto displays = WaveTrackView::Get( *pTrack ).GetDisplays();
+   const bool wrongType = !(displays.size() == 1 && displays[0] == id);
    const bool wrongScale =
-      (id == WaveTrack::Waveform &&
+      (id == Waveform &&
       pTrack->GetWaveformSettings().isLinear() != linear);
    if (wrongType || wrongScale) {
       for (auto channel : TrackList::Channels(pTrack)) {
          channel->SetLastScaleType();
-         channel->SetDisplay(WaveTrack::WaveTrackDisplay(id));
+         WaveTrackView::Get( *channel )
+            .SetDisplay(WaveTrackView::WaveTrackDisplay(id));
          if (wrongScale)
             channel->GetIndependentWaveformSettings().scaleType = linear
                ? WaveformSettings::stLinear
@@ -735,7 +766,7 @@ void WaveTrackMenuTable::OnSetDisplay(wxCommandEvent & event)
       }
 
       AudacityProject *const project = ::GetActiveProject();
-      project->ModifyState(true);
+      ProjectHistory::Get( *project ).ModifyState(true);
 
       using namespace RefreshCode;
       mpData->result = RefreshAll | UpdateVRuler;
@@ -768,6 +799,7 @@ void WaveTrackMenuTable::OnSpectrogramSettings(wxCommandEvent &)
       const int mPage;
    };
 
+   auto gAudioIO = AudioIOBase::Get();
    if (gAudioIO->IsBusy()){
       AudacityMessageBox(_("To change Spectrogram Settings, stop any\n"
                      "playing or recording first."),
@@ -776,13 +808,10 @@ void WaveTrackMenuTable::OnSpectrogramSettings(wxCommandEvent &)
    }
 
    WaveTrack *const pTrack = static_cast<WaveTrack*>(mpData->pTrack);
-   // WaveformPrefsFactory waveformFactory(pTrack);
-   // TracksBehaviorsPrefsFactory tracksBehaviorsFactory();
-   SpectrumPrefsFactory spectrumFactory(pTrack);
 
    PrefsDialog::Factories factories;
-   // factories.push_back(&waveformFactory);
-   factories.push_back(&spectrumFactory);
+   // factories.push_back(WaveformPrefsFactory( pTrack ));
+   factories.push_back(SpectrumPrefsFactory( pTrack ));
    const int page =
       // (pTrack->GetDisplay() == WaveTrack::Spectrum) ? 1 :
       0;
@@ -793,11 +822,11 @@ void WaveTrackMenuTable::OnSpectrogramSettings(wxCommandEvent &)
    if (0 != dialog.ShowModal()) {
       // Redraw
       AudacityProject *const project = ::GetActiveProject();
-      project->ModifyState(true);
+      ProjectHistory::Get( *project ).ModifyState(true);
       //Bug 1725 Toolbar was left greyed out.
       //This solution is overkill, but does fix the problem and is what the
       //prefs dialog normally does.
-      MenuCommandHandler::RebuildAllMenuBars();
+      MenuCreator::RebuildAllMenuBars();
       mpData->result = RefreshCode::RefreshAll;
    }
 }
@@ -829,10 +858,11 @@ void WaveTrackMenuTable::OnChannelChange(wxCommandEvent & event)
    pTrack->SetChannel(channel);
    AudacityProject *const project = ::GetActiveProject();
    /* i18n-hint: The strings name a track and a channel choice (mono, left, or right) */
-   project->PushState(wxString::Format(_("Changed '%s' to %s"),
-      pTrack->GetName(),
-      channelmsg),
-      _("Channel"));
+   ProjectHistory::Get( *project )
+      .PushState(wxString::Format(_("Changed '%s' to %s"),
+         pTrack->GetName(),
+         channelmsg),
+         _("Channel"));
    mpData->result = RefreshCode::RefreshAll;
 }
 #endif
@@ -841,15 +871,19 @@ void WaveTrackMenuTable::OnChannelChange(wxCommandEvent & event)
 void WaveTrackMenuTable::OnMergeStereo(wxCommandEvent &)
 {
    AudacityProject *const project = ::GetActiveProject();
-   const auto tracks = project->GetTracks();
+   auto &tracks = TrackList::Get( *project );
 
    WaveTrack *const pTrack = static_cast<WaveTrack*>(mpData->pTrack);
    wxASSERT(pTrack);
 
    auto partner = static_cast< WaveTrack * >
-      ( *tracks->Find( pTrack ).advance( 1 ) );
+      ( *tracks.Find( pTrack ).advance( 1 ) );
 
-   tracks->GroupChannels( *pTrack, 2 );
+   bool bBothMinimizedp =
+      ((TrackView::Get( *pTrack ).GetMinimized()) &&
+       (TrackView::Get( *partner ).GetMinimized()));
+
+   tracks.GroupChannels( *pTrack, 2 );
 
    // Set partner's parameters to match target.
    partner->Merge(*pTrack);
@@ -858,18 +892,23 @@ void WaveTrackMenuTable::OnMergeStereo(wxCommandEvent &)
    partner->SetPan( 0.0f );
 
    // Set NEW track heights and minimized state
-   bool bBothMinimizedp = ((pTrack->GetMinimized()) && (partner->GetMinimized()));
-   pTrack->SetMinimized(false);
-   partner->SetMinimized(false);
-   int AverageHeight = (pTrack->GetHeight() + partner->GetHeight()) / 2;
-   pTrack->SetHeight(AverageHeight);
-   partner->SetHeight(AverageHeight);
-   pTrack->SetMinimized(bBothMinimizedp);
-   partner->SetMinimized(bBothMinimizedp);
+   auto
+      &view = WaveTrackView::Get( *pTrack ),
+      &partnerView = WaveTrackView::Get( *partner );
+   view.SetMinimized(false);
+   partnerView.SetMinimized(false);
+   int AverageHeight = (view.GetHeight() + partnerView.GetHeight()) / 2;
+   view.SetHeight(AverageHeight);
+   partnerView.SetHeight(AverageHeight);
+   view.SetMinimized(bBothMinimizedp);
+   partnerView.SetMinimized(bBothMinimizedp);
+
+   partnerView.RestorePlacements( view.SavePlacements() );
 
    //On Demand - join the queues together.
    if (ODManager::IsInstanceCreated())
-      if (!ODManager::Instance()->MakeWaveTrackDependent(partner, pTrack))
+      if (!ODManager::Instance()
+         ->MakeWaveTrackDependent(partner->SharedPointer<WaveTrack>(), pTrack))
       {
          ;
          //TODO: in the future, we will have to check the return value of MakeWaveTrackDependent -
@@ -879,11 +918,13 @@ void WaveTrackMenuTable::OnMergeStereo(wxCommandEvent &)
       }
 
    /* i18n-hint: The string names a track */
-   project->PushState(wxString::Format(_("Made '%s' a stereo track"),
+   ProjectHistory::Get( *project )
+      .PushState(wxString::Format(_("Made '%s' a stereo track"),
       pTrack->GetName()),
       _("Make Stereo"));
 
-   mpData->result = RefreshCode::RefreshAll;
+   using namespace RefreshCode;
+   mpData->result = RefreshAll | FixScrollbars;
 }
 
 /// Split a stereo track (or more-than-stereo?) into two (or more) tracks...
@@ -899,27 +940,27 @@ void WaveTrackMenuTable::SplitStereo(bool stereo)
    for (auto channel : channels) {
       // Keep original stereo track name.
       channel->SetName(pTrack->GetName());
+      auto &view = TrackView::Get( *channel );
       if (stereo)
          channel->SetPanFromChannelType();
 
       //On Demand - have each channel add its own.
       if (ODManager::IsInstanceCreated())
-         ODManager::Instance()->MakeWaveTrackIndependent(channel);
+         ODManager::Instance()->MakeWaveTrackIndependent(
+            channel->SharedPointer<WaveTrack>() );
       //make sure no channel is smaller than its minimum height
-      if (channel->GetHeight() < channel->GetMinimizedHeight())
-         channel->SetHeight(channel->GetMinimizedHeight());
-      totalHeight += channel->GetHeight();
+      if (view.GetHeight() < view.GetMinimizedHeight())
+         view.SetHeight(view.GetMinimizedHeight());
+      totalHeight += view.GetHeight();
       ++nChannels;
    }
 
-   project->GetTracks()->GroupChannels( *pTrack, 1 );
+   TrackList::Get( *project ).GroupChannels( *pTrack, 1 );
    int averageHeight = totalHeight / nChannels;
 
    for (auto channel : channels)
       // Make tracks the same height
-      channel->SetHeight( averageHeight );
-
-   mpData->result = RefreshCode::RefreshAll;
+      TrackView::Get( *channel ).SetHeight( averageHeight );
 }
 
 /// Swap the left and right channels of a stero track...
@@ -932,26 +973,24 @@ void WaveTrackMenuTable::OnSwapChannels(wxCommandEvent &)
    if (channels.size() != 2)
       return;
 
-   Track *const focused = project->GetTrackPanel()->GetFocusedTrack();
+   auto &trackFocus = TrackFocus::Get( *project );
+   Track *const focused = trackFocus.Get();
    const bool hasFocus = channels.contains( focused );
 
    auto partner = *channels.rbegin();
 
    SplitStereo(false);
 
-   TrackList *const tracks = project->GetTracks();
-   tracks->MoveUp( partner );
-   tracks->GroupChannels( *partner, 2 );
-
-   MixerBoard* pMixerBoard = project->GetMixerBoard();
-   if (pMixerBoard)
-      pMixerBoard->UpdateTrackClusters();
+   auto &tracks = TrackList::Get( *project );
+   tracks.MoveUp( partner );
+   tracks.GroupChannels( *partner, 2 );
 
    if (hasFocus)
-      project->GetTrackPanel()->SetFocusedTrack(partner);
+      trackFocus.Set(partner);
 
    /* i18n-hint: The string names a track  */
-   project->PushState(wxString::Format(_("Swapped Channels in '%s'"),
+   ProjectHistory::Get( *project )
+      .PushState(wxString::Format(_("Swapped Channels in '%s'"),
       pTrack->GetName()),
       _("Swap Channels"));
 
@@ -965,11 +1004,13 @@ void WaveTrackMenuTable::OnSplitStereo(wxCommandEvent &)
    WaveTrack *const pTrack = static_cast<WaveTrack*>(mpData->pTrack);
    AudacityProject *const project = ::GetActiveProject();
    /* i18n-hint: The string names a track  */
-   project->PushState(wxString::Format(_("Split stereo track '%s'"),
+   ProjectHistory::Get( *project )
+      .PushState(wxString::Format(_("Split stereo track '%s'"),
       pTrack->GetName()),
       _("Split"));
 
-   mpData->result = RefreshCode::RefreshAll;
+   using namespace RefreshCode;
+   mpData->result = RefreshAll | FixScrollbars;
 }
 
 /// Split a stereo track into two mono tracks...
@@ -979,11 +1020,13 @@ void WaveTrackMenuTable::OnSplitStereoMono(wxCommandEvent &)
    WaveTrack *const pTrack = static_cast<WaveTrack*>(mpData->pTrack);
    AudacityProject *const project = ::GetActiveProject();
    /* i18n-hint: The string names a track  */
-   project->PushState(wxString::Format(_("Split Stereo to Mono '%s'"),
+   ProjectHistory::Get( *project ).
+      PushState(wxString::Format(_("Split Stereo to Mono '%s'"),
       pTrack->GetName()),
       _("Split to Mono"));
 
-   mpData->result = RefreshCode::RefreshAll;
+   using namespace RefreshCode;
+   mpData->result = RefreshAll | FixScrollbars;
 }
 
 //=============================================================================
@@ -993,3 +1036,288 @@ PopupMenuTable *WaveTrackControls::GetMenuExtension(Track * pTrack)
    WaveTrackMenuTable & result = WaveTrackMenuTable::Instance( pTrack );
    return &result;
 }
+
+// drawing related
+#include "../../../../widgets/ASlider.h"
+#include "../../../../TrackInfo.h"
+#include "../../../../TrackPanelDrawingContext.h"
+#include "../../../../ViewInfo.h"
+
+namespace {
+
+void SliderDrawFunction
+( LWSlider *(*Selector)
+    (const wxRect &sliderRect, const WaveTrack *t, bool captured, wxWindow*),
+  wxDC *dc, const wxRect &rect, const Track *pTrack,
+  bool captured, bool highlight )
+{
+   wxRect sliderRect = rect;
+   TrackInfo::GetSliderHorizontalBounds( rect.GetTopLeft(), sliderRect );
+   auto wt = static_cast<const WaveTrack*>( pTrack );
+   Selector( sliderRect, wt, captured, nullptr )->OnPaint(*dc, highlight);
+}
+
+void PanSliderDrawFunction
+( TrackPanelDrawingContext &context,
+  const wxRect &rect, const Track *pTrack )
+{
+   auto target = dynamic_cast<PanSliderHandle*>( context.target.get() );
+   auto dc = &context.dc;
+   bool hit = target && target->GetTrack().get() == pTrack;
+   bool captured = hit && target->IsClicked();
+   SliderDrawFunction
+      ( &WaveTrackControls::PanSlider, dc, rect, pTrack, captured, hit);
+}
+
+void GainSliderDrawFunction
+( TrackPanelDrawingContext &context,
+  const wxRect &rect, const Track *pTrack )
+{
+   auto target = dynamic_cast<GainSliderHandle*>( context.target.get() );
+   auto dc = &context.dc;
+   bool hit = target && target->GetTrack().get() == pTrack;
+   if( hit )
+      hit=hit;
+   bool captured = hit && target->IsClicked();
+   SliderDrawFunction
+      ( &WaveTrackControls::GainSlider, dc, rect, pTrack, captured, hit);
+}
+
+void StatusDrawFunction
+   ( const wxString &string, wxDC *dc, const wxRect &rect )
+{
+   static const int offset = 3;
+   dc->DrawText(string, rect.x + offset, rect.y);
+}
+
+void Status1DrawFunction
+( TrackPanelDrawingContext &context,
+  const wxRect &rect, const Track *pTrack )
+{
+   auto dc = &context.dc;
+   auto wt = static_cast<const WaveTrack*>(pTrack);
+
+   /// Returns the string to be displayed in the track label
+   /// indicating whether the track is mono, left, right, or
+   /// stereo and what sample rate it's using.
+   auto rate = wt ? wt->GetRate() : 44100.0;
+   wxString s;
+   if (!pTrack || TrackList::Channels(pTrack).size() > 1)
+      // TODO: more-than-two-channels-message
+      // more appropriate strings
+      s = _("Stereo, %dHz");
+   else {
+      if (wt->GetChannel() == Track::MonoChannel)
+         s = _("Mono, %dHz");
+      else if (wt->GetChannel() == Track::LeftChannel)
+         s = _("Left, %dHz");
+      else if (wt->GetChannel() == Track::RightChannel)
+         s = _("Right, %dHz");
+   }
+   s = wxString::Format( s, (int) (rate + 0.5) );
+
+   StatusDrawFunction( s, dc, rect );
+}
+
+void Status2DrawFunction
+( TrackPanelDrawingContext &context,
+  const wxRect &rect, const Track *pTrack )
+{
+   auto dc = &context.dc;
+   auto wt = static_cast<const WaveTrack*>(pTrack);
+   auto format = wt ? wt->GetSampleFormat() : floatSample;
+   auto s = GetSampleFormatStr(format);
+   StatusDrawFunction( s, dc, rect );
+}
+
+}
+
+using TCPLine = TrackInfo::TCPLine;
+
+static const struct WaveTrackTCPLines
+   : TCPLines { WaveTrackTCPLines() {
+   (TCPLines&)*this =
+      PlayableTrackControls::StaticTCPLines();
+   insert( end(), {
+
+      { TCPLine::kItemGain, kTrackInfoSliderHeight, kTrackInfoSliderExtra,
+        GainSliderDrawFunction },
+      { TCPLine::kItemPan, kTrackInfoSliderHeight, kTrackInfoSliderExtra,
+        PanSliderDrawFunction },
+
+#ifdef EXPERIMENTAL_DA
+      // DA: Does not have status information for a track.
+#else
+      { TCPLine::kItemStatusInfo1, 12, 0,
+        Status1DrawFunction },
+      { TCPLine::kItemStatusInfo2, 12, 0,
+        Status2DrawFunction },
+#endif
+
+   } );
+} } waveTrackTCPLines;
+
+void WaveTrackControls::GetGainRect(const wxPoint &topleft, wxRect & dest)
+{
+   TrackInfo::GetSliderHorizontalBounds( topleft, dest );
+   auto results = CalcItemY( waveTrackTCPLines, TCPLine::kItemGain );
+   dest.y = topleft.y + results.first;
+   dest.height = results.second;
+}
+
+void WaveTrackControls::GetPanRect(const wxPoint &topleft, wxRect & dest)
+{
+   GetGainRect( topleft, dest );
+   auto results = CalcItemY( waveTrackTCPLines, TCPLine::kItemPan );
+   dest.y = topleft.y + results.first;
+}
+
+unsigned WaveTrackControls::DefaultWaveTrackHeight()
+{
+   return TrackInfo::DefaultTrackHeight( waveTrackTCPLines );
+}
+
+const TCPLines &WaveTrackControls::GetTCPLines() const
+{
+   return waveTrackTCPLines;
+}
+
+namespace
+{
+std::unique_ptr<LWSlider>
+   gGainCaptured
+   , gPanCaptured
+   , gGain
+   , gPan;
+}
+
+LWSlider *WaveTrackControls::GainSlider(
+   CellularPanel &panel, const WaveTrack &wt )
+{
+   auto &controls = TrackControls::Get( wt );
+   auto rect = panel.FindRect( controls );
+   wxRect sliderRect;
+   GetGainRect( rect.GetTopLeft(), sliderRect );
+   return GainSlider( sliderRect, &wt, false, &panel );
+}
+
+LWSlider * WaveTrackControls::GainSlider
+(const wxRect &sliderRect, const WaveTrack *t, bool captured, wxWindow *pParent)
+{
+   static std::once_flag flag;
+   std::call_once( flag, [] {
+      wxCommandEvent dummy;
+      ReCreateGainSlider( dummy );
+      wxTheApp->Bind(EVT_THEME_CHANGE, ReCreateGainSlider);
+   } );
+
+   wxPoint pos = sliderRect.GetPosition();
+   float gain = t ? t->GetGain() : 1.0;
+
+   gGain->Move(pos);
+   gGain->Set(gain);
+   gGainCaptured->Move(pos);
+   gGainCaptured->Set(gain);
+
+   auto slider = (captured ? gGainCaptured : gGain).get();
+   slider->SetParent( pParent ? pParent :
+      FindProjectFrame( ::GetActiveProject() ) );
+   return slider;
+}
+
+void WaveTrackControls::ReCreateGainSlider( wxEvent &event )
+{
+   event.Skip();
+
+   const wxPoint point{ 0, 0 };
+   wxRect sliderRect;
+   GetGainRect(point, sliderRect);
+
+   float defPos = 1.0;
+   /* i18n-hint: Title of the Gain slider, used to adjust the volume */
+   gGain = std::make_unique<LWSlider>(nullptr, _("Gain"),
+                        wxPoint(sliderRect.x, sliderRect.y),
+                        wxSize(sliderRect.width, sliderRect.height),
+                        DB_SLIDER);
+   gGain->SetDefaultValue(defPos);
+
+   gGainCaptured = std::make_unique<LWSlider>(nullptr, _("Gain"),
+                                wxPoint(sliderRect.x, sliderRect.y),
+                                wxSize(sliderRect.width, sliderRect.height),
+                                DB_SLIDER);
+   gGainCaptured->SetDefaultValue(defPos);
+}
+
+LWSlider *WaveTrackControls::PanSlider(
+   CellularPanel &panel, const WaveTrack &wt )
+{
+   auto &controls = TrackControls::Get( wt );
+   auto rect = panel.FindRect( controls );
+   wxRect sliderRect;
+   GetPanRect( rect.GetTopLeft(), sliderRect );
+   return PanSlider( sliderRect, &wt, false,  &panel );
+}
+
+LWSlider * WaveTrackControls::PanSlider
+(const wxRect &sliderRect, const WaveTrack *t, bool captured, wxWindow *pParent)
+{
+   static std::once_flag flag;
+   std::call_once( flag, [] {
+      wxCommandEvent dummy;
+      ReCreatePanSlider( dummy );
+      wxTheApp->Bind(EVT_THEME_CHANGE, ReCreatePanSlider);
+   } );
+
+   wxPoint pos = sliderRect.GetPosition();
+   float pan = t ? t->GetPan() : 0.0;
+
+   gPan->Move(pos);
+   gPan->Set(pan);
+   gPanCaptured->Move(pos);
+   gPanCaptured->Set(pan);
+
+   auto slider = (captured ? gPanCaptured : gPan).get();
+   slider->SetParent( pParent ? pParent :
+      FindProjectFrame( ::GetActiveProject() ) );
+   return slider;
+}
+
+void WaveTrackControls::ReCreatePanSlider( wxEvent &event )
+{
+   event.Skip();
+
+   const wxPoint point{ 0, 0 };
+   wxRect sliderRect;
+   GetPanRect(point, sliderRect);
+
+   float defPos = 0.0;
+   /* i18n-hint: Title of the Pan slider, used to move the sound left or right */
+   gPan = std::make_unique<LWSlider>(nullptr, _("Pan"),
+                       wxPoint(sliderRect.x, sliderRect.y),
+                       wxSize(sliderRect.width, sliderRect.height),
+                       PAN_SLIDER);
+   gPan->SetDefaultValue(defPos);
+
+   gPanCaptured = std::make_unique<LWSlider>(nullptr, _("Pan"),
+                               wxPoint(sliderRect.x, sliderRect.y),
+                               wxSize(sliderRect.width, sliderRect.height),
+                               PAN_SLIDER);
+   gPanCaptured->SetDefaultValue(defPos);
+}
+
+using DoGetWaveTrackControls = DoGetControls::Override< WaveTrack >;
+template<> template<> auto DoGetWaveTrackControls::Implementation() -> Function {
+   return [](WaveTrack &track) {
+      return std::make_shared<WaveTrackControls>( track.SharedPointer() );
+   };
+}
+static DoGetWaveTrackControls registerDoGetWaveTrackControls;
+
+using GetDefaultWaveTrackHeight = GetDefaultTrackHeight::Override< WaveTrack >;
+template<> template<>
+auto GetDefaultWaveTrackHeight::Implementation() -> Function {
+   return [](WaveTrack &) {
+      return WaveTrackControls::DefaultWaveTrackHeight();
+   };
+}
+static GetDefaultWaveTrackHeight registerGetDefaultWaveTrackHeight;

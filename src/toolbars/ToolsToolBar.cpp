@@ -18,9 +18,7 @@
   This class, which is a child of Toolbar, creates the
   window containing the tool selection (ibeam, envelope,
   move, zoom). The window can be embedded within a
-  normal project window, or within a ToolbarFrame that is
-  managed by a global ToolBarStub called
-  gToolsToolBarStub.
+  normal project window, or within a ToolBarFrame.
 
   All of the controls in this window were custom-written for
   Audacity - they are not native controls on any platform -
@@ -34,9 +32,12 @@
 
 #include "../Audacity.h"
 #include "ToolsToolBar.h"
+#include "ToolManager.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
+
+#include <wx/setup.h> // for wxUSE_* macros
 
 #ifndef WX_PRECOMP
 #include <wx/defs.h>
@@ -46,16 +47,13 @@
 #endif
 #include <wx/tooltip.h>
 
-#include "MeterToolBar.h"
-
 #include "../Prefs.h"
 #include "../AllThemeResources.h"
 #include "../ImageManipulation.h"
 #include "../Project.h"
+#include "../ProjectSettings.h"
+#include "../ProjectWindow.h"
 #include "../tracks/ui/Scrubbing.h"
-#include "../Theme.h"
-
-#include "../Experimental.h"
 
 #include "../widgets/AButton.h"
 
@@ -67,16 +65,18 @@ IMPLEMENT_CLASS(ToolsToolBar, ToolBar);
 ////////////////////////////////////////////////////////////
 
 BEGIN_EVENT_TABLE(ToolsToolBar, ToolBar)
-   EVT_COMMAND_RANGE(firstTool+FirstToolID,
-                     lastTool+FirstToolID,
+   EVT_COMMAND_RANGE(ToolCodes::firstTool + FirstToolID,
+                     ToolCodes::lastTool + FirstToolID,
                      wxEVT_COMMAND_BUTTON_CLICKED,
                      ToolsToolBar::OnTool)
 END_EVENT_TABLE()
 
 //Standard constructor
-ToolsToolBar::ToolsToolBar()
-: ToolBar(ToolsBarID, _("Tools"), wxT("Tools"))
+ToolsToolBar::ToolsToolBar( AudacityProject &project )
+: ToolBar(project, ToolsBarID, _("Tools"), wxT("Tools"))
 {
+   using namespace ToolCodes;
+
    //Read the following wxASSERTs as documentating a design decision
    wxASSERT( selectTool   == selectTool   - firstTool );
    wxASSERT( envelopeTool == envelopeTool - firstTool );
@@ -96,6 +96,19 @@ ToolsToolBar::ToolsToolBar()
 
 ToolsToolBar::~ToolsToolBar()
 {
+   static_assert( ToolsToolBar::numTools == ToolCodes::numTools,
+      "mismatch in number of tools" );
+}
+
+ToolsToolBar &ToolsToolBar::Get( AudacityProject &project )
+{
+   auto &toolManager = ToolManager::Get( project );
+   return *static_cast<ToolsToolBar*>( toolManager.GetToolBar(ToolsBarID) );
+}
+
+const ToolsToolBar &ToolsToolBar::Get( const AudacityProject &project )
+{
+   return Get( const_cast<AudacityProject&>( project )) ;
 }
 
 void ToolsToolBar::RegenerateTooltips()
@@ -124,9 +137,11 @@ void ToolsToolBar::RegenerateTooltips()
 
    #if wxUSE_TOOLTIPS
 
+   using namespace ToolCodes;
+
    static const struct Entry {
       int tool;
-      wxString commandName;
+      CommandID commandName;
       wxString untranslatedLabel;
    } table[] = {
       { selectTool,   wxT("SelectTool"),    XO("Selection Tool")  },
@@ -140,7 +155,8 @@ void ToolsToolBar::RegenerateTooltips()
    for (const auto &entry : table) {
       TranslatedInternalString command{
          entry.commandName, wxGetTranslation(entry.untranslatedLabel) };
-      ToolBar::SetButtonToolTip( *mTool[entry.tool], &command, 1u );
+      ToolBar::SetButtonToolTip( mProject,
+         *mTool[entry.tool], &command, 1u );
    }
 
    #endif
@@ -181,6 +197,7 @@ void ToolsToolBar::Populate()
    Add(mToolSizer = safenew wxGridSizer(2, 3, 1, 1));
 
    /* Tools */
+   using namespace ToolCodes;
    mTool[ selectTool   ] = MakeTool( this, bmpIBeam, selectTool, _("Selection Tool") );
    mTool[ envelopeTool ] = MakeTool( this, bmpEnvelope, envelopeTool, _("Envelope Tool") );
    mTool[ drawTool     ] = MakeTool( this, bmpDraw, drawTool, _("Draw Tool") );
@@ -208,6 +225,7 @@ void ToolsToolBar::SetCurrentTool(int tool)
    //In multi-mode the current tool is shown by the
    //cursor icon.  The buttons are not updated.
 
+   using namespace ToolCodes;
    bool leavingMulticlipMode =
       IsDown(multiTool) && tool != multiTool;
 
@@ -219,17 +237,17 @@ void ToolsToolBar::SetCurrentTool(int tool)
       mCurrentTool=tool;
       mTool[mCurrentTool]->PushDown();
    }
-   //JKC: ANSWER-ME: Why is this RedrawAllProjects() line required?
+   //JKC: ANSWER-ME: Why is this required?
    //msmeyer: I think it isn't, we leave it out for 1.3.1 (beta), and
    // we'll see if anyone complains.
-   // RedrawAllProjects();
-
-   //msmeyer: But we instruct the projects to handle the cursor shape again
-   RefreshCursorForAllProjects();
+   //for ( auto pProject : AllProjects{} )
+   //   ProjectWindow::Get( *pProject ).RedrawProject();
 
    gPrefs->Write(wxT("/GUI/ToolBars/Tools/MultiToolActive"),
                  IsDown(multiTool));
    gPrefs->Flush();
+
+   ProjectSettings::Get( mProject ).SetTool( mCurrentTool );
 }
 
 bool ToolsToolBar::IsDown(int tool) const
@@ -241,6 +259,7 @@ int ToolsToolBar::GetDownTool()
 {
    int tool;
 
+   using namespace ToolCodes;
    for (tool = firstTool; tool <= lastTool; tool++)
       if (IsDown(tool))
          return tool;
@@ -250,6 +269,7 @@ int ToolsToolBar::GetDownTool()
 
 void ToolsToolBar::OnTool(wxCommandEvent & evt)
 {
+   using namespace ToolCodes;
    mCurrentTool = evt.GetId() - firstTool - FirstToolID;
    for (int i = 0; i < numTools; i++)
       if (i == mCurrentTool)
@@ -257,9 +277,23 @@ void ToolsToolBar::OnTool(wxCommandEvent & evt)
       else
          mTool[i]->PopUp();
 
-   RedrawAllProjects();
+   for ( auto pProject : AllProjects{} )
+      ProjectWindow::Get( *pProject ).RedrawProject();
 
    gPrefs->Write(wxT("/GUI/ToolBars/Tools/MultiToolActive"),
                  IsDown(multiTool));
    gPrefs->Flush();
+
+   ProjectSettings::Get( mProject ).SetTool( mCurrentTool );
 }
+
+void ToolsToolBar::Create(wxWindow * parent)
+{
+   ToolBar::Create(parent);
+   UpdatePrefs();
+}
+
+static RegisteredToolbarFactory factory{ ToolsBarID,
+   []( AudacityProject &project ){
+      return ToolBar::Holder{ safenew ToolsToolBar{ project } }; }
+};

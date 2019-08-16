@@ -13,27 +13,28 @@
 #define __AUDACITY_WAVECLIP__
 
 #include "Audacity.h"
-#include "MemoryX.h"
+
 #include "SampleFormat.h"
-#include "widgets/ProgressDialog.h"
 #include "ondemand/ODTaskThread.h"
 #include "xml/XMLTagHandler.h"
 
-#include "Experimental.h"
 #include "RealFFTf.h"
 
-#include <wx/gdicmn.h>
 #include <wx/longlong.h>
 
 #include <vector>
 
 class BlockArray;
+class BlockFile;
+using BlockFilePtr = std::shared_ptr<BlockFile>;
 class DirManager;
 class Envelope;
+class ProgressDialog;
 class Sequence;
 class SpectrogramSettings;
 class WaveCache;
 class WaveTrackCache;
+class wxFileNameWrapper;
 
 class SpecCache {
 public:
@@ -121,10 +122,6 @@ class WaveClip;
 using WaveClipHolder = std::shared_ptr< WaveClip >;
 using WaveClipHolders = std::vector < WaveClipHolder >;
 using WaveClipConstHolders = std::vector < std::shared_ptr< const WaveClip > >;
-
-// Temporary arrays of mere pointers
-using WaveClipPointers = std::vector < WaveClip* >;
-using WaveClipConstPointers = std::vector < const WaveClip* >;
 
 // A bundle of arrays needed for drawing waveforms.  The object may or may not
 // own the storage for those arrays.  If it does, it destroys them.
@@ -243,11 +240,13 @@ public:
    Envelope* GetEnvelope() { return mEnvelope.get(); }
    const Envelope* GetEnvelope() const { return mEnvelope.get(); }
    BlockArray* GetSequenceBlockArray();
+   const BlockArray* GetSequenceBlockArray() const;
 
    // Get low-level access to the sequence. Whenever possible, don't use this,
    // but use more high-level functions inside WaveClip (or add them if you
    // think they are useful for general use)
    Sequence* GetSequence() { return mSequence.get(); }
+   const Sequence* GetSequence() const { return mSequence.get(); }
 
    /** WaveTrack calls this whenever data in the wave clip changes. It is
     * called automatically when WaveClip has a chance to know that something
@@ -286,11 +285,9 @@ public:
    /// Flush must be called after last Append
    void Flush();
 
-   void AppendAlias(const wxString &fName, sampleCount start,
-                    size_t len, int channel,bool useOD);
-
-   void AppendCoded(const wxString &fName, sampleCount start,
-                            size_t len, int channel, int decodeType);
+   using BlockFileFactory =
+      std::function< BlockFilePtr( wxFileNameWrapper, size_t /* len */ ) >;
+   void AppendBlockFile( const BlockFileFactory &factory, size_t len);
 
    /// This name is consistent with WaveTrack::Clear. It performs a "Cut"
    /// operation (but without putting the cutted audio to the clipboard)

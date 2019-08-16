@@ -13,29 +13,16 @@ Paul Licameli split from TrackPanel.cpp
 
 #include "../../../ui/TrackVRulerControls.h"
 
-class WaveTrackVZoomHandle;
+class Ruler;
+class WaveTrack;
 
-class WaveTrackVRulerControls final : public TrackVRulerControls
+namespace WaveTrackVRulerControls
 {
-   WaveTrackVRulerControls(const WaveTrackVRulerControls&) = delete;
-   WaveTrackVRulerControls &operator=(const WaveTrackVRulerControls&) = delete;
+   Ruler &ScratchRuler();
 
-public:
-   explicit
-   WaveTrackVRulerControls( std::shared_ptr<Track> pTrack )
-      : TrackVRulerControls( pTrack ) {}
-   ~WaveTrackVRulerControls();
-
-   std::vector<UIHandlePtr> HitTest
-      (const TrackPanelMouseState &state,
-       const AudacityProject *) override;
-
-   unsigned HandleWheelRotation
-      (const TrackPanelMouseEvent &event,
-       AudacityProject *pProject) override;
-   void DoZoomPreset( int i);
-private:
-   std::weak_ptr<WaveTrackVZoomHandle> mVZoomHandle;
+   void DoDraw( TrackVRulerControls &controls,
+      TrackPanelDrawingContext &context,
+      const wxRect &rect, unsigned iPass );
 };
 
 #endif

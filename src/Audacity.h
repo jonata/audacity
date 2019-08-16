@@ -62,7 +62,7 @@
 // Increment as appropriate every time we release a NEW version.
 #define AUDACITY_VERSION   2
 #define AUDACITY_RELEASE   3
-#define AUDACITY_REVISION  1
+#define AUDACITY_REVISION  3
 #define AUDACITY_MODLEVEL  0
 
 #if defined(IS_BETA)
@@ -108,9 +108,6 @@
 #define AUDACITY_FILE_FORMAT_VERSION "1.3.0"
 
 class wxWindow;
-
-void QuitAudacity(bool bForce);
-void QuitAudacity();
 
 // Please try to support unlimited path length instead of using PLATFORM_MAX_PATH!
 // Define one constant for maximum path value, so we don't have to do

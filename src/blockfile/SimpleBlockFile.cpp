@@ -66,14 +66,12 @@ to get its definition, rather than rolling our own.
 #include <wx/utils.h>
 #include <wx/log.h>
 
-#include "../FileException.h"
+#include "../DirManager.h"
 #include "../Prefs.h"
 
 #include "../FileFormats.h"
 
 #include "sndfile.h"
-#include "../Internat.h"
-#include "../MemoryX.h"
 
 
 static wxUint32 SwapUintEndianess(wxUint32 in)
@@ -435,7 +433,7 @@ void SimpleBlockFile::SaveXML(XMLWriter &xmlFile)
 
 // BuildFromXML methods should always return a BlockFile, not NULL,
 // even if the result is flawed (e.g., refers to nonexistent file),
-// as testing will be done in DirManager::ProjectFSCK().
+// as testing will be done in ProjectFSCK().
 /// static
 BlockFilePtr SimpleBlockFile::BuildFromXML(DirManager &dm, const wxChar **attrs)
 {
@@ -456,7 +454,7 @@ BlockFilePtr SimpleBlockFile::BuildFromXML(DirManager &dm, const wxChar **attrs)
       if (!wxStricmp(attr, wxT("filename")) &&
             // Can't use XMLValueChecker::IsGoodFileName here, but do part of its test.
             XMLValueChecker::IsGoodFileString(strValue) &&
-            (strValue.Length() + 1 + dm.GetProjectDataDir().Length() <= PLATFORM_MAX_PATH))
+            (strValue.length() + 1 + dm.GetProjectDataDir().length() <= PLATFORM_MAX_PATH))
       {
          if (!dm.AssignFile(fileName, strValue, false))
             // Make sure fileName is back to uninitialized state so we can detect problem later.
@@ -612,3 +610,10 @@ bool SimpleBlockFile::GetCache()
    return false;
 #endif
 }
+
+static DirManager::RegisteredBlockFileDeserializer sRegistration {
+   "simpleblockfile",
+   []( DirManager &dm, const wxChar **attrs ){
+      return SimpleBlockFile::BuildFromXML( dm, attrs );
+   }
+};

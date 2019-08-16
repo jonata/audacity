@@ -11,7 +11,6 @@
 #ifndef __AUDACITY_LEGACYALIASBLOCKFILE__
 #define __AUDACITY_LEGACYALIASBLOCKFILE__
 
-#include "../BlockFile.h"
 #include "PCMAliasBlockFile.h"
 
 /// An AliasBlockFile that references uncompressed data in an existing file
@@ -35,7 +34,7 @@ class LegacyAliasBlockFile final : public PCMAliasBlockFile
    BlockFilePtr Copy(wxFileNameWrapper &&fileName) override;
    void Recover() override;
 
-   static BlockFilePtr BuildFromXML(const wxString &projDir, const wxChar **attrs);
+   static BlockFilePtr BuildFromXML(const FilePath &projDir, const wxChar **attrs);
 };
 
 #endif

@@ -27,8 +27,8 @@
 *//**********************************************************************/
 
 #include "../Audacity.h"
+#include "ProgressDialog.h"
 
-#include "../MemoryX.h"
 #include <algorithm>
 
 #include <wx/defs.h>
@@ -39,6 +39,7 @@
 #include <wx/dialog.h>
 #include <wx/event.h>
 #include <wx/evtloop.h>
+#include <wx/gauge.h>
 #include <wx/frame.h>
 #include <wx/intl.h>
 #include <wx/msgdlg.h>
@@ -47,11 +48,9 @@
 #include <wx/sound.h>
 #include <wx/stopwatch.h>
 #include <wx/window.h>
+#include <wx/stattext.h>
 
-#include "ProgressDialog.h"
-#include "ErrorDialog.h"
 #include "../Prefs.h"
-#include "../Internat.h"
 
 // This really should be a Preferences setting
 static const unsigned char beep[] =
@@ -1000,9 +999,9 @@ ProgressDialog::ProgressDialog()
 }
 
 ProgressDialog::ProgressDialog(const wxString & title,
-                               const wxString & message /* = wxEmptyString*/,
+                               const wxString & message /* = {}*/,
                                int flags /* = pdlgDefaultFlags */,
-                               const wxString & sRemainingLabelText /* = wxEmptyString */)
+                               const wxString & sRemainingLabelText /* = {} */)
 :  wxDialogWrapper()
 {
    Create(title, message, flags, sRemainingLabelText);
@@ -1011,7 +1010,7 @@ ProgressDialog::ProgressDialog(const wxString & title,
 ProgressDialog::ProgressDialog(const wxString & title,
                                const MessageTable &columns,
                                int flags /* = pdlgDefaultFlags */,
-                               const wxString & sRemainingLabelText /* = wxEmptyString */)
+                               const wxString & sRemainingLabelText /* = {} */)
 :  wxDialogWrapper()
 {
    Create(title, columns, flags, sRemainingLabelText);
@@ -1132,9 +1131,9 @@ void ProgressDialog::AddMessageAsColumn(wxBoxSizer * pSizer,
 }
 
 bool ProgressDialog::Create(const wxString & title,
-                            const wxString & message /* = wxEmptyString */,
+                            const wxString & message /* = {} */,
                             int flags /* = pdlgDefaultFlags */,
-                            const wxString & sRemainingLabelText /* = wxEmptyString */)
+                            const wxString & sRemainingLabelText /* = {} */)
 {
    MessageTable columns(1);
    columns.back().push_back(message);
@@ -1153,7 +1152,7 @@ bool ProgressDialog::Create(const wxString & title,
 bool ProgressDialog::Create(const wxString & title,
                             const MessageTable & columns,
                             int flags /* = pdlgDefaultFlags */,
-                            const wxString & sRemainingLabelText /* = wxEmptyString */)
+                            const wxString & sRemainingLabelText /* = {} */)
 {
    Init();
 
@@ -1240,7 +1239,7 @@ bool ProgressDialog::Create(const wxString & title,
 
          // Customised "Remaining" label text
          wxString sRemainingText = sRemainingLabelText;
-         if (sRemainingText == wxEmptyString) {
+         if (sRemainingText.empty()) {
             sRemainingText = _("Remaining Time:");
          }
 
@@ -1492,7 +1491,7 @@ ProgressResult ProgressDialog::Update(double current, double total, const wxStri
 //
 void ProgressDialog::SetMessage(const wxString & message)
 {
-   if (!message.IsEmpty())
+   if (!message.empty())
    {
       mMessage->SetLabel(message);
 
@@ -1591,7 +1590,7 @@ void ProgressDialog::Beep() const
       wxBusyCursor busy;
       wxSound s;
 
-      if (name.IsEmpty())
+      if (name.empty())
       {
          s.Create(sizeof(beep), beep);
       }
@@ -1638,7 +1637,7 @@ TimerProgressDialog::TimerProgressDialog(const wxLongLong_t duration,
                                          const wxString & title,
                                          const MessageTable & columns,
                                          int flags /* = pdlgDefaultFlags */,
-                                         const wxString & sRemainingLabelText /* = wxEmptyString */)
+                                         const wxString & sRemainingLabelText /* = {} */)
 : ProgressDialog(title, columns, flags, sRemainingLabelText)
 {
    mDuration = duration;

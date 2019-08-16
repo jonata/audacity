@@ -10,17 +10,17 @@ Paul Licameli split from TrackPanel.cpp
 
 #include "../../Audacity.h"
 #include "TrackSelectHandle.h"
-#include "TrackControls.h"
-#include "../../Experimental.h"
-#include "../../HitTestResult.h"
-#include "../../MixerBoard.h"
+
+#include "TrackView.h"
 #include "../../Project.h"
+#include "../../ProjectAudioIO.h"
+#include "../../ProjectHistory.h"
 #include "../../RefreshCode.h"
+#include "../../SelectUtilities.h"
 #include "../../TrackPanel.h"
 #include "../../TrackPanelMouseEvent.h"
 #include "../../WaveTrack.h"
 
-#include "../../MemoryX.h"
 #include <wx/cursor.h>
 #include <wx/translation.h>
 
@@ -86,7 +86,7 @@ UIHandle::Result TrackSelectHandle::Click
    const auto pTrack = mpTrack;
    if (!pTrack)
       return Cancelled;
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
 
    // DM: If they weren't clicking on a particular part of a track label,
    //  deselect other tracks and select this one.
@@ -100,7 +100,7 @@ UIHandle::Result TrackSelectHandle::Click
       CalculateRearrangingThresholds(event);
    }
 
-   GetMenuCommandHandler(*pProject).HandleListSelection(*pProject,
+   SelectUtilities::DoListSelection(*pProject,
       pTrack.get(), event.ShiftDown(), event.ControlDown(), !unsafe);
 
    mClicked = true;
@@ -115,28 +115,21 @@ UIHandle::Result TrackSelectHandle::Drag
 
    const wxMouseEvent &event = evt.event;
 
-   TrackList *const tracks = pProject->GetTracks();
+   auto &tracks = TrackList::Get( *pProject );
 
    // probably harmless during play?  However, we do disallow the click, so check this too.
-   bool unsafe = pProject->IsAudioActive();
+   bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if (unsafe)
       return result;
 
-   MixerBoard* pMixerBoard = pProject->GetMixerBoard(); // Update mixer board, too.
    if (event.m_y < mMoveUpThreshold || event.m_y < 0) {
-      tracks->MoveUp(mpTrack.get());
+      tracks.MoveUp(mpTrack.get());
       --mRearrangeCount;
-      if (pMixerBoard)
-         if(auto pPlayable = dynamic_cast< const PlayableTrack* >( mpTrack.get() ))
-            pMixerBoard->MoveTrackCluster(pPlayable, true /* up */);
    }
    else if ( event.m_y > mMoveDownThreshold
       || event.m_y > evt.whole.GetHeight() ) {
-      tracks->MoveDown(mpTrack.get());
+      tracks.MoveDown(mpTrack.get());
       ++mRearrangeCount;
-      if (pMixerBoard)
-         if(auto pPlayable = dynamic_cast< const PlayableTrack* >( mpTrack.get() ))
-            pMixerBoard->MoveTrackCluster(pPlayable, false /* down */);
    }
    else
       return result;
@@ -152,14 +145,15 @@ UIHandle::Result TrackSelectHandle::Drag
 HitTestPreview TrackSelectHandle::Preview
 (const TrackPanelMouseState &, const AudacityProject *project)
 {
-   const auto trackCount = project->GetTrackPanel()->GetTrackCount();
+   const auto trackCount = TrackList::Get( *project ).Leaders().size();
    auto message = Message(trackCount);
    if (mClicked) {
       static auto disabledCursor =
          ::MakeCursor(wxCURSOR_NO_ENTRY, DisabledCursorXpm, 16, 16);
       static wxCursor rearrangeCursor{ wxCURSOR_HAND };
 
-      const bool unsafe = GetActiveProject()->IsAudioActive();
+      const bool unsafe =
+         ProjectAudioIO::Get( *GetActiveProject() ).IsAudioActive();
       return {
          message,
          (unsafe
@@ -187,7 +181,7 @@ UIHandle::Result TrackSelectHandle::Release
    wxASSERT( mpTrack );
    if (mRearrangeCount != 0) {
       AudacityProject *const project = ::GetActiveProject();
-      project->PushState(
+      ProjectHistory::Get( *project ).PushState(
          wxString::Format(
             /* i18n-hint: will substitute name of track for %s */
             ( mRearrangeCount < 0 ? _("Moved '%s' up") : _("Moved '%s' down") ),
@@ -206,7 +200,7 @@ UIHandle::Result TrackSelectHandle::Release
 
 UIHandle::Result TrackSelectHandle::Cancel(AudacityProject *pProject)
 {
-   pProject->RollbackState();
+   ProjectHistory::Get( *pProject ).RollbackState();
    // Bug 1677
    mpTrack.reset();
    return RefreshCode::RefreshAll;
@@ -221,21 +215,21 @@ void TrackSelectHandle::CalculateRearrangingThresholds(const wxMouseEvent & even
    //   user.
 
    AudacityProject *const project = ::GetActiveProject();
-   TrackList *const tracks = project->GetTracks();
+   auto &tracks = TrackList::Get( *project );
 
-   if (tracks->CanMoveUp(mpTrack.get()))
+   if (tracks.CanMoveUp(mpTrack.get()))
       mMoveUpThreshold =
          event.m_y -
-            tracks->GetGroupHeight(
-               * -- tracks->FindLeader( mpTrack.get() ) );
+            TrackView::GetChannelGroupHeight(
+               * -- tracks.FindLeader( mpTrack.get() ) );
    else
       mMoveUpThreshold = INT_MIN;
 
-   if (tracks->CanMoveDown(mpTrack.get()))
+   if (tracks.CanMoveDown(mpTrack.get()))
       mMoveDownThreshold =
          event.m_y +
-            tracks->GetGroupHeight(
-               * ++ tracks->FindLeader( mpTrack.get() ) );
+            TrackView::GetChannelGroupHeight(
+               * ++ tracks.FindLeader( mpTrack.get() ) );
    else
       mMoveDownThreshold = INT_MAX;
 }

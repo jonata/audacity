@@ -11,14 +11,10 @@ Paul Licameli
 #include "../../Audacity.h"
 #include "ButtonHandle.h"
 
-#include "../../MemoryX.h"
-
 #include "../../HitTestResult.h"
-#include "../../Project.h"
 #include "../../RefreshCode.h"
 #include "../../Track.h"
 #include "../../TrackPanelMouseEvent.h"
-#include "../ui/TrackControls.h"
 
 ButtonHandle::ButtonHandle
 ( const std::shared_ptr<Track> &pTrack, const wxRect &rect )
@@ -40,7 +36,7 @@ UIHandle::Result ButtonHandle::Click
 (const TrackPanelMouseEvent &evt, AudacityProject *pProject)
 {
    using namespace RefreshCode;
-   auto pTrack = pProject->GetTracks()->Lock(mpTrack);
+   auto pTrack = TrackList::Get( *pProject ).Lock(mpTrack);
    if ( !pTrack )
       return Cancelled;
 
@@ -64,7 +60,7 @@ UIHandle::Result ButtonHandle::Drag
 {
    const wxMouseEvent &event = evt.event;
    using namespace RefreshCode;
-   auto pTrack = pProject->GetTracks()->Lock(mpTrack);
+   auto pTrack = TrackList::Get( *pProject ).Lock(mpTrack);
    if (!pTrack)
       return Cancelled;
 
@@ -87,7 +83,7 @@ UIHandle::Result ButtonHandle::Release
  wxWindow *pParent)
 {
    using namespace RefreshCode;
-   auto pTrack = pProject->GetTracks()->Lock(mpTrack);
+   auto pTrack = TrackList::Get( *pProject ).Lock(mpTrack);
    if (!pTrack)
       return Cancelled;
 

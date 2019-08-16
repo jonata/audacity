@@ -8,7 +8,6 @@
 
 #include "../Audacity.h"
 #include "NotYetAvailableException.h"
-#include "../Internat.h"
 
 NotYetAvailableException::~NotYetAvailableException()
 {

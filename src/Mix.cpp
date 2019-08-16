@@ -31,14 +31,14 @@
 #include <wx/timer.h>
 #include <wx/intl.h>
 
+#include "Envelope.h"
 #include "WaveTrack.h"
-#include "DirManager.h"
-#include "Internat.h"
 #include "Prefs.h"
-#include "Project.h"
 #include "Resample.h"
 #include "TimeTrack.h"
 #include "float_cast.h"
+
+#include "widgets/ProgressDialog.h"
 
 //TODO-MB: wouldn't it make more sense to DELETE the time track after 'mix and render'?
 void MixAndRender(TrackList *tracks, TrackFactory *trackFactory,
@@ -85,7 +85,7 @@ void MixAndRender(TrackList *tracks, TrackFactory *trackFactory,
    WaveTrackConstArray waveArray;
 
    for(auto wt : trackRange) {
-      waveArray.push_back( Track::Pointer< const WaveTrack >( wt ) );
+      waveArray.push_back( wt->SharedPointer< const WaveTrack >() );
       tstart = wt->GetStartTime();
       tend = wt->GetEndTime();
       if (tend > mixEndTime)
@@ -144,10 +144,11 @@ void MixAndRender(TrackList *tracks, TrackFactory *trackFactory,
       endTime = mixEndTime;
    }
 
+   auto timeTrack = *tracks->Any<TimeTrack>().begin();
    Mixer mixer(waveArray,
       // Throw to abort mix-and-render if read fails:
       true,
-      Mixer::WarpOptions(tracks->GetTimeTrack()),
+      Mixer::WarpOptions(timeTrack ? timeTrack->GetEnvelope() : nullptr),
       startTime, endTime, mono ? 1 : 2, maxBlockLen, false,
       rate, format);
 
@@ -188,8 +189,7 @@ void MixAndRender(TrackList *tracks, TrackFactory *trackFactory,
       return;
    }
    else {
-      uLeft = std::move(mixLeft),
-         uRight = std::move(mixRight);
+      uLeft = mixLeft, uRight = mixRight;
 #if 0
    int elapsedMS = wxGetElapsedTime();
    double elapsedTime = elapsedMS * 0.001;
@@ -206,7 +206,7 @@ void MixAndRender(TrackList *tracks, TrackFactory *trackFactory,
 }
 
 Mixer::WarpOptions::WarpOptions(double min, double max)
-   : timeTrack(0), minSpeed(min), maxSpeed(max)
+   : minSpeed(min), maxSpeed(max)
 {
    if (minSpeed < 0)
    {
@@ -255,7 +255,7 @@ Mixer::Mixer(const WaveTrackConstArray &inputTracks,
       mInputTrack[i].SetTrack(inputTracks[i]);
       mSamplePos[i] = inputTracks[i]->TimeToLongSamples(startTime);
    }
-   mTimeTrack = warpOptions.timeTrack;
+   mEnvelope = warpOptions.envelope;
    mT0 = startTime;
    mT1 = stopTime;
    mTime = startTime;
@@ -303,11 +303,11 @@ Mixer::Mixer(const WaveTrackConstArray &inputTracks,
    mMaxFactor.resize(mNumInputTracks);
    for (size_t i = 0; i<mNumInputTracks; i++) {
       double factor = (mRate / mInputTrack[i].GetTrack()->GetRate());
-      if (mTimeTrack) {
+      if (mEnvelope) {
          // variable rate resampling
          mbVariableRates = true;
-         mMinFactor[i] = factor / mTimeTrack->GetRangeUpper();
-         mMaxFactor[i] = factor / mTimeTrack->GetRangeLower();
+         mMinFactor[i] = factor / mEnvelope->GetRangeUpper();
+         mMaxFactor[i] = factor / mEnvelope->GetRangeLower();
       }
       else if (warpOptions.minSpeed > 0.0 && warpOptions.maxSpeed > 0.0) {
          // variable rate resampling
@@ -382,12 +382,32 @@ void MixBuffers(unsigned numChannels, int *channelFlags, float *gains,
    }
 }
 
+namespace {
+   //Note: The meaning of this function has changed (December 2012)
+   //Previously this function did something that was close to the opposite (but not entirely accurate).
+   /** @brief Compute the integral warp factor between two non-warped time points
+    *
+    * Calculate the relative length increase of the chosen segment from the original sound.
+    * So if this time track has a low value (i.e. makes the sound slower), the NEW warped
+    * sound will be *longer* than the original sound, so the return value of this function
+    * is larger.
+    * @param t0 The starting time to calculate from
+    * @param t1 The ending time to calculate to
+    * @return The relative length increase of the chosen segment from the original sound.
+    */
+double ComputeWarpFactor(const Envelope &env, double t0, double t1)
+{
+   return env.AverageOfInverse(t0, t1);
+}
+
+}
+
 size_t Mixer::MixVariableRates(int *channelFlags, WaveTrackCache &cache,
                                     sampleCount *pos, float *queue,
                                     int *queueStart, int *queueLen,
                                     Resample * pResample)
 {
-   const WaveTrack *const track = cache.GetTrack();
+   const WaveTrack *const track = cache.GetTrack().get();
    const double trackRate = track->GetRate();
    const double initialWarp = mRate / mSpeed / trackRate;
    const double tstep = 1.0 / trackRate;
@@ -476,7 +496,7 @@ size_t Mixer::MixVariableRates(int *channelFlags, WaveTrackCache &cache,
       }
 
       double factor = initialWarp;
-      if (mTimeTrack)
+      if (mEnvelope)
       {
          //TODO-MB: The end time is wrong when the resampler doesn't use all input samples,
          //         as a result of this the warp factor may be slightly wrong, so AudioIO will stop too soon
@@ -484,11 +504,11 @@ size_t Mixer::MixVariableRates(int *channelFlags, WaveTrackCache &cache,
          //         without changing the way the resampler works, because the number of input samples that will be used
          //         is unpredictable. Maybe it can be compensated later though.
          if (backwards)
-            factor *= mTimeTrack->ComputeWarpFactor
-               (t - (double)thisProcessLen / trackRate + tstep, t + tstep);
+            factor *= ComputeWarpFactor( *mEnvelope,
+               t - (double)thisProcessLen / trackRate + tstep, t + tstep);
          else
-            factor *= mTimeTrack->ComputeWarpFactor
-               (t, t + (double)thisProcessLen / trackRate);
+            factor *= ComputeWarpFactor( *mEnvelope,
+               t, t + (double)thisProcessLen / trackRate);
       }
 
       auto results = pResample->Process(factor,
@@ -532,7 +552,7 @@ size_t Mixer::MixVariableRates(int *channelFlags, WaveTrackCache &cache,
 size_t Mixer::MixSameRate(int *channelFlags, WaveTrackCache &cache,
                                sampleCount *pos)
 {
-   const WaveTrack *const track = cache.GetTrack();
+   const WaveTrack *const track = cache.GetTrack().get();
    const double t = ( *pos ).as_double() / track->GetRate();
    const double trackEndTime = track->GetEndTime();
    const double trackStartTime = track->GetStartTime();
@@ -605,7 +625,7 @@ size_t Mixer::Process(size_t maxToProcess)
 
    Clear();
    for(size_t i=0; i<mNumInputTracks; i++) {
-      const WaveTrack *const track = mInputTrack[i].GetTrack();
+      const WaveTrack *const track = mInputTrack[i].GetTrack().get();
       for(size_t j=0; j<mNumChannels; j++)
          channelFlags[j] = 0;
 
@@ -710,7 +730,7 @@ void Mixer::Restart()
    MakeResamplers();
 }
 
-void Mixer::Reposition(double t)
+void Mixer::Reposition(double t, bool bSkipping)
 {
    mTime = t;
    const bool backwards = (mT1 < mT0);
@@ -724,6 +744,13 @@ void Mixer::Reposition(double t)
       mQueueStart[i] = 0;
       mQueueLen[i] = 0;
    }
+
+   // Bug 2025:  libsoxr 0.1.3, first used in Audacity 2.3.0, crashes with
+   // constant rate resampling if you try to reuse the resampler after it has
+   // flushed.  Should that be considered a bug in sox?  This works around it.
+   // (See also bug 1887, and the same work around in Mixer::Restart().)
+   if( bSkipping )
+      MakeResamplers();
 }
 
 void Mixer::SetTimesAndSpeed(double t0, double t1, double speed)

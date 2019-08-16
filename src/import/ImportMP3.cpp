@@ -26,8 +26,7 @@
 
 *//*******************************************************************/
 
-#include "../Audacity.h"
-#include "ImportMP3.h"
+#include "../Audacity.h" // for USE_* macros
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
@@ -39,18 +38,16 @@
 #include <wx/defs.h>
 #include <wx/intl.h>
 
-#include "../AudacityException.h"
 #include "../Prefs.h"
 #include "Import.h"
 #include "ImportPlugin.h"
-#include "../Internat.h"
 #include "../Tags.h"
 #include "../prefs/QualityPrefs.h"
+#include "../widgets/ProgressDialog.h"
 
 #define DESC _("MP3 files")
 
-static const wxChar *exts[] =
-{
+static const auto exts = {
    wxT("mp3"),
    wxT("mp2"),
    wxT("mpa")
@@ -58,14 +55,10 @@ static const wxChar *exts[] =
 
 #ifndef USE_LIBMAD
 
-void GetMP3ImportPlugin(ImportPluginList &importPluginList,
-                        UnusableImportPluginList &unusableImportPluginList)
-{
-   unusableImportPluginList.push_back(
+static Importer::RegisteredUnusableImportPlugin registered{
       std::make_unique<UnusableImportPlugin>
-         (DESC, wxArrayString(WXSIZEOF(exts), exts))
-  );
-}
+         (DESC, FileExtensions( exts.begin(), exts.end() ) )
+};
 
 #else /* USE_LIBMAD */
 
@@ -77,6 +70,12 @@ void GetMP3ImportPlugin(ImportPluginList &importPluginList,
 #include <wx/timer.h>
 #include <wx/intl.h>
 
+#include "../WaveTrack.h"
+
+// PRL:  include these last,
+// and correct some preprocessor namespace pollution from wxWidgets that
+// caused a warning about duplicate definition
+#undef SIZEOF_LONG
 extern "C" {
 #include "mad.h"
 
@@ -84,8 +83,6 @@ extern "C" {
 #include <id3tag.h>
 #endif
 }
-
-#include "../WaveTrack.h"
 
 #define INPUT_BUFFER_SIZE 65535
 #define PROGRESS_SCALING_FACTOR 100000
@@ -110,7 +107,7 @@ class MP3ImportPlugin final : public ImportPlugin
 {
 public:
    MP3ImportPlugin():
-      ImportPlugin(wxArrayString(WXSIZEOF(exts), exts))
+      ImportPlugin( FileExtensions( exts.begin(), exts.end() ) )
    {
    }
 
@@ -118,13 +115,15 @@ public:
 
    wxString GetPluginStringID() override { return wxT("libmad"); }
    wxString GetPluginFormatDescription() override;
-   std::unique_ptr<ImportFileHandle> Open(const wxString &Filename) override;
+   std::unique_ptr<ImportFileHandle> Open(const FilePath &Filename) override;
+
+   unsigned SequenceNumber() const override;
 };
 
 class MP3ImportFileHandle final : public ImportFileHandle
 {
 public:
-   MP3ImportFileHandle(std::unique_ptr<wxFile> &&file, wxString filename):
+   MP3ImportFileHandle(std::unique_ptr<wxFile> &&file, const FilePath &filename):
       ImportFileHandle(filename),
       mFile(std::move(file))
    {
@@ -156,12 +155,6 @@ private:
    mad_decoder mDecoder;
 };
 
-void GetMP3ImportPlugin(ImportPluginList &importPluginList,
-                        UnusableImportPluginList & WXUNUSED(unusableImportPluginList))
-{
-   importPluginList.push_back( std::make_unique<MP3ImportPlugin>() );
-}
-
 /* The MAD callbacks */
 enum mad_flow input_cb(void *_data, struct mad_stream *stream);
 enum mad_flow output_cb(void *_data,
@@ -184,7 +177,7 @@ wxString MP3ImportPlugin::GetPluginFormatDescription()
    return DESC;
 }
 
-std::unique_ptr<ImportFileHandle> MP3ImportPlugin::Open(const wxString &Filename)
+std::unique_ptr<ImportFileHandle> MP3ImportPlugin::Open(const FilePath &Filename)
 {
    auto file = std::make_unique<wxFile>(Filename);
 
@@ -261,6 +254,15 @@ ProgressResult MP3ImportFileHandle::Import(
 
    return privateData.updateResult;
 }
+
+unsigned MP3ImportPlugin::SequenceNumber() const
+{
+   return 40;
+}
+
+static Importer::RegisteredImportPlugin registered{
+   std::make_unique< MP3ImportPlugin >()
+};
 
 MP3ImportFileHandle::~MP3ImportFileHandle()
 {
@@ -378,7 +380,7 @@ void MP3ImportFileHandle::ImportID3(Tags *tags)
          v = UTF8CTOWX(str.get());
       }
 
-      if (!n.IsEmpty() && !v.IsEmpty()) {
+      if (!n.empty() && !v.empty()) {
          tags->SetTag(n, v);
       }
    }

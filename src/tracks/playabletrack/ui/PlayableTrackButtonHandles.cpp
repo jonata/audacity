@@ -11,13 +11,16 @@ Paul Licameli split from TrackPanel.cpp
 #include "../../../Audacity.h"
 #include "PlayableTrackButtonHandles.h"
 
+#include "PlayableTrackControls.h"
 #include "../../../commands/CommandManager.h"
-#include "../../../HitTestResult.h"
 #include "../../../Project.h"
+#include "../../../ProjectSettings.h"
 #include "../../../RefreshCode.h"
 #include "../../../Track.h"
-#include "../../../TrackPanel.h"
+#include "../../../TrackPanelAx.h"
+#include "../../../TrackInfo.h"
 #include "../../../TrackPanelMouseEvent.h"
+#include "../../../TrackUtilities.h"
 
 MuteButtonHandle::MuteButtonHandle
 ( const std::shared_ptr<Track> &pTrack, const wxRect &rect )
@@ -33,7 +36,7 @@ UIHandle::Result MuteButtonHandle::CommitChanges
 {
    auto pTrack = mpTrack.lock();
    if ( dynamic_cast< PlayableTrack* >( pTrack.get() ) )
-      pProject->DoTrackMute(pTrack.get(), event.ShiftDown());
+      TrackUtilities::DoTrackMute(*pProject, pTrack.get(), event.ShiftDown());
 
    return RefreshCode::RefreshNone;
 }
@@ -43,13 +46,13 @@ wxString MuteButtonHandle::Tip(const wxMouseState &) const
    auto name = _("Mute");
    auto project = ::GetActiveProject();
    auto focused =
-      project->GetTrackPanel()->GetFocusedTrack() == GetTrack().get();
+      TrackFocus::Get( *project ).Get() == GetTrack().get();
    if (!focused)
       return name;
 
-   auto commandManager = project->GetCommandManager();
+   auto &commandManager = CommandManager::Get( *project );
    TranslatedInternalString command{ wxT("TrackMute"), name };
-   return commandManager->DescribeCommandsAndShortcuts(&command, 1u);
+   return commandManager.DescribeCommandsAndShortcuts(&command, 1u);
 }
 
 UIHandlePtr MuteButtonHandle::HitTest
@@ -59,8 +62,8 @@ UIHandlePtr MuteButtonHandle::HitTest
 {
    wxRect buttonRect;
    if ( pTrack )
-      TrackInfo::GetMuteSoloRect(rect, buttonRect, false,
-         !pProject->IsSoloNone(), pTrack.get());
+      PlayableTrackControls::GetMuteSoloRect(rect, buttonRect, false,
+         !ProjectSettings::Get( *pProject ).IsSoloNone(), pTrack.get());
    if ( TrackInfo::HideTopItem( rect, buttonRect ) )
       return {};
 
@@ -89,7 +92,7 @@ UIHandle::Result SoloButtonHandle::CommitChanges
 {
    auto pTrack = mpTrack.lock();
    if ( dynamic_cast< PlayableTrack* >( pTrack.get() ) )
-      pProject->DoTrackSolo(pTrack.get(), event.ShiftDown());
+      TrackUtilities::DoTrackSolo(*pProject, pTrack.get(), event.ShiftDown());
 
    return RefreshCode::RefreshNone;
 }
@@ -99,13 +102,13 @@ wxString SoloButtonHandle::Tip(const wxMouseState &) const
    auto name = _("Solo");
    auto project = ::GetActiveProject();
    auto focused =
-      project->GetTrackPanel()->GetFocusedTrack() == GetTrack().get();
+      TrackFocus::Get( *project ).Get() == GetTrack().get();
    if (!focused)
       return name;
 
-   auto commandManager = project->GetCommandManager();
+   auto &commandManager = CommandManager::Get( *project );
    TranslatedInternalString command{ wxT("TrackSolo"), name };
-   return commandManager->DescribeCommandsAndShortcuts( &command, 1u );
+   return commandManager.DescribeCommandsAndShortcuts( &command, 1u );
 }
 
 UIHandlePtr SoloButtonHandle::HitTest
@@ -115,8 +118,8 @@ UIHandlePtr SoloButtonHandle::HitTest
 {
    wxRect buttonRect;
    if ( pTrack )
-      TrackInfo::GetMuteSoloRect(rect, buttonRect, true,
-         !pProject->IsSoloNone(), pTrack.get());
+      PlayableTrackControls::GetMuteSoloRect(rect, buttonRect, true,
+         !ProjectSettings::Get( *pProject ).IsSoloNone(), pTrack.get());
 
    if ( TrackInfo::HideTopItem( rect, buttonRect ) )
       return {};

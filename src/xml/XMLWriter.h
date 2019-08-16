@@ -11,10 +11,11 @@
 #define __AUDACITY_XML_XML_FILE_WRITER__
 
 #include <vector>
-#include <wx/arrstr.h>
-#include <wx/ffile.h>
+#include <wx/ffile.h> // to inherit
 
 #include "../FileException.h"
+
+#include "audacity/Types.h"
 
 ///
 /// XMLWriter
@@ -28,6 +29,12 @@ class AUDACITY_DLL_API XMLWriter /* not final */ {
 
    virtual void StartTag(const wxString &name);
    virtual void EndTag(const wxString &name);
+
+   // nonvirtual pass-through
+   void WriteAttr(const wxString &name, const Identifier &value)
+      // using GET once here, permitting Identifiers in XML,
+      // so no need for it at each WriteAttr call
+      { WriteAttr( name, value.GET() ); }
 
    virtual void WriteAttr(const wxString &name, const wxString &value);
    virtual void WriteAttr(const wxString &name, const wxChar *value);
@@ -78,7 +85,7 @@ class AUDACITY_DLL_API XMLFileWriter final : private wxFFile, public XMLWriter {
    /// The caption is for message boxes to show in case of errors.
    /// Might throw.
    XMLFileWriter
-      ( const wxString &outputPath, const wxString &caption,
+      ( const FilePath &outputPath, const wxString &caption,
         bool keepBackup = false );
 
    virtual ~XMLFileWriter();
@@ -99,7 +106,7 @@ class AUDACITY_DLL_API XMLFileWriter final : private wxFFile, public XMLWriter {
    /// Write to file. Might throw.
    void Write(const wxString &data) override;
 
-   wxString GetBackupName() const { return mBackupName; }
+   FilePath GetBackupName() const { return mBackupName; }
 
  private:
 
@@ -113,9 +120,9 @@ class AUDACITY_DLL_API XMLFileWriter final : private wxFFile, public XMLWriter {
    /// Might throw.
    void CloseWithoutEndingTags(); // for auto-save files
 
-   const wxString mOutputPath;
+   const FilePath mOutputPath;
    const wxString mCaption;
-   wxString mBackupName;
+   FilePath mBackupName;
    const bool mKeepBackup;
 
    wxFFile mBackupFile;

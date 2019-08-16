@@ -17,7 +17,6 @@ It forwards the actual work of doing the commands to the ScreenshotCommand.
 ***********************************************************************/
 
 #include "Screenshot.h"
-#include "MemoryX.h"
 #include "commands/ScreenshotCommand.h"
 #include "commands/CommandTargets.h"
 #include "commands/CommandContext.h"
@@ -32,17 +31,22 @@ It forwards the actual work of doing the commands to the ScreenshotCommand.
 #include <wx/image.h>
 #include <wx/intl.h>
 #include <wx/panel.h>
+#include <wx/sizer.h>
 #include <wx/statusbr.h>
 #include <wx/textctrl.h>
 #include <wx/timer.h>
 #include <wx/tglbtn.h>
 #include <wx/window.h>
 
-#include "AudacityApp.h"
 #include "Project.h"
+#include "ProjectStatus.h"
+#include "ProjectWindow.h"
 #include "Prefs.h"
 #include "toolbars/ToolManager.h"
+#include "tracks/ui/TrackView.h"
+#include "widgets/HelpSystem.h"
 
+#include "ViewInfo.h"
 #include "WaveTrack.h"
 
 class OldStyleCommandType;
@@ -65,6 +69,9 @@ class ScreenFrame final : public wxFrame
    void OnCloseWindow(wxCloseEvent & event);
    void OnUIUpdate(wxUpdateUIEvent & event);
    void OnDirChoose(wxCommandEvent & event);
+   void OnGetURL(wxCommandEvent & event);
+   void OnClose(wxCommandEvent & event );
+
 
    void SizeMainWindow(int w, int h);
    void OnMainWindowSmall(wxCommandEvent & event);
@@ -96,7 +103,7 @@ class ScreenFrame final : public wxFrame
    wxStatusBar *mStatus;
 
    std::unique_ptr<ScreenshotCommand> mCommand;
-   CommandContext mContext;
+   const CommandContext mContext;
 
    DECLARE_EVENT_TABLE()
 };
@@ -113,7 +120,7 @@ ScreenFramePtr mFrame;
 void OpenScreenshotTools()
 {
    if (!mFrame) {
-      auto parent = wxGetApp().GetTopWindow();
+      auto parent = wxTheApp->GetTopWindow();
       if (!parent) {
          wxASSERT(false);
          return;
@@ -219,6 +226,8 @@ enum
 
 BEGIN_EVENT_TABLE(ScreenFrame, wxFrame)
    EVT_CLOSE(ScreenFrame::OnCloseWindow)
+   EVT_BUTTON(wxID_HELP, ScreenFrame::OnGetURL)
+   EVT_BUTTON(wxID_CANCEL, ScreenFrame::OnClose)
 
    EVT_UPDATE_UI(IdCaptureFullScreen,   ScreenFrame::OnUIUpdate)
 
@@ -285,7 +294,7 @@ ScreenFrame::ScreenFrame(wxWindow * parent, wxWindowID id)
    // because we've switched monitor mid play.
    // Bug 383 - Resetting the toolbars is not wanted.
    // Any that are invisible will be amde visible as/when needed.
-   //mContext.GetProject()->GetToolManager()->Reset();
+   //ToolManager::Get( mContext.project ).Reset();
    Center();
 }
 
@@ -337,14 +346,13 @@ void ScreenFrame::PopulateOrExchange(ShuttleGui & S)
             S.Id(IdMainWindowLarge).AddButton(_("Resize Large"));
             /* i18n-hint: Bkgnd is short for background and appears on a small button
              * It is OK to just translate this item as if it said 'Blue' */
-            wxASSERT(p); // To justify safenew
-            mBlue = safenew wxToggleButton(p,
+            mBlue = safenew wxToggleButton(S.GetParent(),
                                        IdToggleBackgroundBlue,
                                        _("Blue Bkgnd"));
             S.AddWindow(mBlue);
             /* i18n-hint: Bkgnd is short for background and appears on a small button
              * It is OK to just translate this item as if it said 'White' */
-            mWhite = safenew wxToggleButton(p,
+            mWhite = safenew wxToggleButton(S.GetParent(),
                                         IdToggleBackgroundWhite,
                                         _("White Bkgnd"));
             S.AddWindow(mWhite);
@@ -369,7 +377,7 @@ void ScreenFrame::PopulateOrExchange(ShuttleGui & S)
          {
             mDelayCheckBox = S.Id(IdDelayCheckBox).AddCheckBox
                (_("Wait 5 seconds and capture frontmost window/dialog"),
-                _("false"));
+                false);
          }
          S.EndHorizontalLay();
       }
@@ -446,6 +454,7 @@ void ScreenFrame::PopulateOrExchange(ShuttleGui & S)
          S.EndHorizontalLay();
       }
       S.EndStatic();
+      S.AddStandardButtons(eCloseButton |eHelpButton);
    }
    S.EndPanel();
 
@@ -471,7 +480,7 @@ void ScreenFrame::PopulateOrExchange(ShuttleGui & S)
       CentreOnParent();
    }
 
-   SetIcon(mContext.GetProject()->GetIcon());
+   SetIcon( GetProjectFrame( mContext.project ).GetIcon() );
 }
 
 bool ScreenFrame::ProcessEvent(wxEvent & e)
@@ -503,6 +512,16 @@ bool ScreenFrame::ProcessEvent(wxEvent & e)
 void ScreenFrame::OnCloseWindow(wxCloseEvent &  WXUNUSED(event))
 {
    Destroy();
+}
+
+void ScreenFrame::OnClose(wxCommandEvent &  WXUNUSED(event))
+{
+   Destroy();
+}
+
+void ScreenFrame::OnGetURL(wxCommandEvent & WXUNUSED(event))
+{
+   HelpSystem::ShowHelp(this, wxT("Screenshot"));
 }
 
 void ScreenFrame::OnUIUpdate(wxUpdateUIEvent &  WXUNUSED(event))
@@ -541,7 +560,7 @@ void ScreenFrame::OnDirChoose(wxCommandEvent & WXUNUSED(event))
                     current);
 
    dlog.ShowModal();
-   if (dlog.GetPath() != wxT("")) {
+   if (!dlog.GetPath().empty()) {
       wxFileName tmpDirPath;
       tmpDirPath.AssignDir(dlog.GetPath());
       wxString path = tmpDirPath.GetPath(wxPATH_GET_VOLUME|wxPATH_GET_SEPARATOR);
@@ -566,10 +585,11 @@ void ScreenFrame::SizeMainWindow(int w, int h)
 {
    int top = 20;
 
-   mContext.GetProject()->Maximize(false);
-   mContext.GetProject()->SetSize(16, 16 + top, w, h);
+   auto &window = GetProjectFrame( mContext.project );
+   window.Maximize(false);
+   window.SetSize(16, 16 + top, w, h);
    //Bug383 - Toolbar Resets not wanted.
-   //mContext.GetProject()->GetToolManager()->Reset();
+   //ToolManager::Get( mContext.project ).Reset();
 }
 
 void ScreenFrame::OnMainWindowSmall(wxCommandEvent & WXUNUSED(event))
@@ -670,10 +690,12 @@ void ScreenFrame::OnCaptureSomething(wxCommandEvent &  event)
 
 void ScreenFrame::TimeZoom(double seconds)
 {
+   auto &viewInfo = ViewInfo::Get( mContext.project );
+   auto &window = ProjectWindow::Get( mContext.project );
    int width, height;
-   mContext.GetProject()->GetClientSize(&width, &height);
-   mContext.GetProject()->mViewInfo.SetZoom((0.75 * width) / seconds);
-   mContext.GetProject()->RedrawProject();
+   window.GetClientSize(&width, &height);
+   viewInfo.SetZoom((0.75 * width) / seconds);
+   window.RedrawProject();
 }
 
 void ScreenFrame::OnOneSec(wxCommandEvent & WXUNUSED(event))
@@ -710,23 +732,25 @@ void ScreenFrame::SizeTracks(int h)
    // If there should be more-than-stereo tracks, this makes
    // each channel as high as for a stereo channel
 
-   auto tracks = mContext.GetProject()->GetTracks();
-   for (auto t : tracks->Leaders<WaveTrack>()) {
+   auto &tracks = TrackList::Get( mContext.project );
+   for (auto t : tracks.Leaders<WaveTrack>()) {
       auto channels = TrackList::Channels(t);
       auto nChannels = channels.size();
       auto height = nChannels == 1 ? 2 * h : h;
       for (auto channel : channels)
-         channel->SetHeight(height);
+         TrackView::Get( *channel ).SetHeight(height);
    }
-   mContext.GetProject()->RedrawProject();
+   ProjectWindow::Get( mContext.project ).RedrawProject();
 }
 
 void ScreenFrame::OnShortTracks(wxCommandEvent & WXUNUSED(event))
 {
-   for (auto t : mContext.GetProject()->GetTracks()->Any<WaveTrack>())
-      t->SetHeight(t->GetMinimizedHeight());
+   for (auto t : TrackList::Get( mContext.project ).Any<WaveTrack>()) {
+      auto &view = TrackView::Get( *t );
+      view.SetHeight( view.GetMinimizedHeight() );
+   }
 
-   mContext.GetProject()->RedrawProject();
+   ProjectWindow::Get( mContext.project ).RedrawProject();
 }
 
 void ScreenFrame::OnMedTracks(wxCommandEvent & WXUNUSED(event))

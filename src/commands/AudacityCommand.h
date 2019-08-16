@@ -12,46 +12,32 @@
 #define __AUDACITY_COMMAND__
 
 #include "../Audacity.h"
-#include "../MemoryX.h"
+
 #include <set>
 
-#include "../MemoryX.h"
-#include <wx/bmpbuttn.h>
 #include <wx/defs.h>
-#include <wx/dynarray.h>
-#include <wx/intl.h>
-#include <wx/string.h>
-#include <wx/tglbtn.h>
-#include <wx/event.h> // for idle event.
+#include <wx/event.h> // to inherit
 
-class wxCheckBox;
-class wxChoice;
-class wxListBox;
-class wxWindow;
+#include "../widgets/wxPanelWrapper.h" // to inherit
 
-#include "../Experimental.h"
-#include "../SampleFormat.h"
-#include "../SelectedRegion.h"
-#include "../Shuttle.h"
-#include "../Internat.h"
-#include "../widgets/ProgressDialog.h"
-#include "../include/audacity/IdentInterface.h"
+#include "../include/audacity/ComponentInterface.h"
 #include "../include/audacity/EffectAutomationParameters.h" // for command automation
 
-#include "../Track.h"
-#include "../effects/Effect.h"
 #include "../Registrar.h"
 
 class ShuttleGui;
 
 #define BUILTIN_GENERIC_COMMAND_PREFIX wxT("Built-in AudacityCommand: ")
 
+class AudacityCommand;
 class AudacityProject;
 class CommandContext;
+class EffectUIHostInterface;
+class ProgressDialog;
 
 
 class AUDACITY_DLL_API AudacityCommand /* not final */ : public wxEvtHandler,
-                                public CommandDefinitionInterface
+                                public ComponentInterface
 {
  public:
    //std::unique_ptr<CommandOutputTargets> mOutput;
@@ -59,17 +45,22 @@ class AUDACITY_DLL_API AudacityCommand /* not final */ : public wxEvtHandler,
  public:
    AudacityCommand();
    virtual ~AudacityCommand();
+   
+   // Type of a registered function that, if it returns true,
+   // causes ShowInterface to return early without making any dialog
+   using VetoDialogHook = bool (*) ( wxDialog* );
+   static VetoDialogHook SetVetoDialogHook( VetoDialogHook hook );
 
-   // IdentInterface implementation
+   // ComponentInterface implementation
 
    //These four can be defaulted....
-   wxString GetPath() override;
-   IdentInterfaceSymbol GetVendor() override;
+   PluginPath GetPath() override;
+   VendorSymbol GetVendor() override;
    wxString GetVersion() override;
    //  virtual wxString GetFamily();
 
    //These two must be implemented by instances.
-   IdentInterfaceSymbol GetSymbol() override = 0;
+   ComponentInterfaceSymbol GetSymbol() override = 0;
    virtual wxString GetDescription() override
    {wxFAIL_MSG( "Implement a Description for this command");return "FAIL";};
 
@@ -78,8 +69,7 @@ class AUDACITY_DLL_API AudacityCommand /* not final */ : public wxEvtHandler,
    virtual bool IsBatchProcessing(){ return mIsBatch;}
    virtual void SetBatchProcessing(bool start){ mIsBatch = start;};
    
-   virtual bool Apply(const CommandContext & WXUNUSED(context) ) {return false;}; 
-   virtual bool Apply(); // redirects to the command context version.
+   virtual bool Apply(const CommandContext & WXUNUSED(context) ) {return false;};
 
    bool ShowInterface(wxWindow *parent, bool forceModal = false);
    virtual void SetHostUI(EffectUIHostInterface * WXUNUSED(host)){;};

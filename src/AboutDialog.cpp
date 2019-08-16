@@ -25,7 +25,10 @@ hold information about one contributor to Audacity.
 *//********************************************************************/
 
 
-#include "Audacity.h"
+#include "Audacity.h" // for USE_* macros
+#include "AboutDialog.h"
+
+#include "Experimental.h"
 
 #include <wx/dialog.h>
 #include <wx/html/htmlwin.h>
@@ -35,13 +38,11 @@ hold information about one contributor to Audacity.
 #include <wx/statbmp.h>
 #include <wx/intl.h>
 
-#include "AboutDialog.h"
 #include "FileNames.h"
-#include "Internat.h"
+#include "HelpText.h"
 #include "ShuttleGui.h"
-#include "widgets/LinkingHtmlWindow.h"
+#include "widgets/HelpSystem.h"
 
-#include "Theme.h"
 #include "AllThemeResources.h"
 
 // DA: Logo for About box.
@@ -68,39 +69,6 @@ hold information about one contributor to Audacity.
 #endif
 
 extern wxString FormatHtmlText( const wxString & Text );
-
-// Function to give the xtra arguments to put on the version check string.
-const wxString VerCheckArgs(){
-   wxString result = wxString("from_ver=") + AUDACITY_VERSION_STRING;
-#ifdef REV_LONG
-   result += wxString("&CommitId=")+wxString(REV_LONG).Left(6);
-#endif
-   result += wxString("&Time=") + wxString( __DATE__ ) + wxString( __TIME__ );
-   result.Replace(" ","");
-   return result;
-}
-
-// Url with Version check args attached.
-const wxString VerCheckUrl(){
-   //The version we intend to use for live Audacity.
-#define VER_CHECK_URL "https://www.audacityteam.org/download/?"
-//For testing of our scriptlet.
-//#define VER_CHECK_URL "http://www.audacityteam.org/slug/?"
-//For testing locally
-//#define VER_CHECK_URL "http://localhost:63342/WorkingDocs/demos/download.html?"
-
-   return wxString( wxT(VER_CHECK_URL)) +VerCheckArgs();
-}
-
-// Text of htperlink to check versions.
-const wxString VerCheckHtml(){
-
-   wxString result = "<center>[[";
-   result += VerCheckUrl() + "|" + _("Check Online");
-   result += "]]</center>\n";
-   return result;
-}
-
 
 void AboutDialog::CreateCreditsList()
 {
@@ -450,7 +418,7 @@ void AboutDialog::PopulateInformationPage( ShuttleGui & S )
    // create a html pane in it to put the content in.
    wxString enabled = _("Enabled");
    wxString disabled = _("Disabled");
-   wxString blank = wxT("");
+   wxString blank;
 
    /* this builds up the list of information to go in the window in the string
     * informationStr */
@@ -639,10 +607,14 @@ void AboutDialog::PopulateInformationPage( ShuttleGui & S )
    // Current date
    AddBuildinfoRow(&informationStr, _("Program build date: "), __TDATE__);
    AddBuildinfoRow(&informationStr, _("Commit Id:"), REV_IDENT );
+
+   // Not translated in 2.3.1.
+   wxString bits = (sizeof(void*) == 8) ? ", 64 bits" : "";
+
 #ifdef __WXDEBUG__
-   AddBuildinfoRow(&informationStr, _("Build type:"), _("Debug build"));
+   AddBuildinfoRow(&informationStr, _("Build type:"), wxString(_("Debug build"))+bits );
 #else
-   AddBuildinfoRow(&informationStr, _("Build type:"), _("Release build"));
+   AddBuildinfoRow(&informationStr, _("Build type:"), wxString(_("Release build"))+bits);
 #endif
 
 #ifdef _MSC_FULL_VER
@@ -1012,7 +984,7 @@ wxString AboutDialog::GetCreditsByRole(AboutDialog::Role role)
 
    // Strip last <br>, if any
    if (s.Right(4) == wxT("<br>"))
-      s = s.Left(s.Length() - 4);
+      s = s.Left(s.length() - 4);
 
    return s;
 }

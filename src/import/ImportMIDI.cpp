@@ -8,11 +8,12 @@
 
 **********************************************************************/
 
-#include "../Audacity.h"
+#include "../Audacity.h" // for USE_* macros
 #include "ImportMIDI.h"
 
 #include <wx/defs.h>
 #include <wx/ffile.h>
+#include <wx/frame.h>
 #include <wx/intl.h>
 
 #if defined(USE_MIDI)
@@ -21,13 +22,44 @@
 //#include "strparse.h"
 //#include "mfmidi.h"
 
-#include "../Internat.h"
 #include "../NoteTrack.h"
-#include "../widgets/ErrorDialog.h"
+#include "../Project.h"
+#include "../ProjectHistory.h"
+#include "../ProjectWindow.h"
+#include "../SelectUtilities.h"
+#include "../widgets/AudacityMessageBox.h"
+#include "../widgets/FileHistory.h"
 
-bool ImportMIDI(const wxString &fName, NoteTrack * dest)
+// Given an existing project, try to import into it, return true on success
+bool DoImportMIDI( AudacityProject &project, const FilePath &fileName )
 {
-   if (fName.Length() <= 4){
+   auto &tracks = TrackList::Get( project );
+   auto newTrack = TrackFactory::Get( project ).NewNoteTrack();
+   
+   if (::ImportMIDI(fileName, newTrack.get())) {
+      
+      SelectUtilities::SelectNone( project );
+      auto pTrack = tracks.Add( newTrack );
+      pTrack->SetSelected(true);
+      
+      ProjectHistory::Get( project )
+         .PushState(
+            wxString::Format(_("Imported MIDI from '%s'"),
+                         fileName),
+            _("Import MIDI")
+         );
+      
+      ProjectWindow::Get( project ).ZoomAfterImport(pTrack);
+      FileHistory::Global().AddFileToHistory(fileName);
+      return true;
+   }
+   else
+      return false;
+}
+
+bool ImportMIDI(const FilePath &fName, NoteTrack * dest)
+{
+   if (fName.length() <= 4){
       AudacityMessageBox( wxString::Format(
          _("Could not open file %s: Filename too short."), fName
       ) );
@@ -69,26 +101,8 @@ bool ImportMIDI(const wxString &fName, NoteTrack * dest)
    wxString trackNameBase = fName.AfterLast(wxFILE_SEP_PATH).BeforeLast('.');
    dest->SetName(trackNameBase);
    mf.Close();
-   // the mean pitch should be somewhere in the middle of the display
-   Alg_iterator iterator( &dest->GetSeq(), false );
-   iterator.begin();
-   // for every event
-   Alg_event_ptr evt;
-   int note_count = 0;
-   int pitch_sum = 0;
-   while (NULL != (evt = iterator.next())) {
-      // if the event is a note
-       if (evt->get_type() == 'n') {
-           Alg_note_ptr note = (Alg_note_ptr) evt;
-           pitch_sum += (int) note->pitch;
-           note_count++;
-       }
-   }
-   int mean_pitch = (note_count > 0 ? pitch_sum / note_count : 60);
-   // initial track is about 27 half-steps high; if bottom note is C,
-   // then middle pitch class is D. Round mean_pitch to the nearest D:
-   int mid_pitch = ((mean_pitch - 2 + 6) / 12) * 12 + 2;
-   dest->SetBottomNote(mid_pitch - 14);
+
+   dest->ZoomAllNotes();
    return true;
 }
 

@@ -9,8 +9,9 @@
 #ifndef __AUDACITY_OVERLAY_PANEL__
 #define __AUDACITY_OVERLAY_PANEL__
 
+#include <memory>
 #include <vector>
-#include "BackedPanel.h"
+#include "BackedPanel.h" // to inherit
 
 class Overlay;
 
@@ -22,13 +23,11 @@ public:
                 // default as for wxPanel:
                 long style = wxTAB_TRAVERSAL | wxNO_BORDER);
 
-   // Registers and unregisters overlay objects.
+   // Registers overlay objects.
    // The sequence in which they were registered is the sequence in
    // which they are painted.
    // OverlayPanel is not responsible for their memory management.
-   void AddOverlay(Overlay *pOverlay);
-   // Returns true if the overlay was found
-   bool RemoveOverlay(Overlay *pOverlay);
+   void AddOverlay( const std::weak_ptr<Overlay> &pOverlay );
    void ClearOverlays();
 
    // Erases and redraws to the client area the overlays that have
@@ -41,11 +40,40 @@ public:
    void DrawOverlays(bool repaint_all, wxDC *pDC = nullptr);
    
 private:
-   std::vector<Overlay*> mOverlays;
+   using OverlayPtr = std::weak_ptr<Overlay>;
+
+   void Compress();
+   std::vector< OverlayPtr > mOverlays;
    
    
    DECLARE_EVENT_TABLE()
    friend class GetInfoCommand;
+};
+
+/// Used to restore pen, brush and logical-op in a DC back to what they were.
+struct DCUnchanger {
+public:
+   DCUnchanger() {}
+
+   DCUnchanger(const wxBrush &brush_, const wxPen &pen_, long logicalOperation_)
+   : brush(brush_), pen(pen_), logicalOperation(logicalOperation_)
+   {}
+
+   void operator () (wxDC *pDC) const;
+
+   wxBrush brush {};
+   wxPen pen {};
+   long logicalOperation {};
+};
+
+/// Makes temporary drawing context changes that you back out of, RAII style
+//  It's like wxDCPenChanger, etc., but simple and general
+class ADCChanger : public std::unique_ptr<wxDC, ::DCUnchanger>
+{
+   using Base = std::unique_ptr<wxDC, ::DCUnchanger>;
+public:
+   ADCChanger() : Base{} {}
+   ADCChanger(wxDC *pDC);
 };
 
 #endif

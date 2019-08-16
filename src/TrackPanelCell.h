@@ -11,10 +11,14 @@ Paul Licameli
 #ifndef __AUDACITY_TRACK_PANEL_CELL__
 #define __AUDACITY_TRACK_PANEL_CELL__
 
+#include "Audacity.h"
+
 #include "MemoryX.h"
+#include "TrackPanelDrawable.h" // to inherit
 
 class AudacityProject;
 struct HitTestPreview;
+struct TrackPanelDrawingContext;
 struct TrackPanelMouseEvent;
 struct TrackPanelMouseState;
 class ViewInfo;
@@ -28,11 +32,51 @@ using UIHandlePtr = std::shared_ptr<UIHandle>;
 
 #include <vector>
 
-// Abstract base class defining TrackPanel's access to specialist classes that
-// implement drawing and user interactions
-class AUDACITY_DLL_API TrackPanelCell /* not final */
+/// \brief The TrackPanel is built up of nodes, subtrees of the CellularPanel's area
+/// Common base class for TrackPanelCell (leaf) and TrackPanelGroup (nonleaf)
+class AUDACITY_DLL_API /* not final */ TrackPanelNode
+   : public TrackPanelDrawable
 {
 public:
+   TrackPanelNode();
+   virtual ~TrackPanelNode() = 0;
+};
+
+// A node of the TrackPanel that contains other nodes.
+class AUDACITY_DLL_API TrackPanelGroup /* not final */ : public TrackPanelNode
+{
+public:
+   TrackPanelGroup();
+   virtual ~TrackPanelGroup();
+
+   enum class Axis { X, Y };
+
+   // A refinement of a given rectangle partitions it along one of its axes
+   // and associates TrackPanelNodes with the partition.
+   // The sequence of coordinates should be increasing, giving left or top
+   // coordinates of sub-rectangles.
+   // Null pointers are permitted to define empty spaces with no cell object.
+   // If the first coordinate is right of or below the rectangle boundary,
+   // then that also defines an empty space at the edge.
+   // Sub-rectangles may be defined partly or wholly out of the bounds of the
+   // given rectangle.  Such portions are ignored.
+   using Child = std::pair< wxCoord, std::shared_ptr<TrackPanelNode> >;
+   using Refinement = std::vector< Child >;
+   using Subdivision = std::pair< Axis, Refinement >;
+
+   // Report a subdivision of one of the axes of the given rectangle
+   virtual Subdivision Children( const wxRect &rect ) = 0;
+};
+
+/// Abstract base class defining TrackPanel's access to specialist classes that
+/// implement drawing and user interactions
+class AUDACITY_DLL_API TrackPanelCell /* not final */ : public TrackPanelNode
+{
+public:
+   TrackPanelCell() = default;
+   TrackPanelCell( const TrackPanelCell & ) PROHIBITED;
+   TrackPanelCell &operator=( const TrackPanelCell & ) PROHIBITED;
+
    virtual ~TrackPanelCell () = 0;
 
    // May supply default cursor, status message, and tooltip, when there is no
@@ -70,22 +114,26 @@ public:
    // Return value is a bitwise OR of RefreshCode values
    // Default skips the event and does nothing
    virtual unsigned CaptureKey
-      (wxKeyEvent &event, ViewInfo &viewInfo, wxWindow *pParent);
+      (wxKeyEvent &event, ViewInfo &viewInfo, wxWindow *pParent,
+       AudacityProject *project);
 
    // Return value is a bitwise OR of RefreshCode values
    // Default skips the event and does nothing
    virtual unsigned KeyDown
-      (wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *pParent);
+      (wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *pParent,
+       AudacityProject *project);
 
    // Return value is a bitwise OR of RefreshCode values
    // Default skips the event and does nothing
    virtual unsigned KeyUp
-      (wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *pParent);
+      (wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *pParent,
+       AudacityProject *project);
 
    // Return value is a bitwise OR of RefreshCode values
    // Default skips the event and does nothing
    virtual unsigned Char
-      (wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *pParent);
+      (wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *pParent,
+       AudacityProject *project);
 };
 
 #endif

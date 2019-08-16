@@ -10,7 +10,10 @@
 
 #include "../Audacity.h"
 #include "SilentBlockFile.h"
+
 #include "../FileFormats.h"
+#include "../DirManager.h"
+#include "../xml/XMLTagHandler.h"
 
 SilentBlockFile::SilentBlockFile(size_t sampleLen):
 BlockFile{ wxFileNameWrapper{}, sampleLen }
@@ -51,7 +54,7 @@ void SilentBlockFile::SaveXML(XMLWriter &xmlFile)
 
 // BuildFromXML methods should always return a BlockFile, not NULL,
 // even if the result is flawed (e.g., refers to nonexistent file),
-// as testing will be done in DirManager::ProjectFSCK().
+// as testing will be done in ProjectFSCK().
 /// static
 BlockFilePtr SilentBlockFile::BuildFromXML(DirManager & WXUNUSED(dm), const wxChar **attrs)
 {
@@ -89,3 +92,9 @@ auto SilentBlockFile::GetSpaceUsage() const -> DiskByteCount
    return 0;
 }
 
+static DirManager::RegisteredBlockFileDeserializer sRegistration {
+   "silentblockfile",
+   []( DirManager &dm, const wxChar **attrs ){
+      return SilentBlockFile::BuildFromXML( dm, attrs );
+   }
+};

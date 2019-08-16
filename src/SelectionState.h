@@ -9,33 +9,40 @@
 #ifndef __AUDACITY_SELECTION_STATE__
 #define __AUDACITY_SELECTION_STATE__
 
+class AudacityProject;
 class Track;
 class TrackList;
-class MixerBoard;
 class ViewInfo;
+#include "ClientData.h"
 #include "MemoryX.h"
 #include <vector>
 
 // State relating to the set of selected tracks
-class SelectionState
+class SelectionState final
+   : public ClientData::Base
 {
 public:
+   SelectionState() = default;
+   SelectionState( const SelectionState & ) PROHIBITED;
+   SelectionState &operator=( const SelectionState & ) PROHIBITED;
+
+   static SelectionState &Get( AudacityProject &project );
+   static const SelectionState &Get( const AudacityProject &project );
+
    static void SelectTrackLength
       ( ViewInfo &viewInfo, Track &track, bool syncLocked );
 
-   void SelectTrack
-      ( Track &track,
-        bool selected, bool updateLastPicked, MixerBoard *pMixerBoard );
+   void SelectTrack(
+      Track &track, bool selected, bool updateLastPicked );
    // Inclusive range of tracks, the limits specified in either order:
    void SelectRangeOfTracks
-      ( TrackList &tracks, Track &sTrack, Track &eTrack,
-        MixerBoard *pMixerBoard );
-   void SelectNone( TrackList &tracks, MixerBoard *pMixerBoard );
+      ( TrackList &tracks, Track &sTrack, Track &eTrack );
+   void SelectNone( TrackList &tracks );
    void ChangeSelectionOnShiftClick
-      ( TrackList &tracks, Track &track, MixerBoard *pMixerBoard );
+      ( TrackList &tracks, Track &track );
    void HandleListSelection
       ( TrackList &tracks, ViewInfo &viewInfo, Track &track,
-        bool shift, bool ctrl, bool syncLocked, MixerBoard *pMixerBoard );
+        bool shift, bool ctrl, bool syncLocked );
 
 private:
    friend class SelectionStateChanger;

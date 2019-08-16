@@ -28,12 +28,11 @@
 #include "ViewInfo.h"
 #include "WaveTrack.h"
 #include "widgets/Ruler.h"
-#include "widgets/ErrorDialog.h"
-
-#include "Experimental.h"
+#include "widgets/AudacityMessageBox.h"
 
 #include "TrackPanelDrawingContext.h"
-#include "Internat.h"
+
+#include "tracks/ui/TrackView.h"
 
 // Globals, so that we remember settings from session to session
 wxPrintData &gPrintData()
@@ -46,9 +45,10 @@ class AudacityPrintout final : public wxPrintout
 {
  public:
    AudacityPrintout(wxString title,
-                    TrackList *tracks):
+                    TrackList *tracks, TrackPanel &panel):
       wxPrintout(title),
       mTracks(tracks)
+      , mPanel(panel)
    {
    }
    bool OnPrintPage(int page);
@@ -58,6 +58,7 @@ class AudacityPrintout final : public wxPrintout
                     int *selPageFrom, int *selPageTo);
 
  private:
+   TrackPanel &mPanel;
    TrackList *mTracks;
 };
 
@@ -71,7 +72,8 @@ bool AudacityPrintout::OnPrintPage(int WXUNUSED(page))
    dc->GetSize(&width, &height);
 
    int rulerScreenHeight = 40;
-   int screenTotalHeight = mTracks->GetHeight() + rulerScreenHeight;
+   int screenTotalHeight =
+      TrackView::GetTotalHeight( *mTracks ) + rulerScreenHeight;
 
    double scale = height / (double)screenTotalHeight;
 
@@ -84,11 +86,14 @@ bool AudacityPrintout::OnPrintPage(int WXUNUSED(page))
    ruler.SetLabelEdges(true);
    ruler.Draw(*dc);
 
-   TrackArtist artist;
+   TrackArtist artist( &mPanel );
    artist.SetBackgroundBrushes(*wxWHITE_BRUSH, *wxWHITE_BRUSH,
                                *wxWHITE_PEN, *wxWHITE_PEN);
    const double screenDuration = mTracks->GetEndTime();
+   SelectedRegion region{};
+   artist.pSelectedRegion = &region;
    ZoomInfo zoomInfo(0.0, width / screenDuration);
+   artist.pZoomInfo = &zoomInfo;
    int y = rulerPageHeight;
 
    for (auto n : mTracks->Any()) {
@@ -96,11 +101,12 @@ bool AudacityPrintout::OnPrintPage(int WXUNUSED(page))
       r.x = 0;
       r.y = y;
       r.width = width;
-      r.height = (int)(n->GetHeight() * scale);
+      r.height = (int)(TrackView::Get( *n ).GetHeight() * scale);
 
-      TrackPanelDrawingContext context{ *dc, {}, {} };
-      artist.DrawTrack(
-         context, n, r, SelectedRegion(), zoomInfo, false, false, false, false);
+      TrackPanelDrawingContext context{
+         *dc, {}, {}, &artist
+      };
+      TrackView::Get( *n ).Draw( context, r, TrackArtist::PassTracks );
 
       dc->SetPen(*wxBLACK_PEN);
       AColor::Line(*dc, 0, r.y, width, r.y);
@@ -140,12 +146,14 @@ void HandlePageSetup(wxWindow *parent)
    gPrintData() = pageSetupDialog.GetPageSetupData().GetPrintData();
 }
 
-void HandlePrint(wxWindow *parent, const wxString &name, TrackList *tracks)
+void HandlePrint(
+   wxWindow *parent, const wxString &name, TrackList *tracks,
+   TrackPanel &panel)
 {
    wxPrintDialogData printDialogData(gPrintData());
 
    wxPrinter printer(&printDialogData);
-   AudacityPrintout printout(name, tracks);
+   AudacityPrintout printout(name, tracks, panel);
    if (!printer.Print(parent, &printout, true)) {
       if (wxPrinter::GetLastError() == wxPRINTER_ERROR) {
          AudacityMessageBox(_("There was a problem printing."),

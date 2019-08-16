@@ -24,24 +24,25 @@ other settings.
 *//********************************************************************/
 
 #include "../Audacity.h"
+#include "MidiIOPrefs.h"
+
 #include "../Experimental.h"
+
 #ifdef EXPERIMENTAL_MIDI_OUT
 
 #include <wx/defs.h>
 
 #include <wx/choice.h>
 #include <wx/intl.h>
+#include <wx/textctrl.h>
 
 #include "../../lib-src/portmidi/pm_common/portmidi.h"
 
-#include "../AudioIO.h"
-#include "../Internat.h"
 #include "../Prefs.h"
-#include "../Project.h"
 #include "../ShuttleGui.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 
-#include "MidiIOPrefs.h"
+#define DEFAULT_SYNTH_LATENCY 5
 
 enum {
    HostID = 10000,
@@ -64,6 +65,21 @@ MidiIOPrefs::MidiIOPrefs(wxWindow * parent, wxWindowID winid)
 
 MidiIOPrefs::~MidiIOPrefs()
 {
+}
+
+ComponentInterfaceSymbol MidiIOPrefs::GetSymbol()
+{
+   return MIDI_IO_PREFS_PLUGIN_SYMBOL;
+}
+
+wxString MidiIOPrefs::GetDescription()
+{
+   return _("Preferences for MidiIO");
+}
+
+wxString MidiIOPrefs::HelpPageName()
+{
+   return "MIDI_Devices_Preferences";
 }
 
 void MidiIOPrefs::Populate()
@@ -103,16 +119,15 @@ void MidiIOPrefs::GetNamesAndLabels() {
       const PmDeviceInfo *info = Pm_GetDeviceInfo(i);
       if (info->output || info->input) { //should always happen
          wxString name = wxSafeConvertMB2WX(info->interf);
-         if (mHostNames.Index(name) == wxNOT_FOUND) {
-            mHostNames.Add(name);
-            mHostLabels.Add(name);
+         if ( ! make_iterator_range( mHostNames ).contains( name ) ) {
+            mHostNames.push_back(name);
+            mHostLabels.push_back(name);
          }
       }
    }
 }
 
 void MidiIOPrefs::PopulateOrExchange( ShuttleGui & S ) {
-   wxArrayString empty;
 
    S.SetBorder(2);
    S.StartScroller();
@@ -141,13 +156,10 @@ void MidiIOPrefs::PopulateOrExchange( ShuttleGui & S ) {
       {
          S.Id(PlayID);
          mPlay = S.AddChoice(_("&Device:"),
-                             wxEmptyString,
-                             &empty);
-         int latency = gPrefs->Read(wxT("/MidiIO/OutputLatency"),
-                                    DEFAULT_SYNTH_LATENCY);
+                             {} );
          mLatency = S.TieNumericTextBox(_("MIDI Synth L&atency (ms):"),
                                         wxT("/MidiIO/SynthLatency"),
-                                        latency, 3);
+                                        DEFAULT_SYNTH_LATENCY, 3);
       }
       S.EndMultiColumn();
    }
@@ -159,14 +171,13 @@ void MidiIOPrefs::PopulateOrExchange( ShuttleGui & S ) {
       {
          S.Id(RecordID);
          mRecord = S.AddChoice(_("De&vice:"),
-                               wxEmptyString,
-                               &empty);
+                               {} );
 
          S.Id(ChannelsID);
          /*
          mChannels = S.AddChoice(_("&Channels:"),
                                  wxEmptyString,
-                                 &empty);
+                                 {} );
          */
       }
       S.EndMultiColumn();
@@ -181,8 +192,8 @@ void MidiIOPrefs::OnHost(wxCommandEvent & WXUNUSED(e))
 {
    wxString itemAtIndex;
    int index = mHost->GetCurrentSelection();
-   if (index >= 0 && index < (int)mHostNames.Count())
-      itemAtIndex = mHostNames.Item(index);
+   if (index >= 0 && index < (int)mHostNames.size())
+      itemAtIndex = mHostNames[index];
    int nDevices = Pm_CountDevices();
 
    if (nDevices == 0) {
@@ -196,19 +207,19 @@ void MidiIOPrefs::OnHost(wxCommandEvent & WXUNUSED(e))
    mRecord->Clear();
 #endif
 
-   wxArrayString playnames;
-   wxArrayString recordnames;
+   wxArrayStringEx playnames;
+   wxArrayStringEx recordnames;
 
    for (int i = 0; i < nDevices; i++) {
       const PmDeviceInfo *info = Pm_GetDeviceInfo(i);
       wxString interf = wxSafeConvertMB2WX(info->interf);
-      if (itemAtIndex.IsSameAs(interf)) {
+      if (itemAtIndex == interf) {
          wxString name = wxSafeConvertMB2WX(info->name);
          wxString device = wxString::Format(wxT("%s: %s"),
                                             interf,
                                             name);
          if (info->output) {
-            playnames.Add(name);
+            playnames.push_back(name);
             index = mPlay->Append(name, (void *) info);
             if (device == mPlayDevice) {
                mPlay->SetSelection(index);
@@ -216,7 +227,7 @@ void MidiIOPrefs::OnHost(wxCommandEvent & WXUNUSED(e))
          }
 #ifdef EXPERIMENTAL_MIDI_IN
          if (info->input) {
-            recordnames.Add(name);
+            recordnames.push_back(name);
             index = mRecord->Append(name, (void *) info);
             if (device == mRecordDevice) {
                mRecord->SetSelection(index);
@@ -227,12 +238,12 @@ void MidiIOPrefs::OnHost(wxCommandEvent & WXUNUSED(e))
    }
 
    if (mPlay->GetCount() == 0) {
-      playnames.Add(_("No devices found"));
+      playnames.push_back(_("No devices found"));
       mPlay->Append(playnames[0], (void *) NULL);
    }
 #ifdef EXPERIMENTAL_MIDI_IN
    if (mRecord->GetCount() == 0) {
-      recordnames.Add(_("No devices found"));
+      recordnames.push_back(_("No devices found"));
       mRecord->Append(recordnames[0], (void *) NULL);
    }
 #endif
@@ -288,15 +299,11 @@ bool MidiIOPrefs::Validate()
    return true;
 }
 
-wxString MidiIOPrefs::HelpPageName()
-{
-   return "MIDI_Devices_Preferences";
-}
-
-PrefsPanel *MidiIOPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
+PrefsPanel::Factory
+MidiIOPrefsFactory = [](wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
    return safenew MidiIOPrefs(parent, winid);
-}
+};
 
 #endif

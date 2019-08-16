@@ -19,22 +19,17 @@
 *//********************************************************************/
 
 #include "../Audacity.h"
-#include "../Experimental.h"
 #include "RecordingPrefs.h"
+
+#include "../Experimental.h"
 
 #include <wx/defs.h>
 #include <wx/textctrl.h>
 #include <algorithm>
 
-#include "../AudioIO.h"
 #include "../prefs/GUISettings.h"
 #include "../Prefs.h"
 #include "../ShuttleGui.h"
-
-#include "../Experimental.h"
-#include "../Internat.h"
-
-#include "../widgets/Warning.h"
 
 using std::min;
 
@@ -56,6 +51,21 @@ RecordingPrefs::RecordingPrefs(wxWindow * parent, wxWindowID winid)
 
 RecordingPrefs::~RecordingPrefs()
 {
+}
+
+ComponentInterfaceSymbol RecordingPrefs::GetSymbol()
+{
+   return RECORDING_PREFS_PLUGIN_SYMBOL;
+}
+
+wxString RecordingPrefs::GetDescription()
+{
+   return _("Preferences for Recording");
+}
+
+wxString RecordingPrefs::HelpPageName()
+{
+   return "Recording_Preferences";
 }
 
 void RecordingPrefs::Populate()
@@ -290,13 +300,9 @@ void RecordingPrefs::OnToggleCustomName(wxCommandEvent & /* Evt */)
    mToggleCustomName->Enable(mUseCustomTrackName);
 }
 
-wxString RecordingPrefs::HelpPageName()
-{
-   return "Recording_Preferences";
-}
-
-PrefsPanel *RecordingPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
+PrefsPanel::Factory
+RecordingPrefsFactory = [](wxWindow *parent, wxWindowID winid)
 {
    wxASSERT(parent); // to justify safenew
    return safenew RecordingPrefs(parent, winid);
-}
+};

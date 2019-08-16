@@ -17,7 +17,6 @@ the ability to not see similar warnings again for this session.
 
 
 #include "../Audacity.h"
-
 #include "Warning.h"
 
 #include "../Prefs.h"
@@ -30,7 +29,6 @@ the ability to not see similar warnings again for this session.
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 #include "wxPanelWrapper.h"
-#include "../Internat.h"
 
 class WarningDialog final : public wxDialogWrapper
 {
@@ -74,7 +72,7 @@ WarningDialog::WarningDialog(wxWindow *parent, const wxString &message,
    S.StartVerticalLay(false);
    {
       S.AddFixedText(message);
-      mCheckBox = S.AddCheckBox(footer, wxT("false"));
+      mCheckBox = S.AddCheckBox(footer, false);
    }
    S.EndVerticalLay();
 
@@ -110,9 +108,4 @@ int ShowWarningDialog(wxWindow *parent,
    gPrefs->Write(key, (retCode == wxID_YES));
    gPrefs->Flush();
    return wxID_OK;
-}
-
-wxString WarningDialogKey(const wxString &internalDialogName)
-{
-   return wxT("/Warnings/") + internalDialogName;
 }

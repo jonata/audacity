@@ -27,12 +27,18 @@ with changes in the SpectralSelectionBar.
 
 
 #include "../Audacity.h"
+#include "SpectralSelectionBar.h"
+#include "SpectralSelectionBarListener.h"
+
+#include "../Experimental.h"
+#include "ToolManager.h"
 
 #include <algorithm>
-#include "../MemoryX.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
+
+#include <wx/setup.h> // for wxUSE_* macros
 
 #ifndef WX_PRECOMP
 #include <wx/defs.h>
@@ -48,20 +54,17 @@ with changes in the SpectralSelectionBar.
 #endif
 #include <wx/statline.h>
 
-#include "SpectralSelectionBarListener.h"
-#include "SpectralSelectionBar.h"
-
 #include "../Prefs.h"
+#include "../Project.h"
 #include "../AllThemeResources.h"
 #include "../SelectedRegion.h"
-#include "../widgets/NumericTextCtrl.h"
-
-#include "../Experimental.h"
-#include "../Internat.h"
+#include "../ViewInfo.h"
 
 #if wxUSE_ACCESSIBILITY
 #include "../widgets/WindowAccessible.h"
 #endif
+
+#include "../widgets/NumericTextCtrl.h"
 
 #ifdef EXPERIMENTAL_SPECTRAL_EDITING
 
@@ -85,13 +88,15 @@ BEGIN_EVENT_TABLE(SpectralSelectionBar, ToolBar)
    EVT_CHOICE(OnChoiceID, SpectralSelectionBar::OnChoice)
    EVT_COMMAND(wxID_ANY, EVT_FREQUENCYTEXTCTRL_UPDATED, SpectralSelectionBar::OnUpdate)
    EVT_COMMAND(wxID_ANY, EVT_BANDWIDTHTEXTCTRL_UPDATED, SpectralSelectionBar::OnUpdate)
+   EVT_IDLE( SpectralSelectionBar::OnIdle )
 END_EVENT_TABLE()
 
 static const wxString preferencePath
 (wxT("/GUI/Toolbars/SpectralSelection/CenterAndWidthChoice"));
 
-SpectralSelectionBar::SpectralSelectionBar()
-: ToolBar(SpectralSelectionBarID, _("Spectral Selection"), wxT("SpectralSelection"))
+SpectralSelectionBar::SpectralSelectionBar( AudacityProject &project )
+: ToolBar( project,
+   SpectralSelectionBarID, _("Spectral Selection"), wxT("SpectralSelection") )
 , mListener(NULL), mbCenterAndWidth(true)
 , mCenter(0.0), mWidth(0.0), mLow(0.0), mHigh(0.0)
 , mCenterCtrl(NULL), mWidthCtrl(NULL), mLowCtrl(NULL), mHighCtrl(NULL)
@@ -104,9 +109,22 @@ SpectralSelectionBar::~SpectralSelectionBar()
    // Do nothing, sizer deletes the controls
 }
 
+SpectralSelectionBar &SpectralSelectionBar::Get( AudacityProject &project )
+{
+   auto &toolManager = ToolManager::Get( project );
+   return *static_cast<SpectralSelectionBar*>(
+      toolManager.GetToolBar(SpectralSelectionBarID) );
+}
+
+const SpectralSelectionBar &SpectralSelectionBar::Get( const AudacityProject &project )
+{
+   return Get( const_cast<AudacityProject&>( project )) ;
+}
+
 void SpectralSelectionBar::Create(wxWindow * parent)
 {
    ToolBar::Create(parent);
+   UpdatePrefs();
    mHeight = wxWindowBase::GetSizer()->GetSize().GetHeight();
 }
 
@@ -132,10 +150,10 @@ void SpectralSelectionBar::Populate()
 
    auto frequencyFormatName = mListener
       ? mListener->SSBL_GetFrequencySelectionFormatName()
-      : NumericFormatId{};
+      : NumericFormatSymbol{};
    auto bandwidthFormatName = mListener
       ? mListener->SSBL_GetBandwidthSelectionFormatName()
-      : NumericFormatId{};
+      : NumericFormatSymbol{};
 
    wxFlexGridSizer *mainSizer;
    Add((mainSizer = safenew wxFlexGridSizer(1, 1, 1)), 0,wxALIGN_TOP | wxLEFT | wxTOP, 5);
@@ -354,6 +372,14 @@ void SpectralSelectionBar::OnChoice(wxCommandEvent &)
    Updated();
 }
 
+void SpectralSelectionBar::OnIdle( wxIdleEvent &evt )
+{
+   evt.Skip();
+   auto &project = mProject;
+   const auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
+   SetFrequencies( selectedRegion.f0(), selectedRegion.f1() );
+}
+
 void SpectralSelectionBar::OnUpdate(wxCommandEvent &evt)
 {
    int index = evt.GetInt();
@@ -370,12 +396,14 @@ void SpectralSelectionBar::OnUpdate(wxCommandEvent &evt)
    if (type == EVT_FREQUENCYTEXTCTRL_UPDATED) {
       NumericTextCtrl *frequencyCtrl = (mbCenterAndWidth ? mCenterCtrl : mLowCtrl);
       auto frequencyFormatName = frequencyCtrl->GetBuiltinName(index);
-      mListener->SSBL_SetFrequencySelectionFormatName(frequencyFormatName);
+      if (mListener)
+         mListener->SSBL_SetFrequencySelectionFormatName(frequencyFormatName);
    }
    else if (mbCenterAndWidth &&
             type == EVT_BANDWIDTHTEXTCTRL_UPDATED) {
       auto bandwidthFormatName = mWidthCtrl->GetBuiltinName(index);
-      mListener->SSBL_SetBandwidthSelectionFormatName(bandwidthFormatName);
+      if (mListener)
+         mListener->SSBL_SetBandwidthSelectionFormatName(bandwidthFormatName);
    }
 
    // ToolBar::ReCreateButtons() will get rid of our sizers and controls
@@ -437,36 +465,49 @@ void SpectralSelectionBar::SetBounds()
 
 void SpectralSelectionBar::SetFrequencies(double bottom, double top)
 {
-   mLow = bottom;
-   mHigh = top;
+   if ( mLow != bottom || mHigh != top ) {
+      mLow = bottom;
+      mHigh = top;
 
-   if (bottom > 0 && top >= bottom)
-      mWidth = log(top / bottom), mCenter = sqrt(top * bottom);
-   else
-      mWidth = mCenter = -1.0;
+      if (bottom > 0 && top >= bottom)
+         mWidth = log(top / bottom), mCenter = sqrt(top * bottom);
+      else
+         mWidth = mCenter = -1.0;
 
-   ValuesToControls();
+      ValuesToControls();
+   }
 }
 
-void SpectralSelectionBar::SetFrequencySelectionFormatName(const NumericFormatId & formatName)
+void SpectralSelectionBar::SetFrequencySelectionFormatName(const NumericFormatSymbol & formatName)
 {
    NumericTextCtrl *frequencyCtrl = (mbCenterAndWidth ? mCenterCtrl : mLowCtrl);
-   frequencyCtrl->SetFormatName(formatName);
-
-   wxCommandEvent e(EVT_FREQUENCYTEXTCTRL_UPDATED);
-   e.SetInt(frequencyCtrl->GetFormatIndex());
-   OnUpdate(e);
-}
-
-void SpectralSelectionBar::SetBandwidthSelectionFormatName(const NumericFormatId & formatName)
-{
-   if (mbCenterAndWidth) {
-      mWidthCtrl->SetFormatName(formatName);
-
-      wxCommandEvent e(EVT_BANDWIDTHTEXTCTRL_UPDATED);
-      e.SetInt(mWidthCtrl->GetFormatIndex());
+   bool changed =
+      frequencyCtrl->SetFormatName(formatName);
+   // Test first whether changed, to avoid infinite recursion from OnUpdate
+   if (changed) {
+      wxCommandEvent e(EVT_FREQUENCYTEXTCTRL_UPDATED);
+      e.SetInt(frequencyCtrl->GetFormatIndex());
       OnUpdate(e);
    }
 }
+
+void SpectralSelectionBar::SetBandwidthSelectionFormatName(const NumericFormatSymbol & formatName)
+{
+   if (mbCenterAndWidth) {
+      bool changed =
+         mWidthCtrl->SetFormatName(formatName);
+      // Test first whether changed, to avoid infinite recursion from OnUpdate
+      if (changed) {
+         wxCommandEvent e(EVT_BANDWIDTHTEXTCTRL_UPDATED);
+         e.SetInt(mWidthCtrl->GetFormatIndex());
+         OnUpdate(e);
+      }
+   }
+}
+
+static RegisteredToolbarFactory factory{ SpectralSelectionBarID,
+   []( AudacityProject &project ){
+      return ToolBar::Holder{ safenew SpectralSelectionBar{ project } }; }
+};
 
 #endif // #ifdef EXPERIMENTAL_SPECTRAL_EDITING

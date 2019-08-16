@@ -23,24 +23,19 @@ The summary is eventually computed and written to a file in a background thread.
 
 #include <wx/file.h>
 #include <wx/utils.h>
-#include <wx/wxchar.h>
+#include <wx/wxcrtvararg.h>
 #include <wx/log.h>
 #include <wx/thread.h>
 #include <sndfile.h>
 
-#include "../AudacityApp.h"
-#include "PCMAliasBlockFile.h"
+#include "../DirManager.h"
 #include "../FileFormats.h"
-#include "../Internat.h"
 
 #include "../ondemand/ODManager.h"
-#include "../AudioIO.h"
 
 #include "NotYetAvailableException.h"
 
 //#include <errno.h>
-
-extern AudioIO *gAudioIO;
 
 const int aheaderTagLen = 20;
 char aheaderTag[aheaderTagLen + 1] = "AudacityBlockFile112";
@@ -273,7 +268,7 @@ void ODPCMAliasBlockFile::SaveXML(XMLWriter &xmlFile)
 /// Does not schedule the ODPCMAliasBlockFile for OD loading.  Client code must do this.
 // BuildFromXML methods should always return a BlockFile, not NULL,
 // even if the result is flawed (e.g., refers to nonexistent file),
-// as testing will be done in DirManager::ProjectFSCK().
+// as testing will be done in ProjectFSCK().
 BlockFilePtr ODPCMAliasBlockFile::BuildFromXML(DirManager &dm, const wxChar **attrs)
 {
    wxFileNameWrapper summaryFileName;
@@ -295,7 +290,7 @@ BlockFilePtr ODPCMAliasBlockFile::BuildFromXML(DirManager &dm, const wxChar **at
       if (!wxStricmp(attr, wxT("summaryfile")) &&
             // Can't use XMLValueChecker::IsGoodFileName here, but do part of its test.
             XMLValueChecker::IsGoodFileString(strValue) &&
-            (strValue.Length() + 1 + dm.GetProjectDataDir().Length() <= PLATFORM_MAX_PATH))
+            (strValue.length() + 1 + dm.GetProjectDataDir().length() <= PLATFORM_MAX_PATH))
       {
          if (!dm.AssignFile(summaryFileName, strValue, false))
             // Make sure summaryFileName is back to uninitialized state so we can detect problem later.
@@ -414,7 +409,7 @@ void ODPCMAliasBlockFile::WriteSummary()
       wxPrintf("Unable to write summary data to file: %s", fileNameChar.get());
 
       throw FileException{
-         FileException::Cause::Read, wxFileName{ fileNameChar.get() } };
+         FileException::Cause::Open, wxFileName{ fileNameChar.get() } };
    }
 
    ArrayOf<char> cleanup;
@@ -563,4 +558,15 @@ void ODPCMAliasBlockFile::UnlockRead() const
    mReadDataMutex.Unlock();
 }
 
+static DirManager::RegisteredBlockFileDeserializer sRegistration {
+   "odpcmaliasblockfile",
+   []( DirManager &dm, const wxChar **attrs ){
+      auto result = ODPCMAliasBlockFile::BuildFromXML( dm, attrs );
+      //in the case of loading an OD file, we need to schedule the ODManager to begin OD computing of summary
+      //However, because we don't have access to the track or even the Sequence from this call, we mark a flag
+      //in the ODMan and check it later.
+      ODManager::MarkLoadedODFlag();
+      return result;
+   }
+};
 

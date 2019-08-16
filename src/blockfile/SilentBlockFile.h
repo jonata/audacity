@@ -14,11 +14,9 @@
 #ifndef __AUDACITY_SILENT_BLOCKFILE__
 #define __AUDACITY_SILENT_BLOCKFILE__
 
-#include <wx/string.h>
-#include <wx/filename.h>
-
 #include "../BlockFile.h"
-#include "../DirManager.h"
+
+class DirManager;
 
 /// A BlockFile containing nothing but silence.  Saves disk space.
 class SilentBlockFile final : public BlockFile {

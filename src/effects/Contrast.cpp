@@ -15,11 +15,13 @@
 #include "../WaveTrack.h"
 #include "../Prefs.h"
 #include "../Project.h"
+#include "../ProjectSettings.h"
 #include "../ShuttleGui.h"
 #include "../FileNames.h"
-#include "../widgets/LinkingHtmlWindow.h"
+#include "../ViewInfo.h"
 #include "../widgets/HelpSystem.h"
 #include "../widgets/NumericTextCtrl.h"
+#include "../widgets/AudacityMessageBox.h"
 #include "../widgets/ErrorDialog.h"
 
 #include <cmath>
@@ -30,6 +32,7 @@
 #define finite(x) _finite(x)
 #endif
 
+#include <wx/button.h>
 #include <wx/filedlg.h>
 #include <wx/valtext.h>
 #include <wx/log.h>
@@ -49,7 +52,7 @@ bool ContrastDialog::GetDB(float &dB)
 
    AudacityProject *p = GetActiveProject();
    auto range =
-      p->GetTracks()->SelectedLeaders< const WaveTrack >();
+      TrackList::Get( *p ).SelectedLeaders< const WaveTrack >();
    auto numberSelectedTracks = range.size();
    if (numberSelectedTracks > 1) {
       AudacityMessageDialog m(NULL, _("You can only measure one track at a time."), _("Error"), wxOK);
@@ -57,7 +60,7 @@ bool ContrastDialog::GetDB(float &dB)
       return false;
    }
    if(numberSelectedTracks == 0) {
-      wxMessageDialog m(NULL, _("Please select an audio track."), _("Error"), wxOK);
+      AudacityMessageDialog m(NULL, _("Please select an audio track."), _("Error"), wxOK);
       m.ShowModal();
       return false;
    }
@@ -112,8 +115,9 @@ bool ContrastDialog::GetDB(float &dB)
 void ContrastDialog::SetStartAndEndTime()
 {
    AudacityProject *p = GetActiveProject();
-   mT0 = p->mViewInfo.selectedRegion.t0();
-   mT1 = p->mViewInfo.selectedRegion.t1();
+   auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
+   mT0 = selectedRegion.t0();
+   mT1 = selectedRegion.t1();
 }
 
 
@@ -190,7 +194,8 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
    wxString number;
 
    AudacityProject *p = GetActiveProject();
-   mProjectRate = p->GetRate();
+   const auto &settings = ProjectSettings::Get( *p );
+   mProjectRate = settings.GetRate();
 
    ShuttleGui S(this, eIsCreating);
 
@@ -223,7 +228,7 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
          if (S.GetMode() == eIsCreating)
          {
             mForegroundStartT = safenew
-               NumericTextCtrl(this, ID_FOREGROUNDSTART_T,
+               NumericTextCtrl(S.GetParent(), ID_FOREGROUNDSTART_T,
                          NumericConverter::TIME,
                          NumericConverter::HundredthsFormat(),
                          0.0,
@@ -236,7 +241,7 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
          if (S.GetMode() == eIsCreating)
          {
             mForegroundEndT = safenew
-               NumericTextCtrl(this, ID_FOREGROUNDEND_T,
+               NumericTextCtrl(S.GetParent(), ID_FOREGROUNDEND_T,
                          NumericConverter::TIME,
                          NumericConverter::HundredthsFormat(),
                          0.0,
@@ -255,7 +260,7 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
          if (S.GetMode() == eIsCreating)
          {
             mBackgroundStartT = safenew
-               NumericTextCtrl(this, ID_BACKGROUNDSTART_T,
+               NumericTextCtrl(S.GetParent(), ID_BACKGROUNDSTART_T,
                          NumericConverter::TIME,
                          NumericConverter::HundredthsFormat(),
                          0.0,
@@ -268,7 +273,7 @@ ContrastDialog::ContrastDialog(wxWindow * parent, wxWindowID id,
          if (S.GetMode() == eIsCreating)
          {
             mBackgroundEndT = safenew
-               NumericTextCtrl(this, ID_BACKGROUNDEND_T,
+               NumericTextCtrl(S.GetParent(), ID_BACKGROUNDEND_T,
                          NumericConverter::TIME,
                          NumericConverter::HundredthsFormat(),
                          0.0,
@@ -343,10 +348,11 @@ void ContrastDialog::OnClose(wxCommandEvent & WXUNUSED(event))
 void ContrastDialog::OnGetForeground(wxCommandEvent & /*event*/)
 {
    AudacityProject *p = GetActiveProject();
+   auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
 
-   if( p->GetTracks()->Selected< const WaveTrack >() ) {
-      mForegroundStartT->SetValue(p->mViewInfo.selectedRegion.t0());
-      mForegroundEndT->SetValue(p->mViewInfo.selectedRegion.t1());
+   if( TrackList::Get( *p ).Selected< const WaveTrack >() ) {
+      mForegroundStartT->SetValue(selectedRegion.t0());
+      mForegroundEndT->SetValue(selectedRegion.t1());
    }
 
    SetStartAndEndTime();
@@ -358,10 +364,11 @@ void ContrastDialog::OnGetForeground(wxCommandEvent & /*event*/)
 void ContrastDialog::OnGetBackground(wxCommandEvent & /*event*/)
 {
    AudacityProject *p = GetActiveProject();
+   auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
 
-   if( p->GetTracks()->Selected< const WaveTrack >() ) {
-      mBackgroundStartT->SetValue(p->mViewInfo.selectedRegion.t0());
-      mBackgroundEndT->SetValue(p->mViewInfo.selectedRegion.t1());
+   if( TrackList::Get( *p ).Selected< const WaveTrack >() ) {
+      mBackgroundStartT->SetValue(selectedRegion.t0());
+      mBackgroundEndT->SetValue(selectedRegion.t1());
    }
 
    SetStartAndEndTime();
@@ -501,11 +508,11 @@ void ContrastDialog::OnExport(wxCommandEvent & WXUNUSED(event))
                         wxEmptyString,
                         fName,
                         wxT("txt"),
-                        wxT("*.txt"),
+                        _("Text files (*.txt)|*.txt|All files|*"),
                         wxFD_SAVE | wxRESIZE_BORDER,
                         this);
 
-   if (fName == wxT(""))
+   if (fName.empty())
       return;
 
    wxTextFile f(fName);

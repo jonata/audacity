@@ -17,21 +17,25 @@
 #include "../Audacity.h"
 #include "SpectrumPrefs.h"
 
+#include "../Experimental.h"
+
+#include <wx/choice.h>
 #include <wx/defs.h>
 #include <wx/intl.h>
 #include <wx/checkbox.h>
+#include <wx/textctrl.h>
 
 #include "../FFT.h"
 #include "../Project.h"
 #include "../ShuttleGui.h"
-#include "../WaveTrack.h"
 
 #include "../TrackPanel.h"
+#include "../WaveTrack.h"
+#include "../tracks/playabletrack/wavetrack/ui/WaveTrackView.h"
 
 #include <algorithm>
 
-#include "../Experimental.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 
 SpectrumPrefs::SpectrumPrefs(wxWindow * parent, wxWindowID winid, WaveTrack *wt)
 :  PrefsPanel(parent, winid, wt ? _("Spectrogram Settings") : _("Spectrograms"))
@@ -45,7 +49,7 @@ SpectrumPrefs::SpectrumPrefs(wxWindow * parent, wxWindowID winid, WaveTrack *wt)
       wt->GetSpectrumBounds(&mOrigMin, &mOrigMax);
       mTempSettings.maxFreq = mOrigMax;
       mTempSettings.minFreq = mOrigMin;
-      mOrigDisplay = mWt->GetDisplay();
+      mOrigPlacements = WaveTrackView::Get( *mWt ).SavePlacements();
    }
    else  {
       mTempSettings = mOrigSettings = SpectrogramSettings::defaults();
@@ -61,6 +65,28 @@ SpectrumPrefs::~SpectrumPrefs()
 {
    if (!mCommitted)
       Rollback();
+}
+
+ComponentInterfaceSymbol SpectrumPrefs::GetSymbol()
+{
+   return SPECTRUM_PREFS_PLUGIN_SYMBOL;
+}
+
+wxString SpectrumPrefs::GetDescription()
+{
+   return _("Preferences for Spectrum");
+}
+
+wxString SpectrumPrefs::HelpPageName()
+{
+   // Currently (May2017) Spectrum Settings is the only preferences
+   // we ever display in a dialog on its own without others.
+   // We do so when it is configuring spectrums for a track.
+   // Because this happens, we want to visit a different help page.
+   // So we change the page name in the case of a page on its own.
+   return mWt
+      ? "Spectrogram_Settings"
+      : "Spectrograms_Preferences";
 }
 
 enum {
@@ -83,30 +109,11 @@ enum {
 
 void SpectrumPrefs::Populate(size_t windowSize)
 {
-   mSizeChoices.Add(_("8 - most wideband"));
-   mSizeChoices.Add(wxT("16"));
-   mSizeChoices.Add(wxT("32"));
-   mSizeChoices.Add(wxT("64"));
-   mSizeChoices.Add(wxT("128"));
-   mSizeChoices.Add(wxT("256"));
-   mSizeChoices.Add(wxT("512"));
-   mSizeChoices.Add(_("1024 - default"));
-   mSizeChoices.Add(wxT("2048"));
-   mSizeChoices.Add(wxT("4096"));
-   mSizeChoices.Add(wxT("8192"));
-   mSizeChoices.Add(wxT("16384"));
-   mSizeChoices.Add(_("32768 - most narrowband"));
-   wxASSERT(mSizeChoices.size() == SpectrogramSettings::NumWindowSizes);
-
    PopulatePaddingChoices(windowSize);
 
    for (int i = 0; i < NumWindowFuncs(); i++) {
-      mTypeChoices.Add(WindowFuncName(i));
+      mTypeChoices.push_back(WindowFuncName(i));
    }
-
-   mScaleChoices = SpectrogramSettings::GetScaleNames();
-
-   mAlgorithmChoices = SpectrogramSettings::GetAlgorithmNames();
 
    //------------------------- Main section --------------------
    // Now construct the GUI itself.
@@ -140,7 +147,7 @@ void SpectrumPrefs::PopulatePaddingChoices(size_t windowSize)
    const size_t maxWindowSize = 1 << (SpectrogramSettings::LogMaxWindowSize);
    while (windowSize <= maxWindowSize) {
       const wxString numeral = wxString::Format(wxT("%d"), padding);
-      mZeroPaddingChoices.Add(numeral);
+      mZeroPaddingChoices.push_back(numeral);
       if (pPaddingSizeControl)
          pPaddingSizeControl->Append(numeral);
       windowSize <<= 1;
@@ -183,7 +190,7 @@ void SpectrumPrefs::PopulateOrExchange(ShuttleGui & S)
             S.SetStretchyCol( 1 );
             S.Id(ID_SCALE).TieChoice(_("S&cale") + wxString(wxT(":")),
                mTempSettings.scaleType,
-               &mScaleChoices);
+               SpectrogramSettings::GetScaleNames());
             mMinFreq =
                S.Id(ID_MINIMUM).TieNumericTextBox(_("Mi&n Frequency (Hz):"),
                mTempSettings.minFreq,
@@ -233,21 +240,36 @@ void SpectrumPrefs::PopulateOrExchange(ShuttleGui & S)
          mAlgorithmChoice =
             S.Id(ID_ALGORITHM).TieChoice(_("A&lgorithm") + wxString(wxT(":")),
             mTempSettings.algorithm,
-            &mAlgorithmChoices);
+            SpectrogramSettings::GetAlgorithmNames());
 
          S.Id(ID_WINDOW_SIZE).TieChoice(_("Window &size:"),
             mTempSettings.windowSize,
-            &mSizeChoices);
+            {
+               _("8 - most wideband"),
+               _("16"),
+               _("32"),
+               _("64"),
+               _("128"),
+               _("256"),
+               _("512"),
+               _("1024 - default"),
+               _("2048"),
+               _("4096"),
+               _("8192"),
+               _("16384"),
+               _("32768 - most narrowband"),
+            }
+         );
 
          S.Id(ID_WINDOW_TYPE).TieChoice(_("Window &type:"),
             mTempSettings.windowType,
-            &mTypeChoices);
+            mTypeChoices);
 
 #ifdef EXPERIMENTAL_ZERO_PADDED_SPECTROGRAMS
          mZeroPaddingChoiceCtrl =
             S.Id(ID_PADDING_SIZE).TieChoice(_("&Zero padding factor") + wxString(wxT(":")),
             mTempSettings.zeroPaddingFactor,
-            &mZeroPaddingChoices);
+            mZeroPaddingChoices);
 #endif
       }
       S.EndMultiColumn();
@@ -402,13 +424,13 @@ void SpectrumPrefs::Rollback()
    if (mWt && isOpenPage) {
       auto channels = TrackList::Channels(mWt);
       for (auto channel : channels)
-         channel->SetDisplay(mOrigDisplay);
+         WaveTrackView::Get( *channel ).RestorePlacements( mOrigPlacements );
    }
 
    if (isOpenPage) {
-      TrackPanel *const tp = ::GetActiveProject()->GetTrackPanel();
-      tp->UpdateVRulers();
-      tp->Refresh(false);
+      auto &tp = TrackPanel::Get ( *::GetActiveProject() );
+      tp.UpdateVRulers();
+      tp.Refresh(false);
    }
 }
 
@@ -449,13 +471,14 @@ void SpectrumPrefs::Preview()
 
    if (mWt && isOpenPage) {
       for (auto channel : TrackList::Channels(mWt))
-         channel->SetDisplay(WaveTrack::Spectrum);
+         WaveTrackView::Get( *channel )
+            .SetDisplay( WaveTrackViewConstants::Spectrum );
    }
 
    if (isOpenPage) {
-      TrackPanel *const tp = ::GetActiveProject()->GetTrackPanel();
-      tp->UpdateVRulers();
-      tp->Refresh(false);
+      auto &tp = TrackPanel::Get( *::GetActiveProject() );
+      tp.UpdateVRulers();
+      tp.Refresh(false);
    }
 }
 
@@ -536,11 +559,6 @@ void SpectrumPrefs::EnableDisableSTFTOnlyControls()
 #endif
 }
 
-wxString SpectrumPrefs::HelpPageName()
-{
-   return "Spectrograms_Preferences";
-}
-
 BEGIN_EVENT_TABLE(SpectrumPrefs, PrefsPanel)
    EVT_CHOICE(ID_WINDOW_SIZE, SpectrumPrefs::OnWindowSize)
    EVT_CHECKBOX(ID_DEFAULTS, SpectrumPrefs::OnDefaults)
@@ -560,13 +578,12 @@ BEGIN_EVENT_TABLE(SpectrumPrefs, PrefsPanel)
 
 END_EVENT_TABLE()
 
-SpectrumPrefsFactory::SpectrumPrefsFactory(WaveTrack *wt)
-: mWt(wt)
+PrefsPanel::Factory
+SpectrumPrefsFactory( WaveTrack *wt )
 {
-}
-
-PrefsPanel *SpectrumPrefsFactory::operator () (wxWindow *parent, wxWindowID winid)
-{
-   wxASSERT(parent); // to justify safenew
-   return safenew SpectrumPrefs(parent, winid, mWt);
+   return [=](wxWindow *parent, wxWindowID winid)
+   {
+      wxASSERT(parent); // to justify safenew
+      return safenew SpectrumPrefs(parent, winid, wt);
+   };
 }

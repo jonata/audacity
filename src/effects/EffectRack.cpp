@@ -12,14 +12,18 @@
 **********************************************************************/
 
 #include "../Audacity.h"
+#include "EffectRack.h"
+
 #include "../Experimental.h"
+
+#include "Effect.h"
+#include "EffectManager.h"
+#include "RealtimeEffectManager.h"
 
 #if defined(EXPERIMENTAL_EFFECTS_RACK)
 
-#include "../MemoryX.h"
 #include "../UndoManager.h"
 
-#include <wx/access.h>
 #include <wx/defs.h>
 #include <wx/bmpbuttn.h>
 #include <wx/button.h>
@@ -34,11 +38,11 @@
 #include <wx/timer.h>
 #include <wx/tglbtn.h>
 
-#include "EffectManager.h"
-#include "EffectRack.h"
 #include "../commands/CommandContext.h"
 #include "../Prefs.h"
 #include "../Project.h"
+#include "../ProjectHistory.h"
+#include "../widgets/wxPanelWrapper.h"
 
 #include "../../images/EffectRack/EffectRack.h"
 
@@ -77,7 +81,7 @@ BEGIN_EVENT_TABLE(EffectRack, wxFrame)
 END_EVENT_TABLE()
 
 EffectRack::EffectRack()
-:  wxFrame(GetActiveProject(),
+:  wxFrame( FindProjectFrame( GetActiveProject() ),
       wxID_ANY,
       _("Effects Rack"),
       wxDefaultPosition,
@@ -281,7 +285,7 @@ void EffectRack::OnClose(wxCloseEvent & evt)
 
 void EffectRack::OnTimer(wxTimerEvent & WXUNUSED(evt))
 {
-   int latency = EffectManager::Get().GetRealtimeLatency();
+   int latency = RealtimeEffectManager::Get().GetRealtimeLatency();
    if (latency != mLastLatency)
    {
       mLatency->SetLabel(wxString::Format(_("Latency: %4d"), latency));
@@ -295,19 +299,19 @@ void EffectRack::OnApply(wxCommandEvent & WXUNUSED(evt))
    AudacityProject *project = GetActiveProject();
 
    bool success = false;
-   auto state = project->GetUndoManager()->GetCurrentState();
+   auto state = UndoManager::Get( *project ).GetCurrentState();
    auto cleanup = finally( [&] {
       if(!success)
-         project->SetStateTo(state);
+         ProjectHistory::Get( *project ).SetStateTo( state );
    } );
 
    for (size_t i = 0, cnt = mEffects.size(); i < cnt; i++)
    {
       if (mPowerState[i])
       {
-         if (!GetMenuCommandHandler(*project).DoEffect(mEffects[i]->GetID(),
+         if (!EffectManager::DoEffect(mEffects[i]->GetID(),
                            *project,
-                           AudacityProject::OnEffectFlags::kConfigured))
+                           EffectManager::kConfigured))
             // If any effect fails (or throws), then stop.
             return;
       }
@@ -394,7 +398,7 @@ void EffectRack::OnDown(wxCommandEvent & evt)
 
    evt.Skip();
 
-   size_t index = GetEffectIndex(btn);
+   int index = GetEffectIndex(btn);
    if (index < 0 || index == (mMainSizer->GetChildren().GetCount() / NUMCOLS) - 1)
    {
       return;
@@ -459,7 +463,7 @@ void EffectRack::OnRemove(wxCommandEvent & evt)
    UpdateActive();
 }
 
-wxBitmap EffectRack::CreateBitmap(const char *xpm[], bool up, bool pusher)
+wxBitmap EffectRack::CreateBitmap(const char *const xpm[], bool up, bool pusher)
 {
    wxMemoryDC dc;
    wxBitmap pic(xpm);
@@ -559,7 +563,9 @@ void EffectRack::UpdateActive()
       }
    }
 
-   EffectManager::Get().RealtimeSetEffects(mActive);
+   RealtimeEffectManager::Get().RealtimeSetEffects(
+      { mActive.begin(), mActive.end() }
+   );
 }
 
 #endif

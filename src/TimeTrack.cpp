@@ -15,39 +15,47 @@
 
 #include "Audacity.h"
 #include "TimeTrack.h"
+
 #include "Experimental.h"
 
 #include <cfloat>
+#include <wx/wxcrtvararg.h>
+#include <wx/dc.h>
 #include <wx/intl.h>
-#include "AColor.h"
 #include "widgets/Ruler.h"
 #include "Envelope.h"
-#include "Prefs.h"
 #include "Project.h"
-#include "Internat.h"
-#include "ViewInfo.h"
-#include "AllThemeResources.h"
+#include "ProjectSettings.h"
+#include "ProjectFileIORegistry.h"
 
 //TODO-MB: are these sensible values?
 #define TIMETRACK_MIN 0.01
 #define TIMETRACK_MAX 10.0
 
-std::unique_ptr<TimeTrack> TrackFactory::NewTimeTrack()
+std::shared_ptr<TimeTrack> TrackFactory::NewTimeTrack()
 {
-   return std::make_unique<TimeTrack>(mDirManager, mZoomInfo);
+   return std::make_shared<TimeTrack>(mDirManager, mZoomInfo);
 }
+
+static ProjectFileIORegistry::Entry registerFactory{
+   wxT( "timetrack" ),
+   []( AudacityProject &project ){
+      auto &trackFactory = TrackFactory::Get( project );
+      auto &tracks = TrackList::Get( project );
+      return tracks.Add(trackFactory.NewTimeTrack());
+   }
+};
 
 TimeTrack::TimeTrack(const std::shared_ptr<DirManager> &projDirManager, const ZoomInfo *zoomInfo):
    Track(projDirManager)
    , mZoomInfo(zoomInfo)
 {
-   mHeight = 100;
+   mEnvelope = std::make_unique<BoundedEnvelope>(true, TIMETRACK_MIN, TIMETRACK_MAX, 1.0);
 
-   mRangeLower = 0.9;
-   mRangeUpper = 1.1;
+   SetRangeLower( 0.9 );
+   SetRangeUpper( 1.1 );
    mDisplayLog = false;
 
-   mEnvelope = std::make_unique<Envelope>(true, TIMETRACK_MIN, TIMETRACK_MAX, 1.0);
    mEnvelope->SetTrackLen(DBL_MAX);
    mEnvelope->SetOffset(0);
 
@@ -69,10 +77,14 @@ TimeTrack::TimeTrack(const TimeTrack &orig, double *pT0, double *pT1)
    auto len = DBL_MAX;
    if (pT0 && pT1) {
       len = *pT1 - *pT0;
-      mEnvelope = std::make_unique<Envelope>( *orig.mEnvelope, *pT0, *pT1 );
+      mEnvelope = std::make_unique<BoundedEnvelope>( *orig.mEnvelope, *pT0, *pT1 );
    }
    else
-      mEnvelope = std::make_unique<Envelope>( *orig.mEnvelope );
+      mEnvelope = std::make_unique<BoundedEnvelope>( *orig.mEnvelope );
+
+   SetRangeLower(orig.GetRangeLower());
+   SetRangeUpper(orig.GetRangeUpper());
+
    mEnvelope->SetTrackLen( len );
    mEnvelope->SetOffset(0);
 
@@ -89,13 +101,31 @@ void TimeTrack::Init(const TimeTrack &orig)
    Track::Init(orig);
    SetDefaultName(orig.GetDefaultName());
    SetName(orig.GetName());
-   SetRangeLower(orig.GetRangeLower());
-   SetRangeUpper(orig.GetRangeUpper());
    SetDisplayLog(orig.GetDisplayLog());
 }
 
 TimeTrack::~TimeTrack()
 {
+}
+
+double TimeTrack::GetRangeLower() const
+{
+   return mEnvelope->GetRangeLower();
+}
+
+double TimeTrack::GetRangeUpper() const
+{
+   return mEnvelope->GetRangeUpper();
+}
+
+void TimeTrack::SetRangeLower(double lower)
+{
+   mEnvelope->SetRangeLower( lower );
+}
+
+void TimeTrack::SetRangeUpper(double upper)
+{
+   mEnvelope->SetRangeUpper( upper );
 }
 
 Track::Holder TimeTrack::Cut( double t0, double t1 )
@@ -107,20 +137,19 @@ Track::Holder TimeTrack::Cut( double t0, double t1 )
 
 Track::Holder TimeTrack::Copy( double t0, double t1, bool ) const
 {
-   auto result = std::make_unique<TimeTrack>( *this, &t0, &t1 );
-   return Track::Holder{ std::move( result ) };
+   return std::make_shared<TimeTrack>( *this, &t0, &t1 );
 }
 
 void TimeTrack::Clear(double t0, double t1)
 {
-   auto sampleTime = 1.0 / GetActiveProject()->GetRate();
+   auto sampleTime = 1.0 / ProjectSettings::Get( *GetActiveProject() ).GetRate();
    mEnvelope->CollapseRegion( t0, t1, sampleTime );
 }
 
 void TimeTrack::Paste(double t, const Track * src)
 {
    bool bOk = src && src->TypeSwitch< bool >( [&] (const TimeTrack *tt) {
-      auto sampleTime = 1.0 / GetActiveProject()->GetRate();
+      auto sampleTime = 1.0 / ProjectSettings::Get( *GetActiveProject() ).GetRate();
       mEnvelope->PasteEnvelope
          (t, tt->mEnvelope.get(), sampleTime);
       return true;
@@ -140,9 +169,9 @@ void TimeTrack::InsertSilence(double t, double len)
    mEnvelope->InsertSpace(t, len);
 }
 
-Track::Holder TimeTrack::Duplicate() const
+Track::Holder TimeTrack::Clone() const
 {
-   return std::make_unique<TimeTrack>(*this);
+   return std::make_shared<TimeTrack>(*this);
 }
 
 bool TimeTrack::GetInterpolateLog() const
@@ -152,22 +181,6 @@ bool TimeTrack::GetInterpolateLog() const
 
 void TimeTrack::SetInterpolateLog(bool interpolateLog) {
    mEnvelope->SetExponential(interpolateLog);
-}
-
-//Compute the (average) warp factor between two non-warped time points
-double TimeTrack::ComputeWarpFactor(double t0, double t1) const
-{
-   return GetEnvelope()->AverageOfInverse(t0, t1);
-}
-
-double TimeTrack::ComputeWarpedLength(double t0, double t1) const
-{
-   return GetEnvelope()->IntegralOfInverse(t0, t1);
-}
-
-double TimeTrack::SolveWarpedLength(double t0, double length) const
-{
-   return GetEnvelope()->SolveIntegralOfInverse(t0, length);
 }
 
 bool TimeTrack::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
@@ -183,22 +196,16 @@ bool TimeTrack::HandleXMLTag(const wxChar *tag, const wxChar **attrs)
             break;
 
          const wxString strValue = value;
-         if (!wxStrcmp(attr, wxT("name")) && XMLValueChecker::IsGoodString(strValue))
-            mName = strValue;
-         else if (!wxStrcmp(attr, wxT("height")) &&
-                  XMLValueChecker::IsGoodInt(strValue) && strValue.ToLong(&nValue))
-            mHeight = nValue;
-         else if (!wxStrcmp(attr, wxT("minimized")) &&
-                  XMLValueChecker::IsGoodInt(strValue) && strValue.ToLong(&nValue))
-            mMinimized = (nValue != 0);
+         if (this->Track::HandleCommonXMLAttribute(attr, strValue))
+            ;
          else if (!wxStrcmp(attr, wxT("rangelower")))
          {
-            mRangeLower = Internat::CompatibleToDouble(value);
+            SetRangeLower( Internat::CompatibleToDouble(value) );
             mRescaleXMLValues = false;
          }
          else if (!wxStrcmp(attr, wxT("rangeupper")))
          {
-            mRangeUpper = Internat::CompatibleToDouble(value);
+            SetRangeUpper( Internat::CompatibleToDouble(value) );
             mRescaleXMLValues = false;
          }
          else if (!wxStrcmp(attr, wxT("displaylog")) &&
@@ -228,7 +235,7 @@ void TimeTrack::HandleXMLEndTag(const wxChar * WXUNUSED(tag))
    if(mRescaleXMLValues)
    {
       mRescaleXMLValues = false;
-      mEnvelope->RescaleValues(mRangeLower, mRangeUpper);
+      mEnvelope->RescaleValues(GetRangeLower(), GetRangeUpper());
       mEnvelope->SetRange(TIMETRACK_MIN, TIMETRACK_MAX);
    }
 }
@@ -245,79 +252,18 @@ void TimeTrack::WriteXML(XMLWriter &xmlFile) const
 // may throw
 {
    xmlFile.StartTag(wxT("timetrack"));
+   this->Track::WriteCommonXMLAttributes( xmlFile );
 
-   xmlFile.WriteAttr(wxT("name"), mName);
    //xmlFile.WriteAttr(wxT("channel"), mChannel);
    //xmlFile.WriteAttr(wxT("offset"), mOffset, 8);
-   xmlFile.WriteAttr(wxT("height"), GetActualHeight());
-   xmlFile.WriteAttr(wxT("minimized"), GetMinimized());
-   xmlFile.WriteAttr(wxT("rangelower"), mRangeLower, 12);
-   xmlFile.WriteAttr(wxT("rangeupper"), mRangeUpper, 12);
+   xmlFile.WriteAttr(wxT("rangelower"), GetRangeLower(), 12);
+   xmlFile.WriteAttr(wxT("rangeupper"), GetRangeUpper(), 12);
    xmlFile.WriteAttr(wxT("displaylog"), GetDisplayLog());
    xmlFile.WriteAttr(wxT("interpolatelog"), GetInterpolateLog());
 
    mEnvelope->WriteXML(xmlFile);
 
    xmlFile.EndTag(wxT("timetrack"));
-}
-
-#include "TrackPanelDrawingContext.h"
-#include "tracks/ui/EnvelopeHandle.h"
-
-void TimeTrack::Draw
-(TrackPanelDrawingContext &context, const wxRect & r, const ZoomInfo &zoomInfo) const
-{
-   auto &dc = context.dc;
-   bool highlight = false;
-#ifdef EXPERIMENTAL_TRACK_PANEL_HIGHLIGHTING
-   auto target = dynamic_cast<EnvelopeHandle*>(context.target.get());
-   highlight = target && target->GetEnvelope() == this->GetEnvelope();
-#endif
-
-   double min = zoomInfo.PositionToTime(0);
-   double max = zoomInfo.PositionToTime(r.width);
-   if (min > max)
-   {
-      wxASSERT(false);
-      min = max;
-   }
-
-   AColor::UseThemeColour( &dc, clrUnselected );
-   dc.DrawRectangle(r);
-
-   //copy this rectangle away for future use.
-   wxRect mid = r;
-
-   // Draw the Ruler
-   mRuler->SetBounds(r.x, r.y, r.x + r.width - 1, r.y + r.height - 1);
-   mRuler->SetRange(min, max);
-   mRuler->SetFlip(false);  // If we don't do this, the Ruler doesn't redraw itself when the envelope is modified.
-                            // I have no idea why!
-                            //
-                            // LL:  It's because the ruler only Invalidate()s when the NEW value is different
-                            //      than the current value.
-   mRuler->SetFlip(GetHeight() > 75 ? true : true); // MB: so why don't we just call Invalidate()? :)
-   mRuler->SetTickColour( theTheme.Colour( clrTrackPanelText ));
-   mRuler->Draw(dc, this);
-
-   Doubles envValues{ size_t(mid.width) };
-   GetEnvelope()->GetValues
-      ( 0, 0, envValues.get(), mid.width, 0, zoomInfo );
-
-   wxPen &pen = highlight ? AColor::uglyPen : AColor::envelopePen;
-   dc.SetPen( pen );
-
-   double logLower = log(std::max(1.0e-7, mRangeLower)), logUpper = log(std::max(1.0e-7, mRangeUpper));
-   for (int x = 0; x < mid.width; x++)
-      {
-         double y;
-         if(mDisplayLog)
-            y = (double)mid.height * (logUpper - log(envValues[x])) / (logUpper - logLower);
-         else
-            y = (double)mid.height * (mRangeUpper - envValues[x]) / (mRangeUpper - mRangeLower);
-         int thisy = r.y + (int)y;
-         AColor::Line(dc, mid.x + x, thisy - 1, mid.x + x, thisy+2);
-      }
 }
 
 void TimeTrack::testMe()

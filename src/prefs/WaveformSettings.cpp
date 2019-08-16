@@ -15,6 +15,7 @@ Paul Licameli
 
 #include "../Audacity.h"
 #include "WaveformSettings.h"
+
 #include "GUISettings.h"
 #include "GUIPrefs.h"
 
@@ -23,7 +24,6 @@ Paul Licameli
 
 #include "../Prefs.h"
 #include "../TranslatableStringArray.h"
-#include "../Internat.h"
 
 
 WaveformSettings::Globals::Globals()
@@ -110,7 +110,7 @@ void WaveformSettings::Update()
 void WaveformSettings::ConvertToEnumeratedDBRange()
 {
    // Assumes the codes are in ascending sequence.
-   wxArrayString codes;
+   wxArrayStringEx codes;
    GUIPrefs::GetRangeChoices(NULL, &codes);
    int ii = 0;
    for (int nn = codes.size(); ii < nn; ++ii) {
@@ -124,7 +124,7 @@ void WaveformSettings::ConvertToEnumeratedDBRange()
 
 void WaveformSettings::ConvertToActualDBRange()
 {
-   wxArrayString codes;
+   wxArrayStringEx codes;
    GUIPrefs::GetRangeChoices(NULL, &codes);
    long value = 0;
    codes[std::max(0, std::min((int)(codes.size()) - 1, dBRange))]
@@ -147,15 +147,15 @@ void WaveformSettings::NextHigherDBRange()
 }
 
 //static
-const wxArrayString &WaveformSettings::GetScaleNames()
+const wxArrayStringEx &WaveformSettings::GetScaleNames()
 {
    class ScaleNamesArray final : public TranslatableStringArray
    {
       void Populate() override
       {
          // Keep in correspondence with enum WaveTrack::WaveTrackDisplay:
-         mContents.Add(_("Linear"));
-         mContents.Add(_("Logarithmic"));
+         mContents.push_back(_("Linear"));
+         mContents.push_back(_("Logarithmic"));
       }
    };
 

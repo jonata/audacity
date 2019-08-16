@@ -22,10 +22,11 @@ ShuttleGui.
 #include "../Audacity.h"
 #include "AudacityCommand.h"
 
+#include "CommandContext.h"
+
 #include <algorithm>
 
 #include <wx/defs.h>
-#include <wx/hashmap.h>
 #include <wx/sizer.h>
 #include <wx/stockitem.h>
 #include <wx/string.h>
@@ -36,31 +37,32 @@ ShuttleGui.
 
 #include "audacity/ConfigInterface.h"
 
-#include "../AudacityException.h"
-#include "../AudioIO.h"
-#include "../LabelTrack.h"
-#include "../Mix.h"
-#include "../Prefs.h"
-#include "../Project.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
-#include "../WaveTrack.h"
-#include "../toolbars/ControlToolBar.h"
-#include "../widgets/AButton.h"
 #include "../widgets/ProgressDialog.h"
-#include "../ondemand/ODManager.h"
 #include "../widgets/HelpSystem.h"
-#include "../widgets/LinkingHtmlWindow.h"
-#include "../widgets/ErrorDialog.h"
-#include "../FileNames.h"
-#include "../widgets/HelpSystem.h"
-
-#include "../commands/CommandTargets.h"
-
-#include "../Experimental.h"
-#include "../commands/ScreenshotCommand.h"
+#include "../widgets/AudacityMessageBox.h"
 
 #include <unordered_map>
-#include "../commands/CommandContext.h"
+
+namespace {
+
+AudacityCommand::VetoDialogHook &GetVetoDialogHook()
+{
+   static AudacityCommand::VetoDialogHook sHook = nullptr;
+   return sHook;
+}
+
+}
+
+auto AudacityCommand::SetVetoDialogHook( VetoDialogHook hook )
+   -> VetoDialogHook
+{
+   auto &theHook = GetVetoDialogHook();
+   auto result = theHook;
+   theHook = hook;
+   return result;
+}
 
 AudacityCommand::AudacityCommand()
 {
@@ -79,16 +81,10 @@ AudacityCommand::~AudacityCommand()
 }
 
 
-wxString AudacityCommand::GetPath(){        return BUILTIN_GENERIC_COMMAND_PREFIX + GetSymbol().Internal(); }
-IdentInterfaceSymbol AudacityCommand::GetVendor(){      return XO("Audacity");}
+PluginPath AudacityCommand::GetPath(){        return BUILTIN_GENERIC_COMMAND_PREFIX + GetSymbol().Internal(); }
+VendorSymbol AudacityCommand::GetVendor(){      return XO("Audacity");}
 wxString AudacityCommand::GetVersion(){     return AUDACITY_VERSION_STRING;}
 
-
-bool AudacityCommand::Apply() { 
-   AudacityProject * pProj = GetActiveProject();
-   const CommandContext context( *pProj );
-   return Apply( context );
-};
 
 bool AudacityCommand::Init(){
    if( !mNeedsInit )
@@ -119,7 +115,8 @@ bool AudacityCommand::ShowInterface(wxWindow *parent, bool WXUNUSED(forceModal))
    mUIDialog->SetMinSize(mUIDialog->GetSize());
 
    // The Screenshot command might be popping this dialog up, just to capture it.
-   if( ScreenshotCommand::MayCapture( mUIDialog ) )
+   auto hook = GetVetoDialogHook();
+   if( hook && hook( mUIDialog ) )
       return false;
 
    bool res = mUIDialog->ShowModal() != 0;
@@ -272,7 +269,7 @@ AudacityCommandDialog::AudacityCommandDialog(wxWindow * parent,
    wxASSERT( pCommand );
    mpCommand = pCommand;
    mAdditionalButtons = additionalButtons |eCancelButton;
-   if( !pCommand->ManualPage().IsEmpty() )
+   if( !pCommand->ManualPage().empty() )
       mAdditionalButtons |= eHelpButton;
 }
 

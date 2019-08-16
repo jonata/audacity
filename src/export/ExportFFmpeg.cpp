@@ -19,7 +19,9 @@ function.
 *//*******************************************************************/
 
 
-#include "../Audacity.h"   // keep ffmpeg before wx because they interact
+#include "../Audacity.h"   // keep ffmpeg before wx because they interact // for USE_* macros
+#include "ExportFFmpeg.h"
+
 #include "../FFmpeg.h"     // and Audacity.h before FFmpeg for config*.h
 
 #include <wx/choice.h>
@@ -34,16 +36,14 @@ function.
 #include <wx/combobox.h>
 
 #include "../FileFormats.h"
-#include "../Internat.h"
 #include "../Mix.h"
-#include "../Prefs.h"
-#include "../Project.h"
+#include "../ProjectSettings.h"
 #include "../Tags.h"
 #include "../Track.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
+#include "../widgets/ProgressDialog.h"
 
 #include "Export.h"
-#include "ExportFFmpeg.h"
 
 #include "ExportFFmpegDialogs.h"
 
@@ -340,7 +340,7 @@ bool ExportFFmpeg::Init(const char *shortname, AudacityProject *project, const T
       return false;
 
    if (metadata == NULL)
-      metadata = project->GetTags();
+      metadata = &Tags::Get( *project );
 
    // Add metadata BEFORE writing the header.
    // At the moment that works with ffmpeg-git and ffmpeg-0.5 for MP4.
@@ -382,6 +382,7 @@ static int set_dict_int(AVDictionary **dict, const char *key, int val)
 
 bool ExportFFmpeg::InitCodecs(AudacityProject *project)
 {
+   const auto &settings = ProjectSettings::Get( *project );
    AVCodec *codec = NULL;
    AVDictionary *options = NULL;
    AVDictionaryCleanup cleanup{ &options };
@@ -391,18 +392,21 @@ bool ExportFFmpeg::InitCodecs(AudacityProject *project)
    mEncAudioCodecCtx->codec_id = ExportFFmpegOptions::fmts[mSubFormat].codecid;
    mEncAudioCodecCtx->codec_type = AVMEDIA_TYPE_AUDIO;
    mEncAudioCodecCtx->codec_tag = av_codec_get_tag(mEncFormatCtx->oformat->codec_tag,mEncAudioCodecCtx->codec_id);
-   mSampleRate = (int)project->GetRate();
+   mSampleRate = (int)settings.GetRate();
    mEncAudioCodecCtx->global_quality = -99999; //quality mode is off by default;
 
    // Each export type has its own settings
    switch (mSubFormat)
    {
    case FMT_M4A:
-      mEncAudioCodecCtx->bit_rate = 98000;
-      mEncAudioCodecCtx->bit_rate *= mChannels;
+   {
+      int q = gPrefs->Read(wxT("/FileFormats/AACQuality"),-99999);
+      mEncAudioCodecCtx->global_quality = q;
+      q = wxClip( q, 98 * mChannels, 160 * mChannels);
+      // Set bit rate to between 98 kbps and 320 kbps (if two channels)
+      mEncAudioCodecCtx->bit_rate = q * 1000;
       mEncAudioCodecCtx->profile = FF_PROFILE_AAC_LOW;
       mEncAudioCodecCtx->cutoff = 0;
-      mEncAudioCodecCtx->global_quality = gPrefs->Read(wxT("/FileFormats/AACQuality"),-99999);
       if (!CheckSampleRate(mSampleRate,
                ExportFFmpegOptions::iAACSampleRates[0],
                ExportFFmpegOptions::iAACSampleRates[11],
@@ -414,6 +418,7 @@ bool ExportFFmpeg::InitCodecs(AudacityProject *project)
                &ExportFFmpegOptions::iAACSampleRates[0]);
       }
       break;
+   }
    case FMT_AC3:
       mEncAudioCodecCtx->bit_rate = gPrefs->Read(wxT("/FileFormats/AC3BitRate"), 192000);
       if (!CheckSampleRate(mSampleRate,ExportFFmpegAC3Options::iAC3SampleRates[0], ExportFFmpegAC3Options::iAC3SampleRates[2], &ExportFFmpegAC3Options::iAC3SampleRates[0]))
@@ -872,7 +877,7 @@ ProgressResult ExportFFmpeg::Export(AudacityProject *project,
       return ProgressResult::Cancelled;
    }
    mName = fName;
-   const TrackList *tracks = project->GetTracks();
+   const auto &tracks = TrackList::Get( *project );
    bool ret = true;
 
    if (mSubFormat >= FMT_LAST) {
@@ -895,10 +900,7 @@ ProgressResult ExportFFmpeg::Export(AudacityProject *project,
 
    size_t pcmBufferSize = 1024;
 
-   const WaveTrackConstArray waveTracks =
-      tracks->GetWaveTrackConstArray(selectionOnly, false);
-   auto mixer = CreateMixer(waveTracks,
-      tracks->GetTimeTrack(),
+   auto mixer = CreateMixer(tracks, selectionOnly,
       t0, t1,
       channels, pcmBufferSize, true,
       mSampleRate, int16Sample, true, mixerSpec);
@@ -1008,10 +1010,10 @@ int ExportFFmpeg::AskResample(int bitrate, int rate, int lowrate, int highrate, 
          S.StartHorizontalLay(wxALIGN_CENTER, false);
          {
             if (bitrate == 0) {
-               text.Printf(_("The project sample rate (%d) is not supported by the current output\nfile format.  "), rate);
+               text.Printf(_("The project sample rate (%d) is not supported by the current output\nfile format. "), rate);
             }
             else {
-               text.Printf(_("The project sample rate (%d) and bit rate (%d kbps) combination is not\nsupported by the current output file format.  "), rate, bitrate/1024);
+               text.Printf(_("The project sample rate (%d) and bit rate (%d kbps) combination is not\nsupported by the current output file format. "), rate, bitrate/1024);
             }
 
             text += _("You may resample to one of the rates below.");
@@ -1019,32 +1021,30 @@ int ExportFFmpeg::AskResample(int bitrate, int rate, int lowrate, int highrate, 
          }
          S.EndHorizontalLay();
 
-         wxArrayString choices;
-         wxString selected = wxT("");
+         wxArrayStringEx choices;
+         int selected = -1;
          for (int i = 0; sampRates[i] > 0; i++)
          {
             int label = sampRates[i];
             if (label >= lowrate && label <= highrate)
             {
                wxString name = wxString::Format(wxT("%d"),label);
-               choices.Add(name);
+               choices.push_back(name);
                if (label <= rate)
                {
-                  selected = name;
+                  selected = i;
                }
             }
          }
 
-         if (selected.IsEmpty())
-         {
-            selected = choices[0];
-         }
+         if (selected == -1)
+            selected = 0;
 
          S.StartHorizontalLay(wxALIGN_CENTER, false);
          {
             choice = S.AddChoice(_("Sample Rates"),
-                                 selected,
-                                 &choices);
+                                 choices,
+                                 selected);
          }
          S.EndHorizontalLay();
       }

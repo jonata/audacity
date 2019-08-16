@@ -19,7 +19,13 @@ selected command.
 *//*******************************************************************/
 
 #include "Audacity.h"
+#include "BatchCommandDialog.h"
 
+#ifdef __WXMSW__
+    #include  <wx/ownerdrw.h>
+#endif
+
+//
 #include <wx/defs.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
@@ -36,10 +42,7 @@ selected command.
 
 
 #include "Project.h"
-#include "BatchCommandDialog.h"
-#include "commands/CommandManager.h"
 #include "effects/EffectManager.h"
-#include "BatchCommands.h"
 #include "ShuttleGui.h"
 #include "widgets/HelpSystem.h"
 
@@ -149,7 +152,11 @@ void MacroCommandDialog::OnChoice(wxCommandEvent & WXUNUSED(event))
 
 void MacroCommandDialog::OnOk(wxCommandEvent & WXUNUSED(event))
 {
-   mSelectedCommand = mInternalCommandName.Strip(wxString::both);
+   mSelectedCommand = mInternalCommandName
+      // .Strip(wxString::both) // PRL: used to do this, here only,
+         // but ultimately mSelectedCommand is looked up in the catalog without
+         // similar adjustment of whitespace in the comparison
+   ;
    mSelectedParameters = mParameters->GetValue().Strip(wxString::trailing);
    EndModal(true);
 }
@@ -174,7 +181,7 @@ void MacroCommandDialog::OnItemSelected(wxListEvent &event)
 
    // If ID is empty, then the effect wasn't found, in which case, the user must have
    // selected one of the "special" commands.
-   mEditParams->Enable(!ID.IsEmpty());
+   mEditParams->Enable(!ID.empty());
    mUsePreset->Enable(em.HasPresets(ID));
 
    if ( command.name.Translated() == mCommand->GetValue() )
@@ -185,20 +192,23 @@ void MacroCommandDialog::OnItemSelected(wxListEvent &event)
    mInternalCommandName = command.name.Internal();
 
    wxString params = MacroCommands::GetCurrentParamsFor(mInternalCommandName);
-   if (params.IsEmpty())
+   if (params.empty())
    {
       params = em.GetDefaultPreset(ID);
    }
 
+   // using GET to expose a CommandID to the user!
    // Cryptic command and category.
    // Later we can put help information there, perhaps.
-   mDetails->SetValue( mInternalCommandName + "\r\n" + command.category  );
+   // Macro command details are one place that we do expose Identifier
+   // to (more sophisticated) users
+   mDetails->SetValue( mInternalCommandName.GET() + "\r\n" + command.category  );
    mParameters->SetValue(params);
 }
 
 void MacroCommandDialog::OnEditParams(wxCommandEvent & WXUNUSED(event))
 {
-   wxString command = mInternalCommandName;
+   auto command = mInternalCommandName;
    wxString params  = mParameters->GetValue();
 
    params = MacroCommands::PromptForParamsFor(command, params, this).Trim();
@@ -209,7 +219,7 @@ void MacroCommandDialog::OnEditParams(wxCommandEvent & WXUNUSED(event))
 
 void MacroCommandDialog::OnUsePreset(wxCommandEvent & WXUNUSED(event))
 {
-   wxString command = mInternalCommandName;
+   auto command = mInternalCommandName;
    wxString params  = mParameters->GetValue();
 
    wxString preset = MacroCommands::PromptForPresetFor(command, params, this).Trim();
@@ -218,7 +228,7 @@ void MacroCommandDialog::OnUsePreset(wxCommandEvent & WXUNUSED(event))
    mParameters->Refresh();
 }
 
-void MacroCommandDialog::SetCommandAndParams(const wxString &Command, const wxString &Params)
+void MacroCommandDialog::SetCommandAndParams(const CommandID &Command, const wxString &Params)
 {
    auto iter = mCatalog.ByCommandId( Command );
 
@@ -226,12 +236,15 @@ void MacroCommandDialog::SetCommandAndParams(const wxString &Command, const wxSt
 
    mInternalCommandName = Command;
    if (iter == mCatalog.end())
-      // Expose an internal name to the user in default of any friendly name
-      // -- AVOID THIS!
-      mCommand->SetValue( Command );
+      // uh oh, using GET to expose an internal name to the user!
+      // in default of any better friendly name
+      mCommand->SetValue( Command.GET() );
    else {
       mCommand->SetValue( iter->name.Translated() );
-      mDetails->SetValue( iter->name.Internal() + "\r\n" + iter->category  );
+      // using GET to expose a CommandID to the user!
+      // Macro command details are one place that we do expose Identifier
+      // to (more sophisticated) users
+      mDetails->SetValue( iter->name.Internal().GET() + "\r\n" + iter->category  );
       mChoices->SetItemState(iter - mCatalog.begin(),
                              wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
 
@@ -240,7 +253,7 @@ void MacroCommandDialog::SetCommandAndParams(const wxString &Command, const wxSt
 
       // If ID is empty, then the effect wasn't found, in which case, the user must have
       // selected one of the "special" commands.
-      mEditParams->Enable(!ID.IsEmpty());
+      mEditParams->Enable(!ID.empty());
       mUsePreset->Enable(em.HasPresets(ID));
    }
 }

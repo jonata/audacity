@@ -15,8 +15,8 @@
 
 #include "../Audacity.h"
 #include "RawAudioGuess.h"
+
 #include "../AudacityException.h"
-#include "../MemoryX.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,8 +25,6 @@
 
 #include <wx/defs.h>
 #include <wx/ffile.h>
-
-#include "../Internat.h"
 
 #define RAW_GUESS_DEBUG 0
 

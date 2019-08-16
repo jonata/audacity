@@ -16,19 +16,17 @@ information.
 
 
 #include "Audacity.h"
-#include "MemoryX.h"
+#include "FileFormats.h"
+
 #include <wx/arrstr.h>
 #include <wx/intl.h>
 #include "sndfile.h"
-#include "widgets/ErrorDialog.h"
+#include "Internat.h"
+#include "widgets/AudacityMessageBox.h"
 
 #ifndef SNDFILE_1
 #error Requires libsndfile 1.0 or higher
 #endif
-
-#include "FileFormats.h"
-
-#include "Internat.h"
 
 //
 // enumerating headers
@@ -204,9 +202,32 @@ bool sf_subtype_is_integer(unsigned int format)
            subtype == SF_FORMAT_PCM_32);
 }
 
-wxArrayString sf_get_all_extensions()
+int sf_subtype_bytes_per_sample(unsigned int format){
+   unsigned int subtype = format & SF_FORMAT_SUBMASK;
+   if( subtype == SF_FORMAT_PCM_S8 )
+      return 1;
+   if( subtype == SF_FORMAT_PCM_U8 )
+      return 1;
+   if( subtype == SF_FORMAT_PCM_16 )
+      return 2;
+   if( subtype == SF_FORMAT_PCM_24 )
+      return 3;
+   if( subtype == SF_FORMAT_PCM_32 )
+      return 4;
+   if( subtype == SF_FORMAT_FLOAT )
+      return 4;
+   if( subtype == SF_FORMAT_DOUBLE )
+      return 8;
+
+   // might be different to 2, but this is good enough for 
+   // WAV and AIFF file size error trapping.
+   return 2;
+}
+
+
+FileExtensions sf_get_all_extensions()
 {
-   wxArrayString exts;
+   FileExtensions exts;
    SF_FORMAT_INFO	format_info;
    int count, k;
 
@@ -220,18 +241,20 @@ wxArrayString sf_get_all_extensions()
       sf_command(NULL, SFC_GET_FORMAT_MAJOR,
                  &format_info, sizeof (format_info)) ;
 
-      exts.Add(LAT1CTOWX(format_info.extension));
+      exts.push_back(LAT1CTOWX(format_info.extension));
    }
 
    // Some other extensions that are often sound files
    // but aren't included by libsndfile
 
-   exts.Add(wxT("aif")); // AIFF file with a DOS-style extension
-   exts.Add(wxT("ircam"));
-   exts.Add(wxT("snd"));
-   exts.Add(wxT("svx"));
-   exts.Add(wxT("svx8"));
-   exts.Add(wxT("sv16"));
+   exts.insert( exts.end(), {
+      wxT("aif") , // AIFF file with a DOS-style extension
+      wxT("ircam") ,
+      wxT("snd") ,
+      wxT("svx") ,
+      wxT("svx8") ,
+      wxT("sv16") ,
+   } );
 
    return exts;
 }
@@ -258,6 +281,16 @@ wxString sf_normalize_name(const char *name)
 
 #define NUM_HEADERS 13
 
+//
+// Mac OS 4-char type
+//
+
+# ifdef __UNIX__
+#  include <CoreServices/CoreServices.h>
+# else
+#  include <Types.h>
+# endif
+
 OSType MacNames[NUM_HEADERS] = {
    'WAVE', // WAVE
    'AIFF', // AIFF
@@ -274,7 +307,7 @@ OSType MacNames[NUM_HEADERS] = {
    'MAT5', // ?? Matlab 5
 };
 
-OSType sf_header_mactype(int format)
+static OSType sf_header_mactype(int format)
 {
    if (format >= 0x10000)
       return MacNames[(format/0x10000)-1];

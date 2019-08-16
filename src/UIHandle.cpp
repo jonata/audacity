@@ -10,6 +10,7 @@ Paul Licameli
 
 #include "Audacity.h"
 #include "UIHandle.h"
+
 #include "RefreshCode.h"
 
 UIHandle::~UIHandle()
@@ -38,11 +39,6 @@ bool UIHandle::HasEscape() const
 bool UIHandle::Escape()
 {
    return false;
-}
-
-void UIHandle::DrawExtras
-   (DrawingPass, wxDC *, const wxRegion &, const wxRect &)
-{
 }
 
 bool UIHandle::StopsOnKeystroke()

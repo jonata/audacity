@@ -11,26 +11,41 @@
 #ifndef __AUDACITY_TRACK_PANEL_RESIZER_CELL__
 #define __AUDACITY_TRACK_PANEL_RESIZER_CELL__
 
-#include "tracks/ui/CommonTrackPanelCell.h"
+#include "ClientData.h" // to inherit
+#include "tracks/ui/CommonTrackPanelCell.h" // to inherit
 
+class Track;
 class TrackPanelResizeHandle;
 
-class TrackPanelResizerCell : public CommonTrackPanelCell
+class TrackPanelResizerCell
+   : public CommonTrackPanelCell
+   , public std::enable_shared_from_this< TrackPanelResizerCell >
+   , public ClientData::Base
 {
    TrackPanelResizerCell(const TrackPanelResizerCell&) = delete;
    TrackPanelResizerCell &operator= (const TrackPanelResizerCell&) = delete;
 public:
 
+   static TrackPanelResizerCell &Get( Track &track );
+   static const TrackPanelResizerCell &Get( const Track &track );
+
    explicit
-   TrackPanelResizerCell( std::shared_ptr<Track> pTrack );
+   TrackPanelResizerCell( const std::shared_ptr<Track> &pTrack );
 
    std::vector<UIHandlePtr> HitTest
       (const TrackPanelMouseState &, const AudacityProject *) override;
 
-   std::shared_ptr<Track> FindTrack() override { return mpTrack.lock(); };
+protected:
+   std::shared_ptr<Track> DoFindTrack() override;
+
 private:
-   friend class TrackPanelCellIterator;
-   std::weak_ptr<Track> mpTrack;
+   // back-pointer is weak to break a cycle
+   std::weak_ptr<Track> mwTrack;
+
+   // TrackPanelDrawable implementation
+   void Draw(
+      TrackPanelDrawingContext &context,
+      const wxRect &rect, unsigned iPass ) override;
 
    std::weak_ptr<TrackPanelResizeHandle> mResizeHandle;
 };

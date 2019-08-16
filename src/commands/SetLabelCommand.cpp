@@ -18,13 +18,14 @@
 
 #include "../Audacity.h"
 #include "SetLabelCommand.h"
-#include "../Project.h"
-#include "../Track.h"
-#include "../TrackPanel.h"
+
+#include "../ViewInfo.h"
 #include "../WaveTrack.h"
 #include "../LabelTrack.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "CommandContext.h"
+#include "../tracks/labeltrack/ui/LabelTrackView.h"
 
 SetLabelCommand::SetLabelCommand()
 {
@@ -65,52 +66,56 @@ bool SetLabelCommand::Apply(const CommandContext & context)
    // this code could be put in subroutines/reduced.
 
    //wxString mode = GetString(wxT("Type"));
-   AudacityProject * p = context.GetProject();
-   TrackList *tracks = context.GetProject()->GetTracks();
-   LabelStruct * pLabel = NULL;
-   int i=0;
-   int nn=0;
-
-   LabelTrack *labelTrack {};
-   for (auto lt : tracks->Any<LabelTrack>()) {
-      if( i > mLabelIndex )
-         break;
-      labelTrack = lt;
-      for (nn = 0;
-         (nn< (int)labelTrack->mLabels.size()) && i<=mLabelIndex; 
-         nn++) {
-         i++;
-         pLabel = &labelTrack->mLabels[nn];
+   AudacityProject * p = &context.project;
+   auto &tracks = TrackList::Get( *p );
+   auto &selectedRegion = ViewInfo::Get( *p ).selectedRegion;
+   const LabelStruct * pLabel = nullptr;
+   LabelTrack *labelTrack = nullptr;
+   auto ii = mLabelIndex;
+   if ( mLabelIndex >= 0 ) {
+      for (auto lt : tracks.Any<LabelTrack>()) {
+         const auto &labels = lt->GetLabels();
+         const auto nLabels = labels.size();
+         if( ii >= nLabels )
+            ii -= nLabels;
+         else {
+            labelTrack = lt;
+            pLabel = &labels[ ii ];
+            break;
+         }
       }
    }
 
-   if ( (i< mLabelIndex) || (pLabel == NULL))
+   if ( !pLabel )
    {
       context.Error(wxT("LabelIndex was invalid."));
       return false;
    }
+   auto newLabel = *pLabel;
    if( bHasText )
-      pLabel->title = mText;
+      newLabel.title = mText;
    if( bHasT0 )
-      pLabel->selectedRegion.setT0(mT0, false);
+      newLabel.selectedRegion.setT0(mT0, false);
    if( bHasT1 )
-      pLabel->selectedRegion.setT1(mT1, false);
+      newLabel.selectedRegion.setT1(mT1, false);
    if( bHasT0 || bHasT1 )
-      pLabel->selectedRegion.ensureOrdering();
-   pLabel->updated = true;
+      newLabel.selectedRegion.ensureOrdering();
+   labelTrack->SetLabel( ii, newLabel );
 
    // Only one label can be selected.
-   if( bHasSelected ){
+   if( bHasSelected ) {
+      auto &view = LabelTrackView::Get( *labelTrack );
       if( mbSelected )
       {
-         labelTrack->mSelIndex = nn-1;
+         view.SetSelectedIndex( ii );
          double t0 = pLabel->selectedRegion.t0();
          double t1 = pLabel->selectedRegion.t1();
-         p->mViewInfo.selectedRegion.setTimes( t0, t1);
+         selectedRegion.setTimes( t0, t1);
       }
-      else if( labelTrack->mSelIndex == (nn-1) )
-         labelTrack->mSelIndex = -1;
+      else if( view.GetSelectedIndex( context.project ) == ii )
+         view.SetSelectedIndex( -1 );
    }
 
+   labelTrack->SortLabels();
    return true;
 }

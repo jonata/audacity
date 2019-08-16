@@ -12,15 +12,17 @@
 \brief Given a key, returns some html.
 *//********************************************************************/
 
+#include "Audacity.h" // for USE_* macros
+#include "HelpText.h"
+
+#include "Experimental.h"
+
 #include <wx/string.h>
 #include <wx/intl.h>
 
-#include "Audacity.h"
-#include "HelpText.h"
 #include "FileNames.h"
-#include "AboutDialog.h"
-#include "AllThemeResources.h"
 #include "Internat.h"
+#include "AllThemeResources.h"
 
 
 wxString HtmlColourOfIndex( int i ){
@@ -307,7 +309,7 @@ wxString HelpText( const wxString & Key )
    wxString Text;
    Text = HelpTextBuiltIn( Key );
 
-   if( !Text.IsEmpty())
+   if( !Text.empty())
       return LinkExpand( Text );
 
    // Perhaps useful for debugging - we'll return key that we didn't find.
@@ -325,4 +327,36 @@ wxString FormatHtmlText( const wxString & Text ){
       wxT("\"></head>") +
       WrapText( LinkExpand( Text ))+
       wxT("</html>");
+}
+
+// Function to give the extra arguments to put on the version check string.
+const wxString VerCheckArgs(){
+   wxString result = wxString("from_ver=") + AUDACITY_VERSION_STRING;
+#ifdef REV_LONG
+   result += wxString("&CommitId=")+wxString(REV_LONG).Left(6);
+#endif
+   result += wxString("&Time=") + wxString( __DATE__ ) + wxString( __TIME__ );
+   result.Replace(" ","");
+   return result;
+}
+
+// Text of hyperlink to check versions.
+const wxString VerCheckHtml(){
+
+   wxString result = "<center>[[";
+   result += VerCheckUrl() + "|" + _("Check Online");
+   result += "]]</center>\n";
+   return result;
+}
+
+// Url with Version check args attached.
+const wxString VerCheckUrl(){
+   //The version we intend to use for live Audacity.
+#define VER_CHECK_URL "https://www.audacityteam.org/download/?"
+//For testing of our scriptlet.
+//#define VER_CHECK_URL "http://www.audacityteam.org/slug/?"
+//For testing locally
+//#define VER_CHECK_URL "http://localhost:63342/WorkingDocs/demos/download.html?"
+
+   return wxString( wxT(VER_CHECK_URL)) +VerCheckArgs();
 }

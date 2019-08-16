@@ -77,21 +77,19 @@ classes derived from it.
 
 #include "../Audacity.h"
 #include "Command.h"
+
 #include <map>
+#include <wx/log.h>
 #include <wx/string.h>
 #include <wx/variant.h>
 #include <wx/arrstr.h>
 
-#include "../AudacityException.h"
-#include "Validators.h"
-#include "CommandType.h"
-#include "CommandMisc.h"
-#include "CommandBuilder.h"
 #include "CommandTargets.h"
 #include "CommandDirectory.h"
 
 #include "CommandContext.h"
-#include "../Project.h"
+
+#include "../AudacityException.h"
 
 
 
@@ -106,7 +104,7 @@ DecoratedCommand::~DecoratedCommand()
 {
 }
 
-IdentInterfaceSymbol DecoratedCommand::GetSymbol()
+ComponentInterfaceSymbol DecoratedCommand::GetSymbol()
 {
    return mCommand->GetSymbol();
 }
@@ -122,9 +120,10 @@ bool DecoratedCommand::SetParameter(const wxString &paramName,
    return mCommand->SetParameter(paramName, paramValue);
 }
 
-ApplyAndSendResponse::ApplyAndSendResponse(const OldStyleCommandPointer &cmd, std::unique_ptr<CommandOutputTargets> &target)
+ApplyAndSendResponse::ApplyAndSendResponse(
+   const OldStyleCommandPointer &cmd, std::unique_ptr<CommandOutputTargets> &target)
       : DecoratedCommand(cmd),
-       mCtx( std::make_unique<CommandContext>( *GetActiveProject(), std::move(target) ) )
+       mCtx( std::make_unique<CommandContext>( cmd->mProject, std::move(target) ) )
 {
 }
 
@@ -170,8 +169,10 @@ bool ApplyAndSendResponse::Apply()
    return result;
 }
 
-CommandImplementation::CommandImplementation(OldStyleCommandType &type)
-: mType(type),
+CommandImplementation::CommandImplementation(
+  AudacityProject &project, OldStyleCommandType &type)
+:  OldStyleCommand{ project },
+   mType(type),
    mParams(type.GetSignature().GetDefaults()),
    mSetParams()
 {
@@ -246,7 +247,7 @@ wxString CommandImplementation::GetString(const wxString &paramName)
 }
 
 /// Get the name of the command
-IdentInterfaceSymbol CommandImplementation::GetSymbol()
+ComponentInterfaceSymbol CommandImplementation::GetSymbol()
 {
    return mType.GetSymbol();
 }
@@ -260,7 +261,7 @@ CommandSignature &CommandImplementation::GetSignature()
 bool CommandImplementation::SetParameter(const wxString &paramName, const wxVariant &paramValue)
 {
    wxASSERT(!paramValue.IsType(wxT("null")));
-   CommandContext context( * GetActiveProject());
+   CommandContext context( mProject );
    ParamValueMap::iterator iter = mParams.find(paramName);
    if (iter == mParams.end())
    {

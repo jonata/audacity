@@ -14,11 +14,14 @@
 *//*******************************************************************/
 
 
-#include "../Audacity.h"
+#include "../Audacity.h" // for USE_* macros
 #include "DeviceToolBar.h"
+#include "ToolManager.h"
 
 // For compilers that support precompilation, includes "wx/wx.h".
 #include <wx/wxprec.h>
+
+#include <wx/setup.h> // for wxUSE_* macros
 
 #ifndef WX_PRECOMP
 #include <wx/choice.h>
@@ -27,6 +30,7 @@
 #include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/statbmp.h>
+#include <wx/stattext.h>
 #include <wx/tooltip.h>
 #endif
 
@@ -35,15 +39,15 @@
 
 #include "../AColor.h"
 #include "../AllThemeResources.h"
-#include "../AudioIO.h"
+#include "../AudioIOBase.h"
 #include "../ImageManipulation.h"
+#include "../KeyboardCapture.h"
 #include "../Prefs.h"
 #include "../Project.h"
 #include "../ShuttleGui.h"
-#include "../Theme.h"
 #include "../widgets/Grabber.h"
 #include "../DeviceManager.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 #include "../widgets/Grabber.h"
 
 #if wxUSE_ACCESSIBILITY
@@ -61,14 +65,33 @@ BEGIN_EVENT_TABLE(DeviceToolBar, ToolBar)
    EVT_COMMAND(wxID_ANY, EVT_CAPTURE_KEY, DeviceToolBar::OnCaptureKey)
 END_EVENT_TABLE()
 
-//Standard contructor
-DeviceToolBar::DeviceToolBar()
-: ToolBar(DeviceBarID, _("Device"), wxT("Device"), true)
+static int DeviceToolbarPrefsID()
 {
+   static int value = wxNewId();
+   return value;
+}
+
+//Standard contructor
+DeviceToolBar::DeviceToolBar( AudacityProject &project )
+: ToolBar( project, DeviceBarID, _("Device"), wxT("Device"), true )
+{
+   wxTheApp->Bind( EVT_RESCANNED_DEVICES,
+      &DeviceToolBar::OnRescannedDevices, this );
 }
 
 DeviceToolBar::~DeviceToolBar()
 {
+}
+
+DeviceToolBar &DeviceToolBar::Get( AudacityProject &project )
+{
+   auto &toolManager = ToolManager::Get( project );
+   return *static_cast<DeviceToolBar*>( toolManager.GetToolBar(DeviceBarID) );
+}
+
+const DeviceToolBar &DeviceToolBar::Get( const AudacityProject &project )
+{
+   return Get( const_cast<AudacityProject&>( project )) ;
 }
 
 void DeviceToolBar::Create(wxWindow *parent)
@@ -186,16 +209,7 @@ void DeviceToolBar::RefillCombos()
 
 void DeviceToolBar::OnFocus(wxFocusEvent &event)
 {
-   if (event.GetEventType() == wxEVT_KILL_FOCUS) {
-      AudacityProject::ReleaseKeyboard(this);
-   }
-   else {
-      AudacityProject::CaptureKeyboard(this);
-   }
-
-   Refresh(false);
-
-   event.Skip();
+   KeyboardCapture::OnFocus( *this, event );
 }
 
 void DeviceToolBar::OnCaptureKey(wxCommandEvent &event)
@@ -240,7 +254,7 @@ void DeviceToolBar::UpdatePrefs()
 
    devName = gPrefs->Read(wxT("/AudioIO/RecordingDevice"), wxT(""));
    sourceName = gPrefs->Read(wxT("/AudioIO/RecordingSource"), wxT(""));
-   if (sourceName == wxT(""))
+   if (sourceName.empty())
       desc = devName;
    else
       desc = devName + wxT(": ") + sourceName;
@@ -270,7 +284,7 @@ void DeviceToolBar::UpdatePrefs()
 
    devName = gPrefs->Read(wxT("/AudioIO/PlaybackDevice"), wxT(""));
    sourceName = gPrefs->Read(wxT("/AudioIO/PlaybackSource"), wxT(""));
-   if (sourceName == wxT(""))
+   if (sourceName.empty())
       desc = devName;
    else
       desc = devName + wxT(": ") + sourceName;
@@ -304,7 +318,7 @@ void DeviceToolBar::UpdatePrefs()
    if (newChannels > 0 && oldChannels != newChannels)
       mInputChannels->SetSelection(newChannels - 1);
 
-   if (hostName != wxT("") && mHost->GetStringSelection() != hostName)
+   if (!hostName.empty() && mHost->GetStringSelection() != hostName)
       mHost->SetStringSelection(hostName);
 
    RegenerateTooltips();
@@ -319,9 +333,17 @@ void DeviceToolBar::UpdatePrefs()
    Refresh();
 }
 
+void DeviceToolBar::UpdateSelectedPrefs( int id )
+{
+   if (id == DeviceToolbarPrefsID())
+      UpdatePrefs();
+   ToolBar::UpdateSelectedPrefs( id );
+}
+
 
 void DeviceToolBar::EnableDisableButtons()
 {
+   auto gAudioIO = AudioIOBase::Get();
    if (gAudioIO) {
       // we allow changes when monitoring, but not when recording
       bool audioStreamActive = gAudioIO->IsStreamActive() && !gAudioIO->IsMonitoring();
@@ -329,12 +351,8 @@ void DeviceToolBar::EnableDisableButtons()
       // Here we should relinquish focus
       if (audioStreamActive) {
          wxWindow *focus = wxWindow::FindFocus();
-         if (focus == mHost || focus == mInput || focus == mOutput || focus == mInputChannels) {
-            AudacityProject *activeProject = GetActiveProject();
-            if (activeProject) {
-               activeProject->GetTrackPanel()->SetFocus();
-            }
-         }
+         if (focus == mHost || focus == mInput || focus == mOutput || focus == mInputChannels)
+            TrackPanel::Get( mProject ).SetFocus();
       }
 
       mHost->Enable(!audioStreamActive);
@@ -368,8 +386,8 @@ void DeviceToolBar::RegenerateTooltips()
 bool DeviceToolBar::Layout()
 {
    bool ret;
-   RepositionCombos();
    ret = ToolBar::Layout();
+   RepositionCombos();
    return ret;
 }
 
@@ -426,7 +444,7 @@ void DeviceToolBar::RepositionCombos()
    wxSize desiredInput, desiredOutput, desiredHost, desiredChannels;
    float hostRatio, outputRatio, inputRatio, channelsRatio;
    // if the toolbar is docked then the width we should use is the project width.
-   // as the toolbar's with can extend past this.
+   // as the toolbar's width can extend past this.
    GetClientSize(&w, &h);
 
    // FIXME: Note that there's some bug in here, in that even if the prefs show the toolbar
@@ -510,16 +528,16 @@ void DeviceToolBar::FillHosts()
    const std::vector<DeviceSourceMap> &outMaps = DeviceManager::Instance()->GetOutputDeviceMaps();
    // go over our lists add the host to the list if it isn't there yet
    for (i = 0; i < inMaps.size(); i++)
-      if (hosts.Index(inMaps[i].hostString) == wxNOT_FOUND)
-         hosts.Add(inMaps[i].hostString);
+      if ( ! make_iterator_range( hosts ).contains( inMaps[i].hostString ) )
+         hosts.push_back(inMaps[i].hostString);
    for (i = 0; i < outMaps.size(); i++)
-      if (hosts.Index(outMaps[i].hostString) == wxNOT_FOUND)
-         hosts.Add(outMaps[i].hostString);
+      if ( ! make_iterator_range( hosts ).contains( outMaps[i].hostString ) )
+         hosts.push_back(outMaps[i].hostString);
 
    mHost->Clear();
    mHost->Append(hosts);
 
-   if (hosts.GetCount() == 0)
+   if (hosts.size() == 0)
       mHost->Enable(false);
 
    mHost->InvalidateBestSize();
@@ -577,7 +595,7 @@ void DeviceToolBar::FillHostDevices()
    for (i = 0; i < inMaps.size(); i++) {
       if (foundHostIndex == inMaps[i].hostIndex) {
          mInput->Append(MakeDeviceSourceString(&inMaps[i]));
-         if (host == wxT("")) {
+         if (host.empty()) {
             host = inMaps[i].hostString;
             gPrefs->Write(wxT("/AudioIO/Host"), host);
             mHost->SetStringSelection(host);
@@ -592,7 +610,7 @@ void DeviceToolBar::FillHostDevices()
    for (i = 0; i < outMaps.size(); i++) {
       if (foundHostIndex == outMaps[i].hostIndex) {
          mOutput->Append(MakeDeviceSourceString(&outMaps[i]));
-         if (host == wxT("")) {
+         if (host.empty()) {
             host = outMaps[i].hostString;
             gPrefs->Write(wxT("/AudioIO/Host"), host);
             gPrefs->Flush();
@@ -606,6 +624,13 @@ void DeviceToolBar::FillHostDevices()
    mOutput->SetMaxSize(mOutput->GetBestSize()*4);
 
    // The setting of the Device is left up to OnChoice
+}
+
+void DeviceToolBar::OnRescannedDevices( wxCommandEvent &event )
+{
+   event.Skip();
+   // Hosts may have disappeared or appeared so a complete repopulate is needed.
+   RefillCombos();
 }
 
 //return 1 if host changed, 0 otherwise.
@@ -756,6 +781,7 @@ void DeviceToolBar::OnChoice(wxCommandEvent &event)
       ChangeDevice(false);
    }
 
+   auto gAudioIO = AudioIOBase::Get();
    if (gAudioIO) {
       // We cannot have gotten here if gAudioIO->IsAudioTokenActive(),
       // per the setting of AudioIONotBusyFlag and AudioIOBusyFlag in
@@ -779,10 +805,8 @@ void DeviceToolBar::OnChoice(wxCommandEvent &event)
       gAudioIO->HandleDeviceChange();
    }
 
-   // Update all projects' DeviceToolBar.
-   for (size_t i = 0; i < gAudacityProjects.size(); i++) {
-      gAudacityProjects[i]->GetDeviceToolBar()->UpdatePrefs();
-   }
+   wxTheApp->AddPendingEvent(wxCommandEvent{
+      EVT_PREFS_UPDATE, DeviceToolbarPrefsID() });
 }
 
 void DeviceToolBar::ShowInputDialog()
@@ -810,7 +834,7 @@ void DeviceToolBar::ShowComboDialog(wxChoice *combo, const wxString &title)
    }
 
 #if USE_PORTMIXER
-   wxArrayString inputSources = combo->GetStrings();
+   wxArrayStringEx inputSources = combo->GetStrings();
 
    wxDialogWrapper dlg(nullptr, wxID_ANY, title);
    dlg.SetName(dlg.GetTitle());
@@ -822,8 +846,8 @@ void DeviceToolBar::ShowComboDialog(wxChoice *combo, const wxString &title)
      S.StartHorizontalLay(wxCENTER, false);
       {
          c = S.AddChoice(combo->GetName(),
-                         combo->GetStringSelection(),
-                         &inputSources);
+                         inputSources,
+                         combo->GetSelection());
       }
       S.EndHorizontalLay();
    }
@@ -843,3 +867,8 @@ void DeviceToolBar::ShowComboDialog(wxChoice *combo, const wxString &title)
    }
 #endif
 }
+
+static RegisteredToolbarFactory factory{ DeviceBarID,
+   []( AudacityProject &project ){
+      return ToolBar::Holder{ safenew DeviceToolBar{ project } }; }
+};

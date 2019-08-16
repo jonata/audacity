@@ -12,15 +12,15 @@ Paul Licameli split from TrackPanel.cpp
 #include "ZoomHandle.h"
 
 #include <algorithm>
-#include "../../MemoryX.h"
 
 #include <wx/dc.h>
 #include <wx/event.h>
 #include <wx/gdicmn.h>
 
 #include "../../HitTestResult.h"
-#include "../../Project.h"
 #include "../../RefreshCode.h"
+#include "../../TrackArtist.h"
+#include "../../TrackPanelDrawingContext.h"
 #include "../../TrackPanelMouseEvent.h"
 #include "../../ViewInfo.h"
 #include "../../../images/Cursors.h"
@@ -128,7 +128,7 @@ UIHandle::Result ZoomHandle::Release
  wxWindow *)
 {
    const wxMouseEvent &event = evt.event;
-   ViewInfo &viewInfo = pProject->GetViewInfo();
+   auto &viewInfo = ViewInfo::Get( *pProject );
    if (mZoomEnd < mZoomStart)
       std::swap(mZoomStart, mZoomEnd);
 
@@ -185,27 +185,35 @@ UIHandle::Result ZoomHandle::Cancel(AudacityProject*)
    return RefreshCode::RefreshAll;
 }
 
-void ZoomHandle::DrawExtras
-(DrawingPass pass, wxDC * dc, const wxRegion &, const wxRect &panelRect)
+void ZoomHandle::Draw(
+   TrackPanelDrawingContext &context,
+   const wxRect &rect, unsigned iPass )
 {
-   if (pass == Cells) {
-      // PRL: Draw dashed lines only if we would zoom in
-      // for button up.
-      if (!IsDragZooming())
-         return;
-
-      wxRect rect;
-
-      dc->SetBrush(*wxTRANSPARENT_BRUSH);
-      dc->SetPen(*wxBLACK_DASHED_PEN);
-
-      rect.x = std::min(mZoomStart, mZoomEnd);
-      rect.width = 1 + abs(mZoomEnd - mZoomStart);
-      rect.y = -1;
-      rect.height = panelRect.height + 2;
-
-      dc->DrawRectangle(rect);
+   if ( iPass == TrackArtist::PassZooming &&
+       // PRL: Draw dashed lines only if we would zoom in
+       // for button up.
+       IsDragZooming() ) {
+      auto &dc = context.dc;
+      dc.SetBrush(*wxTRANSPARENT_BRUSH);
+      dc.SetPen(*wxBLACK_DASHED_PEN);
+      // Make the top and bottom of the dashed rectangle disappear out of
+      // bounds, so that you only see vertical dashed lines.
+      dc.DrawRectangle( {
+         std::min(mZoomStart, mZoomEnd),
+         rect.y - 1,
+         1 + abs(mZoomEnd - mZoomStart),
+         rect.height + 2
+      } );
    }
+}
+
+wxRect ZoomHandle::DrawingArea(
+   const wxRect &rect, const wxRect &panelRect, unsigned iPass )
+{
+   if ( iPass == TrackArtist::PassZooming )
+      return MaximizeHeight( rect, panelRect );
+   else
+      return rect;
 }
 
 bool ZoomHandle::IsDragZooming() const

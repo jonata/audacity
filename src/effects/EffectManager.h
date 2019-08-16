@@ -14,24 +14,23 @@
 
 #include "../Experimental.h"
 
+#include <memory>
 #include <vector>
-#include <wx/choice.h>
-#include <wx/dialog.h>
-#include <wx/event.h>
-#include <wx/listbox.h>
-#include <wx/string.h>
-
-#include "audacity/EffectInterface.h"
-#include "../PluginManager.h"
-#include "Effect.h"
 
 #include <unordered_map>
+#include "audacity/Types.h"
 
 class AudacityCommand;
 class CommandContext;
 class CommandMessageTarget;
+class ComponentInterfaceSymbol;
+class Effect;
+class TrackFactory;
+class TrackList;
+class SelectedRegion;
+class wxString;
+typedef wxString PluginID;
 
-using EffectArray = std::vector <Effect*> ;
 using EffectMap = std::unordered_map<wxString, Effect *>;
 using AudacityCommandMap = std::unordered_map<wxString, AudacityCommand *>;
 using EffectOwnerMap = std::unordered_map< wxString, std::shared_ptr<Effect> >;
@@ -42,9 +41,22 @@ class EffectRack;
 class AudacityCommand;
 
 
+class NotifyingSelectedRegion;
+
 class AUDACITY_DLL_API EffectManager
 {
 public:
+
+   enum : unsigned {
+      // No flags specified
+      kNone = 0x00,
+      // Flag used to disable prompting for configuration parameteres.
+      kConfigured = 0x01,
+      // Flag used to disable saving the state after processing.
+      kSkipState  = 0x02,
+      // Flag used to disable "Repeat Last Effect"
+      kDontRepeatLast = 0x04,
+   };
 
    /** Get the singleton instance of the EffectManager. Probably not safe
        for multi-thread use. */
@@ -57,6 +69,9 @@ public:
 // them by index number, usually when the user selects one from a menu.
 //
 public:
+   static bool DoEffect(
+      const PluginID & ID, const CommandContext &context, unsigned flags );
+
    EffectManager();
    virtual ~EffectManager();
 
@@ -75,7 +90,7 @@ public:
                  double projectRate,
                  TrackList *list,
                  TrackFactory *factory,
-                 SelectedRegion *selectedRegion,
+                 NotifyingSelectedRegion &selectedRegion,
                  bool shouldPrompt = true);
 
    wxString GetEffectFamilyName(const PluginID & ID);
@@ -89,9 +104,9 @@ public:
                          bool shouldPrompt  = true );
 
    // Renamed from 'Effect' to 'Command' prior to moving out of this class.
-   IdentInterfaceSymbol GetCommandSymbol(const PluginID & ID);
+   ComponentInterfaceSymbol GetCommandSymbol(const PluginID & ID);
    wxString GetCommandName(const PluginID & ID); // translated
-   wxString GetCommandIdentifier(const PluginID & ID);
+   CommandID GetCommandIdentifier(const PluginID & ID);
    wxString GetCommandDescription(const PluginID & ID);
    wxString GetCommandUrl(const PluginID & ID);
    wxString GetCommandTip(const PluginID & ID);
@@ -128,27 +143,11 @@ public:
    void SetSkipStateFlag(bool flag);
    bool GetSkipStateFlag();
 
-   // Realtime effect processing
-   bool RealtimeIsActive();
-   bool RealtimeIsSuspended();
-   void RealtimeAddEffect(Effect *effect);
-   void RealtimeRemoveEffect(Effect *effect);
-   void RealtimeSetEffects(const EffectArray & mActive);
-   void RealtimeInitialize(double rate);
-   void RealtimeAddProcessor(int group, unsigned chans, float rate);
-   void RealtimeFinalize();
-   void RealtimeSuspend();
-   void RealtimeResume();
-   void RealtimeProcessStart();
-   size_t RealtimeProcess(int group, unsigned chans, float **buffers, size_t numSamples);
-   void RealtimeProcessEnd();
-   int GetRealtimeLatency();
-
 #if defined(EXPERIMENTAL_EFFECTS_RACK)
    void ShowRack();
 #endif
 
-   const PluginID & GetEffectByIdentifier(const wxString & strTarget);
+   const PluginID & GetEffectByIdentifier(const CommandID & strTarget);
 
 private:
    /** Return an effect by its ID. */
@@ -166,14 +165,6 @@ private:
 
    int mNumEffects;
 
-   wxCriticalSection mRealtimeLock;
-   EffectArray mRealtimeEffects;
-   int mRealtimeLatency;
-   bool mRealtimeSuspended;
-   bool mRealtimeActive;
-   std::vector<unsigned> mRealtimeChans;
-   std::vector<double> mRealtimeRates;
-
    // Set true if we want to skip pushing state 
    // after processing at effect run time.
    bool mSkipStateFlag;
@@ -185,6 +176,5 @@ private:
 #endif
 
 };
-
 
 #endif

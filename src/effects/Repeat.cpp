@@ -21,19 +21,20 @@
 
 
 #include "../Audacity.h"
+#include "Repeat.h"
 
 
 #include <math.h>
 
 #include <wx/intl.h>
+#include <wx/stattext.h>
 
 #include "../LabelTrack.h"
+#include "../Shuttle.h"
 #include "../ShuttleGui.h"
 #include "../WaveTrack.h"
 #include "../widgets/NumericTextCtrl.h"
 #include "../widgets/valnum.h"
-
-#include "Repeat.h"
 
 // Define keys, defaults, minimums, and maximums for the effect parameters
 //
@@ -55,9 +56,9 @@ EffectRepeat::~EffectRepeat()
 {
 }
 
-// IdentInterface implementation
+// ComponentInterface implementation
 
-IdentInterfaceSymbol EffectRepeat::GetSymbol()
+ComponentInterfaceSymbol EffectRepeat::GetSymbol()
 {
    return REPEAT_PLUGIN_SYMBOL;
 }

@@ -19,21 +19,37 @@ effects.
 *//*******************************************************************/
 
 #include "../Audacity.h"
+#include "EffectManager.h"
+
+#include "../Experimental.h"
+
+#include "Effect.h"
 
 #include <algorithm>
 #include <wx/stopwatch.h>
 #include <wx/tokenzr.h>
 
-#include "../Experimental.h"
-#include "../widgets/ErrorDialog.h"
+#include "../widgets/AudacityMessageBox.h"
 
 #if defined(EXPERIMENTAL_EFFECTS_RACK)
 #include "EffectRack.h"
 #endif
 
-#include "EffectManager.h"
-#include "../commands/Command.h"
+#include "../ShuttleGetDefinition.h"
 #include "../commands/CommandContext.h"
+#include "../commands/CommandManager.h"
+#include "../commands/Command.h"
+#include "../Menus.h"
+#include "../MissingAliasFileDialog.h"
+#include "../PluginManager.h"
+#include "../ProjectHistory.h"
+#include "../ProjectAudioManager.h"
+#include "../ProjectSettings.h"
+#include "../ProjectWindow.h"
+#include "../SelectUtilities.h"
+#include "../TrackPanel.h"
+#include "../ViewInfo.h"
+#include "../WaveTrack.h"
 
 
 /*******************************************************************************
@@ -49,13 +65,7 @@ EffectManager & EffectManager::Get()
 
 EffectManager::EffectManager()
 {
-   mRealtimeLock.Enter();
-   mRealtimeActive = false;
-   mRealtimeSuspended = true;
-   mRealtimeLatency = 0;
-   mRealtimeLock.Leave();
    mSkipStateFlag = false;
-
 #if defined(EXPERIMENTAL_EFFECTS_RACK)
    mRack = NULL;
 #endif
@@ -89,12 +99,147 @@ void EffectManager::UnregisterEffect(const PluginID & ID)
    mEffects.erase(id);
 }
 
+/// DoEffect() takes a PluginID and has the EffectManager execute the associated
+/// effect.
+///
+/// At the moment flags are used only to indicate whether to prompt for
+//  parameters, whether to save the state to history and whether to allow
+/// 'Repeat Last Effect'.
+
+/* static */ bool EffectManager::DoEffect(
+   const PluginID & ID, const CommandContext &context, unsigned flags )
+{
+   AudacityProject &project = context.project;
+   const auto &settings = ProjectSettings::Get( project );
+   auto &tracks = TrackList::Get( project );
+   auto &trackPanel = TrackPanel::Get( project );
+   auto &trackFactory = TrackFactory::Get( project );
+   auto rate = settings.GetRate();
+   auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
+   auto &commandManager = CommandManager::Get( project );
+   auto &window = ProjectWindow::Get( project );
+
+   const PluginDescriptor *plug = PluginManager::Get().GetPlugin(ID);
+   if (!plug)
+      return false;
+
+   EffectType type = plug->GetEffectType();
+
+   // Make sure there's no activity since the effect is about to be applied
+   // to the project's tracks.  Mainly for Apply during RTP, but also used
+   // for batch commands
+   if (flags & EffectManager::kConfigured)
+   {
+      ProjectAudioManager::Get( project ).Stop();
+      SelectUtilities::SelectAllIfNone( project );
+   }
+
+   MissingAliasFilesDialog::SetShouldShow(true);
+
+   auto nTracksOriginally = tracks.size();
+   wxWindow *focus = wxWindow::FindFocus();
+   wxWindow *parent = nullptr;
+   if (focus != nullptr) {
+      parent = focus->GetParent();
+   }
+
+   bool success = false;
+   auto cleanup = finally( [&] {
+
+      if (!success) {
+         // For now, we're limiting realtime preview to a single effect, so
+         // make sure the menus reflect that fact that one may have just been
+         // opened.
+         MenuManager::Get(project).UpdateMenus( false );
+      }
+
+   } );
+
+   int count = 0;
+   bool clean = true;
+   for (auto t : tracks.Selected< const WaveTrack >()) {
+      if (t->GetEndTime() != 0.0)
+         clean = false;
+      count++;
+   }
+
+   EffectManager & em = EffectManager::Get();
+
+   success = em.DoEffect(ID, &window, rate,
+      &tracks, &trackFactory, selectedRegion,
+      (flags & EffectManager::kConfigured) == 0);
+
+   if (!success)
+      return false;
+
+   if (em.GetSkipStateFlag())
+      flags = flags | EffectManager::kSkipState;
+
+   if (!(flags & EffectManager::kSkipState))
+   {
+      wxString shortDesc = em.GetCommandName(ID);
+      wxString longDesc = em.GetCommandDescription(ID);
+      ProjectHistory::Get( project ).PushState(longDesc, shortDesc);
+   }
+
+   if (!(flags & EffectManager::kDontRepeatLast))
+   {
+      // Only remember a successful effect, don't remember insert,
+      // or analyze effects.
+      if (type == EffectTypeProcess) {
+         wxString shortDesc = em.GetCommandName(ID);
+         MenuManager::Get(project).mLastEffect = ID;
+         wxString lastEffectDesc;
+         /* i18n-hint: %s will be the name of the effect which will be
+          * repeated if this menu item is chosen */
+         lastEffectDesc.Printf(_("Repeat %s"), shortDesc);
+         commandManager.Modify(wxT("RepeatLastEffect"), lastEffectDesc);
+      }
+   }
+
+   //STM:
+   //The following automatically re-zooms after sound was generated.
+   // IMO, it was disorienting, removing to try out without re-fitting
+   //mchinen:12/14/08 reapplying for generate effects
+   if (type == EffectTypeGenerate)
+   {
+      if (count == 0 || (clean && selectedRegion.t0() == 0.0))
+         window.DoZoomFit();
+         //  trackPanel->Refresh(false);
+   }
+
+   // PRL:  RedrawProject explicitly because sometimes history push is skipped
+   window.RedrawProject();
+
+   if (focus != nullptr && focus->GetParent()==parent) {
+      focus->SetFocus();
+   }
+
+   // A fix for Bug 63
+   // New tracks added?  Scroll them into view so that user sees them.
+   // Don't care what track type.  An analyser might just have added a
+   // Label track and we want to see it.
+   if( tracks.size() > nTracksOriginally ){
+      // 0.0 is min scroll position, 1.0 is max scroll position.
+      trackPanel.VerticalScroll( 1.0 );
+   }
+   else {
+      auto pTrack = *tracks.Selected().begin();
+      if (!pTrack)
+         pTrack = *tracks.Any().begin();
+      if (pTrack)
+         pTrack->EnsureVisible();
+   }
+
+   return true;
+}
+
 bool EffectManager::DoEffect(const PluginID & ID,
                              wxWindow *parent,
                              double projectRate,
                              TrackList *list,
                              TrackFactory *factory,
-                             SelectedRegion *selectedRegion,
+                             NotifyingSelectedRegion &selectedRegion,
                              bool shouldPrompt /* = true */)
 
 {
@@ -142,7 +287,7 @@ bool EffectManager::DoAudacityCommand(const PluginID & ID,
    return res;
 }
 
-IdentInterfaceSymbol EffectManager::GetCommandSymbol(const PluginID & ID)
+ComponentInterfaceSymbol EffectManager::GetCommandSymbol(const PluginID & ID)
 {
    return PluginManager::Get().GetSymbol(ID);
 }
@@ -156,7 +301,7 @@ wxString EffectManager::GetEffectFamilyName(const PluginID & ID)
 {
    auto effect = GetEffect(ID);
    if (effect)
-      return effect->GetFamilyId().Translation();
+      return effect->GetFamily().Translation();
    return {};
 }
 
@@ -168,14 +313,14 @@ wxString EffectManager::GetVendorName(const PluginID & ID)
    return {};
 }
 
-wxString EffectManager::GetCommandIdentifier(const PluginID & ID)
+CommandID EffectManager::GetCommandIdentifier(const PluginID & ID)
 {
    wxString name = PluginManager::Get().GetSymbol(ID).Internal();
 
    // Get rid of leading and trailing white space
    name.Trim(true).Trim(false);
 
-   if (name == wxEmptyString)
+   if (name.empty())
    {
       return name;
    }
@@ -231,7 +376,7 @@ wxString EffectManager::GetCommandTip(const PluginID & ID)
 
 void EffectManager::GetCommandDefinition(const PluginID & ID, const CommandContext & context, int flags)
 {
-   ParamsInterface *command;
+   ComponentInterface *command;
    command = GetEffect(ID);
    if( !command )
       command = GetAudacityCommand( ID );
@@ -247,7 +392,10 @@ void EffectManager::GetCommandDefinition(const PluginID & ID, const CommandConte
    // This is capturing the output context into the shuttle.
    ShuttleGetDefinition S(  *context.pOutput.get()->mStatusTarget.get() );
    S.StartStruct();
-   S.AddItem( GetCommandIdentifier( ID ), "id" );
+   // using GET to expose a CommandID to the user!
+   // Macro command details are one place that we do expose Identifier
+   // to (more sophisticated) users
+   S.AddItem( GetCommandIdentifier( ID ).GET(), "id" );
    S.AddItem( GetCommandName( ID ), "name" );
    if( bHasParams ){
       S.StartField( "params" );
@@ -257,6 +405,7 @@ void EffectManager::GetCommandDefinition(const PluginID & ID, const CommandConte
       S.EndField();
    }
    S.AddItem( GetCommandUrl( ID ), "url" );
+   // The tip is a translated string!
    S.AddItem( GetCommandTip( ID ), "tip" );
    S.EndStruct();
 }
@@ -308,7 +457,7 @@ wxString EffectManager::GetEffectParameters(const PluginID & ID)
 
       // Some effects don't have automatable parameters and will not return
       // anything, so try to get the active preset (current or factory).
-      if (parms.IsEmpty())
+      if (parms.empty())
       {
          parms = GetDefaultPreset(ID);
       }
@@ -326,7 +475,7 @@ wxString EffectManager::GetEffectParameters(const PluginID & ID)
 
       // Some effects don't have automatable parameters and will not return
       // anything, so try to get the active preset (current or factory).
-      if (parms.IsEmpty())
+      if (parms.empty())
       {
          parms = GetDefaultPreset(ID);
       }
@@ -400,8 +549,8 @@ bool EffectManager::HasPresets(const PluginID & ID)
       return false;
    }
 
-   return effect->GetUserPresets().GetCount() > 0 ||
-          effect->GetFactoryPresets().GetCount() > 0 ||
+   return effect->GetUserPresets().size() > 0 ||
+          effect->GetFactoryPresets().size() > 0 ||
           effect->HasCurrentSettings() ||
           effect->HasFactoryDefaults();
 }
@@ -424,7 +573,7 @@ wxString EffectManager::GetPreset(const PluginID & ID, const wxString & params, 
    }
 
    preset = effect->GetPreset(parent, preset);
-   if (preset.IsEmpty())
+   if (preset.empty())
    {
       return preset;
    }
@@ -456,7 +605,7 @@ wxString EffectManager::GetDefaultPreset(const PluginID & ID)
       preset = Effect::kFactoryDefaultsIdent;
    }
 
-   if (!preset.IsEmpty())
+   if (!preset.empty())
    {
       CommandParameters eap;
 
@@ -504,341 +653,12 @@ void EffectManager::ShowRack()
 {
    GetRack()->Show(!GetRack()->IsShown());
 }
-
-void EffectManager::RealtimeSetEffects(const EffectArray & effects)
-{
-   // Block RealtimeProcess()
-   RealtimeSuspend();
-
-   // Tell any effects no longer in the chain to clean up
-   for (auto e: mRealtimeEffects)
-   {
-      // Scan the NEW chain for the effect
-      for (auto e1: effects)
-      {
-         // Found it so we're done
-         if (e == e1)
-         {
-            e = NULL;
-            break;
-         }
-      }
-
-      // Must not have been in the NEW chain, so tell it to cleanup
-      if (e && mRealtimeActive)
-      {
-         e->RealtimeFinalize();
-      }
-   }
-      
-   // Tell any NEW effects to get ready
-   for (auto e : effects)
-   {
-      // Scan the old chain for the effect
-      for (auto e1 : mRealtimeEffects)
-      {
-         // Found it so tell effect to get ready
-         if (e == e1)
-         {
-            e = NULL;
-            break;
-         }
-      }
-
-      // Must not have been in the old chain, so tell it to initialize
-      if (e && mRealtimeActive)
-      {
-         e->RealtimeInitialize();
-      }
-   }
-
-   // Get rid of the old chain
-   // And install the NEW one
-   mRealtimeEffects = effects;
-
-   // Allow RealtimeProcess() to, well, process 
-   RealtimeResume();
-}
 #endif
-
-bool EffectManager::RealtimeIsActive()
-{
-   return mRealtimeEffects.size() != 0;
-}
-
-bool EffectManager::RealtimeIsSuspended()
-{
-   return mRealtimeSuspended;
-}
-
-void EffectManager::RealtimeAddEffect(Effect *effect)
-{
-   // Block RealtimeProcess()
-   RealtimeSuspend();
-
-   // Initialize effect if realtime is already active
-   if (mRealtimeActive)
-   {
-      // Initialize realtime processing
-      effect->RealtimeInitialize();
-
-      // Add the required processors
-      for (size_t i = 0, cnt = mRealtimeChans.size(); i < cnt; i++)
-      {
-         effect->RealtimeAddProcessor(i, mRealtimeChans[i], mRealtimeRates[i]);
-      }
-   }
-   
-   // Add to list of active effects
-   mRealtimeEffects.push_back(effect);
-
-   // Allow RealtimeProcess() to, well, process 
-   RealtimeResume();
-}
-
-void EffectManager::RealtimeRemoveEffect(Effect *effect)
-{
-   // Block RealtimeProcess()
-   RealtimeSuspend();
-
-   if (mRealtimeActive)
-   {
-      // Cleanup realtime processing
-      effect->RealtimeFinalize();
-   }
-      
-   // Remove from list of active effects
-   auto end = mRealtimeEffects.end();
-   auto found = std::find(mRealtimeEffects.begin(), end, effect);
-   if (found != end)
-      mRealtimeEffects.erase(found);
-
-   // Allow RealtimeProcess() to, well, process 
-   RealtimeResume();
-}
-
-void EffectManager::RealtimeInitialize(double rate)
-{
-   // The audio thread should not be running yet, but protect anyway
-   RealtimeSuspend();
-
-   // (Re)Set processor parameters
-   mRealtimeChans.clear();
-   mRealtimeRates.clear();
-
-   // RealtimeAdd/RemoveEffect() needs to know when we're active so it can
-   // initialize newly added effects
-   mRealtimeActive = true;
-
-   // Tell each effect to get ready for action
-   for (auto e : mRealtimeEffects) {
-      e->SetSampleRate(rate);
-      e->RealtimeInitialize();
-   }
-
-   // Get things moving
-   RealtimeResume();
-}
-
-void EffectManager::RealtimeAddProcessor(int group, unsigned chans, float rate)
-{
-   for (auto e : mRealtimeEffects)
-      e->RealtimeAddProcessor(group, chans, rate);
-
-   mRealtimeChans.push_back(chans);
-   mRealtimeRates.push_back(rate);
-}
-
-void EffectManager::RealtimeFinalize()
-{
-   // Make sure nothing is going on
-   RealtimeSuspend();
-
-   // It is now safe to clean up
-   mRealtimeLatency = 0;
-
-   // Tell each effect to clean up as well
-   for (auto e : mRealtimeEffects)
-      e->RealtimeFinalize();
-
-   // Reset processor parameters
-   mRealtimeChans.clear();
-   mRealtimeRates.clear();
-
-   // No longer active
-   mRealtimeActive = false;
-}
-
-void EffectManager::RealtimeSuspend()
-{
-   mRealtimeLock.Enter();
-
-   // Already suspended...bail
-   if (mRealtimeSuspended)
-   {
-      mRealtimeLock.Leave();
-      return;
-   }
-
-   // Show that we aren't going to be doing anything
-   mRealtimeSuspended = true;
-
-   // And make sure the effects don't either
-   for (auto e : mRealtimeEffects)
-      e->RealtimeSuspend();
-
-   mRealtimeLock.Leave();
-}
-
-void EffectManager::RealtimeResume()
-{
-   mRealtimeLock.Enter();
-
-   // Already running...bail
-   if (!mRealtimeSuspended)
-   {
-      mRealtimeLock.Leave();
-      return;
-   }
-
-   // Tell the effects to get ready for more action
-   for (auto e : mRealtimeEffects)
-      e->RealtimeResume();
-
-   // And we should too
-   mRealtimeSuspended = false;
-
-   mRealtimeLock.Leave();
-}
-
-//
-// This will be called in a different thread than the main GUI thread.
-//
-void EffectManager::RealtimeProcessStart()
-{
-   // Protect ourselves from the main thread
-   mRealtimeLock.Enter();
-
-   // Can be suspended because of the audio stream being paused or because effects
-   // have been suspended.
-   if (!mRealtimeSuspended)
-   {
-      for (auto e : mRealtimeEffects)
-      {
-         if (e->IsRealtimeActive())
-            e->RealtimeProcessStart();
-      }
-   }
-
-   mRealtimeLock.Leave();
-}
-
-//
-// This will be called in a different thread than the main GUI thread.
-//
-size_t EffectManager::RealtimeProcess(int group, unsigned chans, float **buffers, size_t numSamples)
-{
-   // Protect ourselves from the main thread
-   mRealtimeLock.Enter();
-
-   // Can be suspended because of the audio stream being paused or because effects
-   // have been suspended, so allow the samples to pass as-is.
-   if (mRealtimeSuspended || mRealtimeEffects.empty())
-   {
-      mRealtimeLock.Leave();
-      return numSamples;
-   }
-
-   // Remember when we started so we can calculate the amount of latency we
-   // are introducing
-   wxMilliClock_t start = wxGetLocalTimeMillis();
-
-   // Allocate the in/out buffer arrays
-   float **ibuf = (float **) alloca(chans * sizeof(float *));
-   float **obuf = (float **) alloca(chans * sizeof(float *));
-
-   // And populate the input with the buffers we've been given while allocating
-   // NEW output buffers
-   for (unsigned int i = 0; i < chans; i++)
-   {
-      ibuf[i] = buffers[i];
-      obuf[i] = (float *) alloca(numSamples * sizeof(float));
-   }
-
-   // Now call each effect in the chain while swapping buffer pointers to feed the
-   // output of one effect as the input to the next effect
-   size_t called = 0;
-   for (auto e : mRealtimeEffects)
-   {
-      if (e->IsRealtimeActive())
-      {
-         e->RealtimeProcess(group, chans, ibuf, obuf, numSamples);
-         called++;
-      }
-
-      for (unsigned int j = 0; j < chans; j++)
-      {
-         float *temp;
-         temp = ibuf[j];
-         ibuf[j] = obuf[j];
-         obuf[j] = temp;
-      }
-   }
-
-   // Once we're done, we might wind up with the last effect storing its results
-   // in the temporary buffers.  If that's the case, we need to copy it over to
-   // the caller's buffers.  This happens when the number of effects proccessed
-   // is odd.
-   if (called & 1)
-   {
-      for (unsigned int i = 0; i < chans; i++)
-      {
-         memcpy(buffers[i], ibuf[i], numSamples * sizeof(float));
-      }
-   }
-
-   // Remember the latency
-   mRealtimeLatency = (int) (wxGetLocalTimeMillis() - start).GetValue();
-
-   mRealtimeLock.Leave();
-
-   //
-   // This is wrong...needs to handle tails
-   //
-   return numSamples;
-}
-
-//
-// This will be called in a different thread than the main GUI thread.
-//
-void EffectManager::RealtimeProcessEnd()
-{
-   // Protect ourselves from the main thread
-   mRealtimeLock.Enter();
-
-   // Can be suspended because of the audio stream being paused or because effects
-   // have been suspended.
-   if (!mRealtimeSuspended)
-   {
-      for (auto e : mRealtimeEffects)
-      {
-         if (e->IsRealtimeActive())
-            e->RealtimeProcessEnd();
-      }
-   }
-
-   mRealtimeLock.Leave();
-}
-
-int EffectManager::GetRealtimeLatency()
-{
-   return mRealtimeLatency;
-}
 
 Effect *EffectManager::GetEffect(const PluginID & ID)
 {
    // Must have a "valid" ID
-   if (ID.IsEmpty())
+   if (ID.empty())
    {
       return NULL;
    }
@@ -877,7 +697,7 @@ Effect *EffectManager::GetEffect(const PluginID & ID)
 
       auto command = dynamic_cast<AudacityCommand *>(PluginManager::Get().GetInstance(ID));
       if( !command )
-         AudacityMessageBox(wxString::Format(_("Attempting to initialize the following effect failed:\n\n%s\n\nMore information may be available in Help->Show Log"),
+         AudacityMessageBox(wxString::Format(_("Attempting to initialize the following effect failed:\n\n%s\n\nMore information may be available in 'Help > Diagnostics > Show Log'"),
                                     GetCommandName(ID)),
                    _("Effect failed to initialize"));
 
@@ -890,7 +710,7 @@ Effect *EffectManager::GetEffect(const PluginID & ID)
 AudacityCommand *EffectManager::GetAudacityCommand(const PluginID & ID)
 {
    // Must have a "valid" ID
-   if (ID.IsEmpty())
+   if (ID.empty())
    {
       return NULL;
    }
@@ -933,7 +753,7 @@ AudacityCommand *EffectManager::GetAudacityCommand(const PluginID & ID)
          }
       }
 */
-      AudacityMessageBox(wxString::Format(_("Attempting to initialize the following command failed:\n\n%s\n\nMore information may be available in Help->Show Log"),
+      AudacityMessageBox(wxString::Format(_("Attempting to initialize the following command failed:\n\n%s\n\nMore information may be available in 'Help > Diagnostics > Show Log'"),
                                     GetCommandName(ID)),
                    _("Command failed to initialize"));
 
@@ -944,10 +764,10 @@ AudacityCommand *EffectManager::GetAudacityCommand(const PluginID & ID)
 }
 
 
-const PluginID & EffectManager::GetEffectByIdentifier(const wxString & strTarget)
+const PluginID & EffectManager::GetEffectByIdentifier(const CommandID & strTarget)
 {
    static PluginID empty;
-   if (strTarget == wxEmptyString) // set GetCommandIdentifier to wxT("") to not show an effect in Batch mode
+   if (strTarget.empty()) // set GetCommandIdentifier to wxT("") to not show an effect in Batch mode
    {
       return empty;
    }
@@ -957,7 +777,7 @@ const PluginID & EffectManager::GetEffectByIdentifier(const wxString & strTarget
    const PluginDescriptor *plug = pm.GetFirstPlugin(PluginTypeEffect | PluginTypeAudacityCommand);
    while (plug)
    {
-      if (GetCommandIdentifier(plug->GetID()).IsSameAs(strTarget, false))
+      if (GetCommandIdentifier(plug->GetID()) == strTarget)
       {
          return plug->GetID();
       }

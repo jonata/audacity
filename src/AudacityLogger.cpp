@@ -16,19 +16,23 @@ Provides thread-safe logging based on the wxWidgets log facility.
 
 #include "Audacity.h" // This should always be included first
 #include "AudacityLogger.h"
+
+#include "Experimental.h"
+
 #include "FileNames.h"
+#include "Internat.h"
 #include "ShuttleGui.h"
 
+#include <mutex>
 #include <wx/filedlg.h>
 #include <wx/log.h>
 #include <wx/frame.h>
 #include <wx/icon.h>
 #include <wx/settings.h>
+#include <wx/textctrl.h>
 
 #include "../images/AudacityLogoAlpha.xpm"
-#include "Experimental.h"
-#include "widgets/ErrorDialog.h"
-#include "Internat.h"
+#include "widgets/AudacityMessageBox.h"
 
 //
 // AudacityLogger class
@@ -48,6 +52,22 @@ enum
    LoggerID_Clear,
    LoggerID_Close
 };
+
+AudacityLogger *AudacityLogger::Get()
+{
+   static std::once_flag flag;
+   std::call_once( flag, []{
+      // wxWidgets will clean up the logger for the main thread, so we can say
+      // safenew.  See:
+      // http://docs.wxwidgets.org/3.0/classwx_log.html#a2525bf54fa3f31dc50e6e3cd8651e71d
+      std::unique_ptr < wxLog > // DELETE any previous logger
+         { wxLog::SetActiveTarget(safenew AudacityLogger) };
+   } );
+
+   // Use dynamic_cast so that we get a NULL ptr in case our logger
+   // is no longer the target.
+   return dynamic_cast<AudacityLogger *>(wxLog::GetActiveTarget());
+}
 
 AudacityLogger::AudacityLogger()
 :  wxEvtHandler(),
@@ -71,7 +91,7 @@ void AudacityLogger::DoLogText(const wxString & str)
       wxMutexGuiEnter();
    }
 
-   if (mBuffer.IsEmpty()) {
+   if (mBuffer.empty()) {
       wxString stamp;
 
       TimeStamp(&stamp);
@@ -240,7 +260,7 @@ void AudacityLogger::OnSave(wxCommandEvent & WXUNUSED(e))
                         wxFD_SAVE | wxFD_OVERWRITE_PROMPT | wxRESIZE_BORDER,
                         mFrame.get());
 
-   if (fName == wxEmptyString) {
+   if (fName.empty()) {
       return;
    }
 

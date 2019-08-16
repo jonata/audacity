@@ -8,19 +8,25 @@ Paul Licameli split from TrackPanel.cpp
 
 **********************************************************************/
 
-#include "../../Audacity.h"
+#include "../../Audacity.h" // for USE_* macros
 #include "TimeShiftHandle.h"
+
 #include "../../Experimental.h"
 
-#include "TrackControls.h"
+#include "TrackView.h"
 #include "../../AColor.h"
 #include "../../HitTestResult.h"
 #include "../../NoteTrack.h"
-#include "../../Project.h"
+#include "../../ProjectAudioIO.h"
+#include "../../ProjectHistory.h"
+#include "../../ProjectSettings.h"
 #include "../../RefreshCode.h"
+#include "../../TrackArtist.h"
+#include "../../TrackPanelDrawingContext.h"
 #include "../../TrackPanelMouseEvent.h"
-#include "../../toolbars/ToolsToolBar.h"
 #include "../../UndoManager.h"
+#include "../../WaveClip.h"
+#include "../../ViewInfo.h"
 #include "../../WaveTrack.h"
 #include "../../../images/Cursors.h"
 
@@ -263,8 +269,8 @@ void TimeShiftHandle::CreateListOfCapturedClips
       // because AddClipsToCaptured doesn't add duplicate clips); to remove
       // this behavior just store the array size beforehand.
       for (unsigned int i = 0; i < state.capturedClipArray.size(); ++i) {
-        {
-            auto &trackClip = state.capturedClipArray[i];
+         auto trackClip = state.capturedClipArray[i];
+         {
             // Capture based on tracks that have clips -- that means we
             // don't capture based on links to label tracks for now (until
             // we can treat individual labels as clips)
@@ -278,8 +284,6 @@ void TimeShiftHandle::CreateListOfCapturedClips
          }
 #ifdef USE_MIDI
          {
-            // Beware relocation of array contents!  Bind trackClip again.
-            auto &trackClip = state.capturedClipArray[i];
             // Capture additional clips from NoteTracks
             trackClip.track->TypeSwitch( [&](NoteTrack *nt) {
                // Iterate over sync-lock group tracks.
@@ -350,25 +354,26 @@ UIHandle::Result TimeShiftHandle::Click
 (const TrackPanelMouseEvent &evt, AudacityProject *pProject)
 {
    using namespace RefreshCode;
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if ( unsafe )
       return Cancelled;
 
    const wxMouseEvent &event = evt.event;
    const wxRect &rect = evt.rect;
-   const ViewInfo &viewInfo = pProject->GetViewInfo();
+   auto &viewInfo = ViewInfo::Get( *pProject );
 
-   const auto pTrack = std::static_pointer_cast<Track>(evt.pCell);
+   const auto pView = std::static_pointer_cast<TrackView>(evt.pCell);
+   const auto pTrack = pView ? pView->FindTrack().get() : nullptr;
    if (!pTrack)
       return RefreshCode::Cancelled;
 
-   TrackList *const trackList = pProject->GetTracks();
+   auto &trackList = TrackList::Get( *pProject );
 
    mClipMoveState.clear();
    mDidSlideVertically = false;
 
-   ToolsToolBar *const ttb = pProject->GetToolsToolBar();
-   const bool multiToolModeActive = (ttb && ttb->IsDown(multiTool));
+   const bool multiToolModeActive =
+      (ToolCodes::multiTool == ProjectSettings::Get( *pProject ).GetTool());
 
    const double clickTime =
       viewInfo.PositionToTime(event.m_x, rect.x);
@@ -402,14 +407,14 @@ UIHandle::Result TimeShiftHandle::Click
    if ( ! ok )
       return Cancelled;
    else if ( captureClips )
-      CreateListOfCapturedClips
-         ( mClipMoveState, viewInfo, *pTrack, *trackList,
-           pProject->IsSyncLocked(), clickTime );
+      CreateListOfCapturedClips(
+         mClipMoveState, viewInfo, *pTrack, trackList,
+         ProjectSettings::Get( *pProject ).IsSyncLocked(), clickTime );
 
    mSlideUpDownOnly = event.CmdDown() && !multiToolModeActive;
    mRect = rect;
    mClipMoveState.mMouseClickX = event.m_x;
-   mSnapManager = std::make_shared<SnapManager>(trackList,
+   mSnapManager = std::make_shared<SnapManager>(&trackList,
                                   &viewInfo,
                                   &mClipMoveState.capturedClipArray,
                                   &mClipMoveState.trackExclusions,
@@ -668,16 +673,17 @@ UIHandle::Result TimeShiftHandle::Drag
 (const TrackPanelMouseEvent &evt, AudacityProject *pProject)
 {
    using namespace RefreshCode;
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if (unsafe) {
       this->Cancel(pProject);
       return RefreshAll | Cancelled;
    }
 
    const wxMouseEvent &event = evt.event;
-   ViewInfo &viewInfo = pProject->GetViewInfo();
+   auto &viewInfo = ViewInfo::Get( *pProject );
 
-   Track *track = dynamic_cast<Track*>(evt.pCell.get());
+   TrackView *trackView = dynamic_cast<TrackView*>(evt.pCell.get());
+   Track *track = trackView ? trackView->FindTrack().get() : nullptr;
 
    // Uncommenting this permits drag to continue to work even over the controls area
    /*
@@ -693,12 +699,12 @@ UIHandle::Result TimeShiftHandle::Drag
    }
 
    // May need a shared_ptr to reassign mCapturedTrack below
-   auto pTrack = Track::Pointer( track );
+   auto pTrack = Track::SharedPointer( track );
    if (!pTrack)
       return RefreshCode::RefreshNone;
 
 
-   TrackList *const trackList = pProject->GetTracks();
+   auto &trackList = TrackList::Get( *pProject );
 
    // GM: DoSlide now implementing snap-to
    // samples functionality based on sample rate.
@@ -732,7 +738,7 @@ UIHandle::Result TimeShiftHandle::Drag
        /* && !mCapturedClipIsSelection*/
       && pTrack->TypeSwitch<bool>( [&] (WaveTrack *) {
             if ( DoSlideVertical( viewInfo, event.m_x, mClipMoveState,
-                     *trackList, *mCapturedTrack, *pTrack, desiredSlideAmount ) ) {
+                     trackList, *mCapturedTrack, *pTrack, desiredSlideAmount ) ) {
                mCapturedTrack = pTrack;
                mDidSlideVertically = true;
             }
@@ -753,7 +759,7 @@ UIHandle::Result TimeShiftHandle::Drag
 
    mClipMoveState.hSlideAmount = desiredSlideAmount;
 
-   DoSlideHorizontal( mClipMoveState, *trackList, *mCapturedTrack );
+   DoSlideHorizontal( mClipMoveState, trackList, *mCapturedTrack );
 
    if (mClipMoveState.capturedClipIsSelection) {
       // Slide the selection, too
@@ -773,7 +779,7 @@ HitTestPreview TimeShiftHandle::Preview
 {
    // After all that, it still may be unsafe to drag.
    // Even if so, make an informative cursor change from default to "banned."
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    return HitPreview(pProject, unsafe);
 }
 
@@ -782,7 +788,7 @@ UIHandle::Result TimeShiftHandle::Release
  wxWindow *)
 {
    using namespace RefreshCode;
-   const bool unsafe = pProject->IsAudioActive();
+   const bool unsafe = ProjectAudioIO::Get( *pProject ).IsAudioActive();
    if (unsafe)
       return this->Cancel(pProject);
 
@@ -830,7 +836,7 @@ UIHandle::Result TimeShiftHandle::Release
          fabs( mClipMoveState.hSlideAmount ) );
       consolidate = true;
    }
-   pProject->PushState(msg, _("Time-Shift"),
+   ProjectHistory::Get( *pProject ).PushState(msg, _("Time-Shift"),
       consolidate ? (UndoPush::CONSOLIDATE) : (UndoPush::AUTOSAVE));
 
    return result | FixScrollbars;
@@ -838,18 +844,29 @@ UIHandle::Result TimeShiftHandle::Release
 
 UIHandle::Result TimeShiftHandle::Cancel(AudacityProject *pProject)
 {
-   pProject->RollbackState();
+   ProjectHistory::Get( *pProject ).RollbackState();
    return RefreshCode::RefreshAll;
 }
 
-void TimeShiftHandle::DrawExtras
-(DrawingPass pass,
- wxDC * dc, const wxRegion &, const wxRect &)
+void TimeShiftHandle::Draw(
+   TrackPanelDrawingContext &context,
+   const wxRect &rect, unsigned iPass )
 {
-   if (pass == Panel) {
+   if ( iPass == TrackArtist::PassSnapping ) {
+      auto &dc = context.dc;
       // Draw snap guidelines if we have any
-      if ( mSnapManager )
-         mSnapManager->Draw
-            ( dc, mClipMoveState.snapLeft, mClipMoveState.snapRight );
+      if ( mSnapManager ) {
+         mSnapManager->Draw(
+            &dc, mClipMoveState.snapLeft, mClipMoveState.snapRight );
+      }
    }
+}
+
+wxRect TimeShiftHandle::DrawingArea(
+   const wxRect &rect, const wxRect &panelRect, unsigned iPass )
+{
+   if ( iPass == TrackArtist::PassSnapping )
+      return MaximizeHeight( rect, panelRect );
+   else
+      return rect;
 }

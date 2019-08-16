@@ -21,8 +21,12 @@ most commonly asked questions about Audacity.
 
 
 #include "Audacity.h"
+#include "SplashDialog.h"
+
+#include "Experimental.h"
 
 #include <wx/dialog.h>
+#include <wx/frame.h>
 #include <wx/html/htmlwin.h>
 #include <wx/button.h>
 #include <wx/dcclient.h>
@@ -31,14 +35,12 @@ most commonly asked questions about Audacity.
 #include <wx/intl.h>
 #include <wx/image.h>
 
-#include "SplashDialog.h"
 #include "FileNames.h"
-#include "Internat.h"
+#include "Project.h"
 #include "ShuttleGui.h"
-#include "widgets/ErrorDialog.h"
-#include "widgets/LinkingHtmlWindow.h"
+#include "widgets/AudacityMessageBox.h"
+#include "widgets/HelpSystem.h"
 
-#include "Theme.h"
 #include "AllThemeResources.h"
 #include "Prefs.h"
 #include "HelpText.h"
@@ -63,6 +65,11 @@ BEGIN_EVENT_TABLE(SplashDialog, wxDialogWrapper)
 END_EVENT_TABLE()
 
 IMPLEMENT_CLASS(SplashDialog, wxDialogWrapper)
+
+void SplashDialog::DoHelpWelcome( AudacityProject &project )
+{
+   Show2( &GetProjectFrame( project ) );
+}
 
 SplashDialog::SplashDialog(wxWindow * parent)
    :  wxDialogWrapper(parent, -1, _("Welcome to Audacity!"),
@@ -132,7 +139,7 @@ void SplashDialog::Populate( ShuttleGui & S )
    S.SetStretchyCol( 1 );// Column 1 is stretchy...
    {
       S.SetBorder( 5 );
-      S.Id( DontShowID).AddCheckBox( _("Don't show this again at start up"), bShow ? wxT("false") : wxT("true") );
+      S.Id( DontShowID).AddCheckBox( _("Don't show this again at start up"), !bShow );
       wxButton *ok = safenew wxButton(S.GetParent(), wxID_OK);
       ok->SetDefault();
       S.SetBorder( 5 );
