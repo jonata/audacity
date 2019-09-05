@@ -93,9 +93,9 @@ void ImportExportPrefs::PopulateOrExchange(ShuttleGui & S)
       S.TieCheckBox(_("S&how Metadata Tags editor before export"),
                     wxT("/AudioFiles/ShowId3Dialog"),
                     true);
-
-      S.TieCheckBox(_("Export with silence at the beginning"),
-                    wxT("/AudioFiles/SilenceAtBeginning"),
+      /* i18n-hint 'blank space' is space on the tracks with no audio in it*/
+      S.TieCheckBox(_("&Ignore blank space at the beginning"),
+                    wxT("/AudioFiles/SkipSilenceAtBeginning"),
                     false);
    }
    S.EndStatic();
