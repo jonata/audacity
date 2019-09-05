@@ -500,8 +500,15 @@ bool Exporter::ExamineTracks()
 
    double earliestBegin = mT1;
 
+<<<<<<< HEAD
    bool silenceAtBeginning = gPrefs->Read(wxT("/AudioFiles/SilenceAtBeginning"),
                                       false);
+=======
+   bool silenceAtBeginning;
+
+   gPrefs->Read(wxT("/AudioFiles/SilenceAtBeginning"),
+                                   &silenceAtBeginning, false);
+>>>>>>> 36b1b05bb4780ce016c904cf74b664381615dd5b
 
    if (silenceAtBeginning) {
      earliestBegin = 0.0;
