@@ -97,9 +97,9 @@ void DoExport
       e.Process(
          &project,   // AudacityProject
          nChannels,  // numChannels,
-         Format,     // type, 
+         Format,     // type,
          filename,   // filename,
-         false,      // selectedOnly, 
+         false,      // selectedOnly,
          t0,         // t0
          t1          // t1
       );
@@ -128,7 +128,7 @@ void OnOpen(const CommandContext &context )
 // JKC: This is like OnClose, except it emptys the project in place,
 // rather than createing a new empty project (with new toolbars etc).
 // It does not test for unsaved changes.
-// It is not in the menus by default.  Its main purpose is/was for 
+// It is not in the menus by default.  Its main purpose is/was for
 // developers checking functionality of ResetProjectToEmpty().
 void OnProjectReset(const CommandContext &context)
 {
@@ -226,7 +226,9 @@ void OnExportLabels(const CommandContext &context)
       return;
    }
    else
-      fName = (*trackRange.rbegin())->GetName();
+      fName = project.GetProjectName()
+         + wxT(" - ")
+         + (*trackRange.rbegin())->GetName();
 
    fName = FileNames::SelectFile(FileNames::Operation::Export,
                         _("Export Labels As:"),
@@ -564,7 +566,7 @@ MenuTable::BaseItemPtr FileMenu( AudacityProject& )
 #ifdef EXPERIMENTAL_RESET
       // Empty the current project and forget its name and path.  DANGEROUS
       // It's just for developers.
-      // Do not translate this menu item (no XXO).  
+      // Do not translate this menu item (no XXO).
       // It MUST not be shown to regular users.
       Command( wxT("Reset"), XXO("&Dangerous Reset..."), FN(OnProjectReset),
          AudioIONotBusyFlag ),
