@@ -250,9 +250,12 @@ std::unique_ptr<Mixer> ExportPlugin::CreateMixer(const TrackList &tracks,
          bool highQuality, MixerSpec *mixerSpec)
 {
    WaveTrackConstArray inputTracks;
+
+   bool anySolo = !(( tracks.Any<const WaveTrack>() + &WaveTrack::GetSolo ).empty());
+
    auto range = tracks.Any< const WaveTrack >()
       + (selectionOnly ? &Track::IsSelected : &Track::Any )
-      - &WaveTrack::GetMute;
+      - ( anySolo ? &WaveTrack::GetNotSolo : &WaveTrack::GetMute);
    for (auto pTrack: range)
       inputTracks.push_back(
          pTrack->SharedPointer< const WaveTrack >() );
@@ -333,7 +336,7 @@ Exporter::~Exporter()
 // Unfortunately, although we get the new extension here, we
 // can't do anything with it as the FileDialog does not provide
 // methods for setting its standard controls.
-// We would need OS specific code that 'knows' about the system 
+// We would need OS specific code that 'knows' about the system
 // dialogs.
 void Exporter::OnExtensionChanged(wxCommandEvent &evt) {
    wxString ext = evt.GetString();
@@ -499,29 +502,16 @@ bool Exporter::ExamineTracks()
    // least one track is selected (if selectedOnly==true)
 
    double earliestBegin = mT1;
-
-<<<<<<< HEAD
-   bool silenceAtBeginning = gPrefs->Read(wxT("/AudioFiles/SilenceAtBeginning"),
-                                      false);
-=======
-   bool silenceAtBeginning;
-
-   gPrefs->Read(wxT("/AudioFiles/SilenceAtBeginning"),
-                                   &silenceAtBeginning, false);
->>>>>>> 36b1b05bb4780ce016c904cf74b664381615dd5b
-
-   if (silenceAtBeginning) {
-     earliestBegin = 0.0;
-   }
-
    double latestEnd = mT0;
 
    auto &tracks = TrackList::Get( *mProject );
 
+   bool anySolo = !(( tracks.Any<const WaveTrack>() + &WaveTrack::GetSolo ).empty());
+
    for (auto tr :
          tracks.Any< const WaveTrack >()
             + ( mSelectedOnly ? &Track::IsSelected : &Track::Any )
-            - &WaveTrack::GetMute
+            - ( anySolo ? &WaveTrack::GetNotSolo : &WaveTrack::GetMute)
    ) {
       mNumSelected++;
 
@@ -569,13 +559,13 @@ bool Exporter::ExamineTracks()
       return false;
    }
 
-   // The skipping of silent space could be cleverer and take 
+   // The skipping of silent space could be cleverer and take
    // into account clips.
-   // As implemented now, it can only skip initial silent space that 
-   // has no clip before it, and terminal silent space that has no clip 
+   // As implemented now, it can only skip initial silent space that
+   // has no clip before it, and terminal silent space that has no clip
    // after it.
    if (mT0 < earliestBegin){
-      // Bug 1904 
+      // Bug 1904
       // Previously we always skipped initial silent space.
       // Now skipping it is an opt-in option.
       bool skipSilenceAtBeginning;
@@ -1379,8 +1369,8 @@ ExportMixerDialog::ExportMixerDialog( const TrackList *tracks, bool selectedOnly
 
    for (auto t :
          tracks->Any< const WaveTrack >()
-            + (anySolo ? &WaveTrack::GetSolo : ( selectedOnly ? &Track::IsSelected : &Track::Any ) )
-            - &WaveTrack::GetMute
+            + ( selectedOnly ? &Track::IsSelected : &Track::Any  )
+            - ( anySolo ? &WaveTrack::GetNotSolo :  &WaveTrack::GetMute)
    ) {
       numTracks++;
       const wxString sTrackName = (t->GetName()).Left(20);
@@ -1408,7 +1398,7 @@ ExportMixerDialog::ExportMixerDialog( const TrackList *tracks, bool selectedOnly
       maxNumChannels = 32;
 
    mMixerSpec = std::make_unique<MixerSpec>(numTracks, maxNumChannels);
-   
+
    wxBoxSizer *vertSizer;
    {
       auto uVertSizer = std::make_unique<wxBoxSizer>(wxVERTICAL);
@@ -1489,4 +1479,3 @@ void ExportMixerDialog::OnMixerPanelHelp(wxCommandEvent & WXUNUSED(event))
 {
    HelpSystem::ShowHelp(this, wxT("Advanced_Mixing_Options"), true);
 }
-
