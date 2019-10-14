@@ -111,18 +111,6 @@ SelectionBar::SelectionBar( AudacityProject &project )
 : ToolBar(project, SelectionBarID, _("Selection"), wxT("Selection")),
   mListener(NULL), mRate(0.0),
   mStart(0.0), mEnd(0.0), mLength(0.0), mCenter(0.0), mAudio(0.0),
-<<<<<<< HEAD
-  mStartTime(NULL), mEndTime(NULL), mLengthTime(NULL), mCenterTime(NULL),
-  mAudioTime(NULL),
-#ifdef SEL_RADIO_TITLES
-  mStartTitle(NULL), mCenterTitle(NULL), mLengthTitle(NULL), mEndTitle(NULL),
-  mStartEndProxy(NULL), mStartLengthProxy(NULL), mLengthEndProxy(NULL), mLengthCenterProxy(NULL),
-#endif
-#ifdef SEL_CHOICE
-  mChoice(NULL),
-#endif
-=======
->>>>>>> upstream/master
   mDrive1( StartTimeID), mDrive2( EndTimeID ),
   mSelectionMode(0),
   mStartTime(NULL), mCenterTime(NULL), mLengthTime(NULL), mEndTime(NULL),
@@ -139,18 +127,6 @@ SelectionBar::SelectionBar( AudacityProject &project )
    mRate = (double) gPrefs->Read(wxT("/SamplingRate/DefaultProjectSampleRate"),
       AudioIOBase::GetOptimalSupportedSampleRate());
 
-<<<<<<< HEAD
-#ifdef SEL_BUTTON_TITLES
-   mButtonTitles[0]=NULL;
-   mButtonTitles[1]=NULL;
-   mButtonTitles[2]=NULL;
-   mHyphen[0]=NULL;
-   mHyphen[1]=NULL;
-   mHyphen[2]=NULL;
-#endif
-
-=======
->>>>>>> upstream/master
    // Selection mode of 0 means showing 'start' and 'end' only.
    mSelectionMode = gPrefs->ReadLong(wxT("/SelectionToolbarMode"),  0);
 }
@@ -176,46 +152,6 @@ void SelectionBar::Create(wxWindow * parent)
    UpdatePrefs();
 }
 
-<<<<<<< HEAD
-// Add Radio Button function is not used anymore.
-// But maybe we will need it again in the future.
-//
-// Can't set textcolour of radio buttons.
-// so instead if we want to them, we make the text empty and add in a wxStaticText
-// and we can set the colour of that.
-// Slight regression relative ot Audacity, in that this text is not
-// clickable/active.  You have to click on the actual button.
-// And you can't tab between and hear the labels with voice over.
-// So VI users should use blend themes (which is the default).
-// Should not be a hardship for them, as themes make little difference
-// for them, except Hi-Contrast, which should be used with blend thems
-// and a windows theme that is close enough to actually blend.
-
-wxRadioButton * SelectionBar::AddRadioButton( const wxString & Name,
-   int id, wxSizer *pSizer, long style )
-{
-   bool bUseNativeRadioButton = theTheme.IsUsingSystemTextColour();
-   wxRadioButton * pBtn;
-   // Safenew because the button is being create dinto this window.
-   pBtn = safenew wxRadioButton(this, id,bUseNativeRadioButton ? Name : wxT(""),
-      wxDefaultPosition, wxDefaultSize, style);
-   pBtn->SetName(Name);
-   pBtn->SetForegroundColour( theTheme.Colour( clrTrackPanelText ));
-
-   pSizer->Add(pBtn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
-   // Hacky code to return a second optional value via the variable mProxy.
-   // If not NULL, we made a NEW proxy label
-   mProxy = NULL;
-   if( !bUseNativeRadioButton )
-   {
-      mProxy = safenew wxStaticText(this, -1, Name);
-      mProxy->SetForegroundColour( theTheme.Colour( clrTrackPanelText ) );
-      pSizer->Add(mProxy, 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, 5);
-   }
-   return pBtn;
-}
-=======
->>>>>>> upstream/master
 
 auStaticText * SelectionBar::AddTitle( const wxString & Title, wxSizer * pSizer ){
    auStaticText * pTitle = safenew auStaticText(this, Title );
@@ -227,17 +163,10 @@ auStaticText * SelectionBar::AddTitle( const wxString & Title, wxSizer * pSizer 
 
 
 NumericTextCtrl * SelectionBar::AddTime( const wxString Name, int id, wxSizer * pSizer ){
-<<<<<<< HEAD
-   wxString formatName = mListener ? mListener->AS_GetSelectionFormat()
-      : wxString(wxEmptyString);
-   NumericTextCtrl * pCtrl = safenew NumericTextCtrl(
-      NumericConverter::TIME, this, id, formatName, 0.0, mRate);
-=======
    auto formatName = mListener ? mListener->AS_GetSelectionFormat()
       : NumericFormatSymbol{};
    auto pCtrl = safenew NumericTextCtrl(
       this, id, NumericConverter::TIME, formatName, 0.0, mRate);
->>>>>>> upstream/master
    pCtrl->SetName(Name);
    pSizer->Add(pCtrl, 0, wxALIGN_TOP | wxRIGHT, 5);
    return pCtrl;
@@ -396,26 +325,6 @@ void SelectionBar::Populate()
                     &SelectionBar::OnFocus,
                     this);
 
-<<<<<<< HEAD
-#ifdef OPTION_BUTTON
-   // Old code which placed a button from which to select options.
-   // Retained in case we want a button for selection-toolbar options at a future date.
-   AButton *& pBtn = mButtons[ SelTBMenuID - SelTBFirstButton];
-   pBtn = ToolBar::MakeButton(this,
-      bmpRecoloredUpSmall, bmpRecoloredDownSmall, bmpRecoloredHiliteSmall,
-      bmpOptions, bmpOptions, bmpOptionsDisabled,
-      SelTBMenuID,
-      wxDefaultPosition,
-      false,
-      theTheme.ImageSize( bmpRecoloredUpSmall ));
-
-   pBtn->SetLabel(_("Selection options"));
-   pBtn->SetToolTip(_("Selection options"));
-   //pBtn->Disable();
-   mainSizer->Add( pBtn, 0,  wxALIGN_TOP | wxRIGHT, 5);
-#endif
-=======
->>>>>>> upstream/master
    AddVLine( mainSizer );
 
    mAudioTime = AddTime(_("Audio Position"), AudioTimeID, mainSizer );
@@ -456,7 +365,7 @@ void SelectionBar::UpdatePrefs()
    // When preferences change, the Project learns about it too.
    // If necessary we can drive the SelectionBar mRate via the Project
    // calling our SetRate().
-   // As of 13-Sep-2018, changes to the sample rate pref will only affect 
+   // As of 13-Sep-2018, changes to the sample rate pref will only affect
    // creation of new projects, not the smaple rate in existing ones.
 
    wxCommandEvent e;
@@ -525,7 +434,7 @@ void SelectionBar::ModifySelection(int newDriver, bool done)
    //    length = (end-start)
    // Therefore we can select any two controls as 'drivers' of
    // the other two.
-   // Here we compute 'i' which combines the identity of the two 
+   // Here we compute 'i' which combines the identity of the two
    // driving controls, to use it as an index.
    // The order of the two drivers generally does not matter much,
    // except that we have want:
@@ -716,69 +625,13 @@ void SelectionBar::SetSelectionMode(int mode)
    // Only modes 0 to 3 are now supported,
    // so fix up a mode that could have come from the config.
    const int maxMode = 3;
-<<<<<<< HEAD
-#else
-   const int maxMode = 7;
-#endif
-=======
->>>>>>> upstream/master
 
    if( mode > maxMode )
       mode = 0;
    if( mode < 0 )
       mode = 0;
    mSelectionMode = mode;
-<<<<<<< HEAD
-
-   int id = mode + StartEndRadioID;
-
-#ifdef SEL_RADIO_TITLES
-   if( mStartEndProxy == NULL ){
-      // The line breaks are a little funny in order that the i18n hints occur i the right place in
-      // the .pot file
-      mStartEndRadBtn->SetLabelText(     (id == StartEndRadioID) ?      _("Start - End") :
-      // i18n-hint: S-E is an abbreviation of Start-End
-         _("S-E") );
-      mStartLengthRadBtn->SetLabelText(  (id == StartLengthRadioID) ?   _("Start - Length") :
-      // i18n-hint: S-L is an abbreviation of Start-Length
-         _("S-L") );
-      mLengthEndRadBtn->SetLabelText(    (id == LengthEndRadioID) ?     _("Length - End") :
-      // i18n-hint: L-E is an abbreviation of Length-End
-         _("L-E") );
-      mLengthCenterRadBtn->SetLabelText( (id == LengthCenterRadioID) ?  _("Length - Center") :
-      // i18n-hint: L-C is an abbreviation of Length-Center
-         _("L-C") );
-   }
-   else
-   {
-      mStartEndProxy->SetLabelText(     (id == StartEndRadioID) ?      _("Start - End") : _("S-E") );
-      mStartLengthProxy->SetLabelText(  (id == StartLengthRadioID) ?   _("Start - Length") : _("S-L") );
-      mLengthEndProxy->SetLabelText(    (id == LengthEndRadioID) ?     _("Length - End") : _("L-E") );
-      mLengthCenterProxy->SetLabelText( (id == LengthCenterRadioID) ?  _("Length - Center") : _("L-C") );
-   }
-
-   mStartEndRadBtn->SetToolTip(     (id != StartEndRadioID) ?      _("Show start time and end time") : "" );
-   mStartLengthRadBtn->SetToolTip(  (id != StartLengthRadioID) ?   _("Show start time and length") : "" );
-   mLengthEndRadBtn->SetToolTip(    (id != LengthEndRadioID) ?     _("Show length and end time") : "" );
-   mLengthCenterRadBtn->SetToolTip( (id != LengthCenterRadioID) ?  _("Show length and center") : "" );
-
-   mStartEndRadBtn->SetValue(     id == StartEndRadioID     );
-   mStartLengthRadBtn->SetValue(  id == StartLengthRadioID  );
-   mLengthEndRadBtn->SetValue(    id == LengthEndRadioID    );
-   mLengthCenterRadBtn->SetValue( id == LengthCenterRadioID );
-#endif
-
-#ifdef SEL_BUTTON_TITLES
-   // Not translated.  This is old experiemental code that is probably on the way out.
-   wxString CenterNames[] = { "       Start  -  End        ", "       Start  -  Length   ", "   Length  -  End        ", "   Length  -  Center   " };
-   mButtonTitles[1]->SetLabel( CenterNames[mode] );
-#endif
-#ifdef SEL_CHOICE
    mChoice->SetSelection( mode );
-#endif
-=======
-   mChoice->SetSelection( mode ); 
->>>>>>> upstream/master
 
    // First decide which two controls drive the others...
    // For example the last option is with all controls shown, and in that mode we
@@ -796,17 +649,10 @@ void SelectionBar::SetSelectionMode(int mode)
 // Our mode determines which controls are visible.
 void SelectionBar::ShowHideControls(int mode)
 {
-<<<<<<< HEAD
-   // These
-   int masks[8]= {
-      9, 5, 12, 6, // 2 items
-      13, 7, 11,// 3 items
-=======
    // The bits in these say which controls are visible.
-   int masks[8]= { 
+   int masks[8]= {
       9, 5, 12, 6, // 2 items shown
       13, 7, 11,// 3 items shown
->>>>>>> upstream/master
       15};
    int mask = masks[mode];
 
@@ -814,13 +660,6 @@ void SelectionBar::ShowHideControls(int mode)
    for(int i=0;i<4;i++){
       if( *Ctrls[i])
          (*Ctrls[i])->Show( (mask & (1<<i))!=0 );
-<<<<<<< HEAD
-#ifdef SEL_PLAIN_TITLES
-      if( *Titles[i])
-         (*Titles[i])->Show( (mask & (1<<i))!=0 );
-#endif
-=======
->>>>>>> upstream/master
    }
 }
 
@@ -832,12 +671,6 @@ void SelectionBar::ValuesToControls()
    for(i=0;i<5;i++)
       if( *Ctrls[i] )
          (*Ctrls[i])->SetValue( Values[i] );
-
-#ifdef PRINT_POSITION_TO_STDOUT
-   printf("(seek)%g\n", mAudio);
-   fflush(stdout);
-#endif
-
 }
 
 // A time has been set.  Update the control values.

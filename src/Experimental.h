@@ -58,11 +58,11 @@
 
 // These CFG macros allow easy distinction between Audacity and DA defaults.
 #ifdef EXPERIMENTAL_DA
-#define CFG_A( x ) 
+#define CFG_A( x )
 #define CFG_DA( x ) x
 #else
 #define CFG_A( x ) x
-#define CFG_DA( x ) 
+#define CFG_DA( x )
 #endif
 
 
@@ -239,14 +239,14 @@
 // with themes
 //#define EXPERIMENTAL_TRACK_PANEL_HIGHLIGHTING
 
-<<<<<<< HEAD
+
 // Jonatã Bolzan Loss 23 Nov 2017
 // Print cursor position in seconds to stdout, useful if used with some video
 // playback engine, for example. It prints in SelectioBar everytime the
 // timecode is changed, and add a "(seek)" string to make sure it is a
 // position information that is being printed
 //#define PRINT_POSITION_TO_STDOUT
-=======
+
 // Paul Licameli (PRL) 28 Dec 2017
 // Easy drag-and-drop to add Nyquist, LADSPA, and VST plug-ins
 // #define EXPERIMENTAL_DRAG_DROP_PLUG_INS
@@ -263,11 +263,11 @@
 
 // mmm-1 22 Aug 2018
 //#define EXPERIMENTAL_R128_NORM
->>>>>>> upstream/master
+
 
 // JKC 29 July 2019
 // OD_DATA made experimental.  It is on the way out because
-// it is dangerous and has too many bugs.  See bug 536 for example. 
+// it is dangerous and has too many bugs.  See bug 536 for example.
 //#do not define EXPERIMENTAL_OD_DATA
 
 #endif
