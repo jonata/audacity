@@ -995,10 +995,6 @@ bool ThemeBase::ReadImageCache( teThemeType type, bool bOkIfNotFound)
             ImageSize = sizeof(HiContrastImageCacheAsData);
             pImage = HiContrastImageCacheAsData;
             break;
-         case themeProTools :
-            ImageSize = sizeof(ProToolsImageCacheAsData);
-            pImage = ProToolsImageCacheAsData;
-            break;
 
       }
       //wxLogDebug("Reading ImageCache %p size %i", pImage, ImageSize );
@@ -1312,14 +1308,9 @@ auStaticText::auStaticText(wxWindow* parent, wxString textIn) :
    SetName(textIn);
    SetLabel(textIn);
 }
-=======
->>>>>>> 73053762addec71933899d47a7fa4a9ffe520e93
-
-void auStaticText::OnPaint(wxPaintEvent & evt)
-=======
 
 void auStaticText::OnPaint(wxPaintEvent & WXUNUSED(evt))
->>>>>>> upstream/master
+
 {
    wxPaintDC dc(this);
    //dc.SetTextForeground( theTheme.Colour( clrTrackPanelText));
