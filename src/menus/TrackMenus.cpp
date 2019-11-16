@@ -34,6 +34,8 @@
 #include "../widgets/ASlider.h"
 #include "../widgets/AudacityMessageBox.h"
 #include "../widgets/ProgressDialog.h"
+#include "../tracks/playabletrack/wavetrack/ui/WaveformVZoomHandle.h"
+#include "../tracks/playabletrack/wavetrack/ui/WaveTrackViewConstants.h"
 
 
 #include <wx/combobox.h>
@@ -1154,6 +1156,48 @@ void OnTrackSolo(const CommandContext &context)
    });
 }
 
+void OnTrackVerticalZoomIn(const CommandContext &context)
+{
+   auto &project = context.project;
+
+   const auto track = TrackFocus::Get( project ).Get();
+   if (track) track->TypeSwitch( [&](WaveTrack *wt) {
+    WaveformVZoomHandle::DoZoom(
+          NULL, wt, WaveTrackViewConstants::kZoomIncrease,
+          wxRect(0,0,0,0), 0,0, false);
+   });
+
+   TrackPanel::Get( project ).RefreshTrack(track);
+}
+
+void OnTrackVerticalZoomOut(const CommandContext &context)
+{
+   auto &project = context.project;
+
+   const auto track = TrackFocus::Get( project ).Get();
+   if (track) track->TypeSwitch( [&](WaveTrack *wt) {
+    WaveformVZoomHandle::DoZoom(
+          NULL, wt, WaveTrackViewConstants::kZoomDecrease,
+          wxRect(0,0,0,0), 0,0, false);
+   });
+
+   TrackPanel::Get( project ).RefreshTrack(track);
+}
+
+void OnTrackVerticalZoomReset(const CommandContext &context)
+{
+   auto &project = context.project;
+
+   const auto track = TrackFocus::Get( project ).Get();
+   if (track) track->TypeSwitch( [&](WaveTrack *wt) {
+    WaveformVZoomHandle::DoZoom(
+          NULL, wt, WaveTrackViewConstants::kZoom1to1,
+          wxRect(0,0,0,0), 0,0, false);
+   });
+
+   TrackPanel::Get( project ).RefreshTrack(track);
+}
+
 void OnTrackView(const CommandContext &context)
 {
    auto &project = context.project;
@@ -1453,6 +1497,15 @@ MenuTable::BaseItemPtr ExtraTrackMenu( AudacityProject & )
       Command( wxT("TrackSolo"), XXO("&Solo/Unsolo Focused Track"),
          FN(OnTrackSolo),
          TracksExistFlag | TrackPanelHasFocus, wxT("Shift+S") ),
+      Command( wxT("TrackVerticalZoomIn"), XXO("Focused Track Vertical Zoom I&n"),
+            FN(OnTrackVerticalZoomIn),
+            TracksExistFlag | TrackPanelHasFocus ),
+      Command( wxT("TrackVerticalZoomOut"), XXO("Focused Track Vertical Zoom O&ut"),
+         FN(OnTrackVerticalZoomOut),
+         TracksExistFlag | TrackPanelHasFocus ),
+      Command( wxT("TrackVerticalZoomReset"), XXO("Focused Track Vertical Zoom &Reset"),
+         FN(OnTrackVerticalZoomReset),
+         TracksExistFlag | TrackPanelHasFocus ),
       Command( wxT("TrackView"), XXO("&Toggle Focused Track View"),
          FN(OnTrackView),
          TracksExistFlag | TrackPanelHasFocus ),
