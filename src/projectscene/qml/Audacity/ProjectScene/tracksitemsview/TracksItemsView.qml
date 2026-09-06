@@ -356,14 +356,7 @@ Rectangle {
 
             property double displayedPlayCursorX: playCursorController.positionX
 
-            //! Where the playhead is actually drawn. During playback
-            //! displayedPlayCursorX comes from time x zoom and so lands
-            //! between pixels, and a one pixel line drawn on a fraction is
-            //! spread over two - which is why the playhead looks smudged while
-            //! playing but crisp while dragged, where the position comes from
-            //! whole mouse pixels. Rounding gives the dragged appearance in
-            //! both cases. Only the drawing is snapped; the time the playhead
-            //! represents is untouched.
+            //! Snapped to whole pixels so the line does not blur while playing.
             readonly property int playCursorPixelX: Math.round(displayedPlayCursorX)
 
             function updateCursorPosition(x, y) {
